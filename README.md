@@ -59,6 +59,7 @@ Hyprland launches the finder through `dev-console --finder`. Repeated launches r
 
 - [Project plan](PLAN.md): product behavior, security requirements, delivery order, and acceptance checks.
 - [Implementation specification](IMPLEMENTATION.md): screen layouts, window lifecycle, data models, backend commands, source structure, and desktop integration.
+- [Cloud agent prompt](CLOUD_AGENT_PROMPT.md): unattended implementation instructions, checkpoint commits, testing, native compilation, CI artifacts, and handoff requirements.
 
 ## Delivery order
 
