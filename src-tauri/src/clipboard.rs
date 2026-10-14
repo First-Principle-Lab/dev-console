@@ -6,8 +6,6 @@ use std::time::{Duration, Instant};
 use crate::error::{AppError, AppResult};
 use crate::models::{ClipboardExclusion, CopyResult, Kind};
 
-const PASSWORD_HINT_TARGET: &str = "x-kde-passwordManagerHint";
-
 #[derive(Debug, Clone)]
 struct PendingCopy {
     value: String,
@@ -32,9 +30,11 @@ pub fn exclusion_status() -> ClipboardExclusion {
     } else if std::env::var_os("DISPLAY").is_some() {
         ClipboardExclusion {
             supported: false,
-            mechanism: PASSWORD_HINT_TARGET.into(),
-            detail: "the value is written with the x-kde-passwordManagerHint target, which only \
-                     KDE-aware managers skip; other clipboard managers may keep a copy"
+            mechanism: "none".into(),
+            detail: "clipboard history cannot be excluded on this X11 session: a client that \
+                     advertises x-kde-passwordManagerHint cannot also serve the ordinary text \
+                     targets, so the value is written as normal text and any running clipboard \
+                     manager may keep a copy. Use the clipboard expiry and lock the vault"
                 .into(),
         }
     } else {
@@ -81,12 +81,11 @@ pub fn write_clipboard(value: &str) -> AppResult<()> {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         write_with("wl-copy", &[], value)
     } else if std::env::var_os("DISPLAY").is_some() {
-        write_with(
-            "xclip",
-            &["-selection", "clipboard", "-target", PASSWORD_HINT_TARGET],
-            value,
-        )
-        .or_else(|_| write_with("xclip", &["-selection", "clipboard"], value))
+        // Plain text on purpose. `xclip` owns exactly one selection type, so publishing the
+        // value under x-kde-passwordManagerHint instead would make it unpasteable for every
+        // normal application - and it would still only be honoured by KDE-aware managers.
+        // `exclusion_status()` reports that honestly rather than pretending otherwise.
+        write_with("xclip", &["-selection", "clipboard"], value)
     } else {
         Err(AppError::Clipboard(
             "no clipboard provider on this session".into(),

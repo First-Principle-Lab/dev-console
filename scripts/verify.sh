@@ -48,6 +48,19 @@ else
   fi
 fi
 
+echo "== clipboard behaviour against a real X11 selection =="
+if [[ "${SKIP_CLIPBOARD_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_CLIPBOARD_TEST=1)"
+else
+  code=0
+  bash scripts/test-clipboard.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: no Xvfb/xclip in this environment"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== release compile =="
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"
