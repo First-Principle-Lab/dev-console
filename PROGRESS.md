@@ -17,7 +17,7 @@ The container was recreated between sessions; the toolchain recorded in the firs
 - Swap: `/swapfile` 6 GiB created with `fallocate` + `mkswap` + `swapon` (required: linking webkit2gtk OOMs without it). Not persistent across container restarts.
 - `$HOME` is **not set** in this shell; every command must export `HOME=/root` (git credentials and cargo both need it).
 - Rust: rustup stable 1.99.0 with `rustfmt` + `clippy` at `/root/.cargo` (minimal profile).
-- Node v24.21.0, npm 11.19.0.
+- Node v24.21.0. **Bun 1.4.3 is the package manager and task runner** (installed at $HOME/.bun/bin); `package-lock.json` is gone and `bun.lock` is committed. npm/npx are not used anywhere in the project.
 - Installed with apt for Tauri 2: `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev (2.50.4) libjavascriptcoregtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libsqlite3-dev libdbus-1-dev dbus dbus-x11 dbus-user-session xvfb xclip wl-clipboard gnome-keyring libsecret-tools libsecret-1-0 patchelf zstd file scrot x11-apps`.
 - No swap of the *user* keyring: `gnome-keyring-daemon` and `secret-tool` exist but no Secret Service provider is registered on a session bus unless we start one ourselves.
 - Not available: Hyprland/Wayland compositor, Waybar, polkit authentication agent, systemd user session/logind, real clipboard history manager.
@@ -41,7 +41,7 @@ The container was recreated between sessions; the toolchain recorded in the firs
 - D6 (search): pure-Rust deterministic ranker (exact > prefix > token > contains > field > fuzzy), usage and pinning break ties only, id breaks the last tie.
 - D7 (browser E2E): Playwright chromium against `vite preview` of the production bundle with `window.__devConsoleIpc` installed by an init script (`tests/e2e/ipc-mock.js`). These prove UI behaviour only; native IPC is exercised by the native smoke test.
 - D8 (tray failure is non-fatal): if the status notifier is unavailable the app logs and continues, because the desktop entry and CLI must still open the library.
-- D9 (debug builds point at the Vite dev server): `cargo build` binaries load `devUrl`. The native smoke test must therefore run the **release** binary (`npm run tauri build -- --no-bundle`).
+- D9 (debug builds point at the Vite dev server): `cargo build` binaries load `devUrl`. The native smoke test must therefore run the **release** binary (`bunx tauri build --no-bundle`).
 
 ## Checks run and results
 
@@ -51,11 +51,11 @@ Per-criterion verdicts and evidence live in `TEST_REPORT.md` (C01–C24).
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Frontend build | `npm run build:frontend` | PASS (dist, 80 KB JS / 9 KB CSS) |
-| Svelte/TS check | `npm run check` | PASS (0 errors, 0 warnings, 306 files) |
-| Lint | `npm run lint` | PASS |
-| Unit tests | `npm run test` | PASS 13/13 (finder selection/completion/IME, draft validation) |
-| E2E tests | `npx playwright test` | PASS 20/20 (library CRUD, drafts, custom fields, reveal, lock, finder keyboard, stale responses) |
+| Frontend build | `bun run build` | PASS (dist, 80 KB JS / 9 KB CSS) |
+| Svelte/TS check | `bun run check` | PASS (0 errors, 0 warnings, 306 files) |
+| Lint | `bun run lint` | PASS |
+| Unit tests | `bun run test` | PASS 13/13 (finder selection/completion/IME, draft validation) |
+| E2E tests | `bun run test:e2e` | PASS 20/20 (library CRUD, drafts, custom fields, reveal, lock, finder keyboard, stale responses) |
 | Rust format | `cargo fmt --check` | PASS |
 | Clippy | `cargo clippy --all-targets -- -D warnings` | PASS |
 | Rust tests | `cargo test` | PASS 27/27 + 1 ignored (search ranking, CLI parsing, execution argv, vault round-trip, wrong key, truncated ciphertext, failed write keeps old vault, no plaintext in file, stale revision, manual lock survives restart, keyring failure descriptions) |
@@ -87,7 +87,8 @@ Per-criterion verdicts and evidence live in `TEST_REPORT.md` (C01–C24).
 - 2026-10-14T15:35Z checkpoint 1: Tauri shell + tray + both windows + SQLite commands + library editor + finder + tests green, native debug binary launches a real window. Pushed as `5751b7e`.
 - 2026-10-14T16:20Z checkpoint 2 (commit `6ce1448`): encrypted vault + OS-keyring credential (verified against a real gnome-keyring provider over D-Bus) + authenticated-unlock gate + Unix-socket control channel + polkit policy/helper packaging; Rust 20/20, svelte-check 0/0, eslint clean, 13/13 unit, 20/20 Playwright. 
 - 2026-10-14T16:23Z checkpoint 3 (commit `2556f5d`): real-SQLite persistence tests (7 new: reopen round trip, revision conflict, delete guard, approval invalidation, usage counters, newer-schema refusal, file/dir permissions). Finding: WAL mode left committed rows in a side file that does not inherit the 0600 database mode → switched to delete journaling and asserted the permission model in a test. Rust 27/27.
-- 2026-10-14T16:30Z checkpoint 4 (commit `b36366c`): release binary built (`npx tauri build --no-bundle` at CARGO_TARGET_DIR=/tmp/dc-release, 7.9 MB) and `scripts/smoke-native.sh` passes end to end against it — live control socket (0600), live-instance lock, lock survives a restart, single-instance handoff, 0600 database in a 0700 directory, unlock fails closed without an authentication mechanism, and the real window renders (screenshot captured).
+- 2026-10-14T16:30Z checkpoint 4 (commit `b36366c`): release binary built (`bunx tauri build --no-bundle` at CARGO_TARGET_DIR=/tmp/dc-release, 7.9 MB) and `scripts/smoke-native.sh` passes end to end against it — live control socket (0600), live-instance lock, lock survives a restart, single-instance handoff, 0600 database in a 0700 directory, unlock fails closed without an authentication mechanism, and the real window renders (screenshot captured).
 - 2026-10-14T16:34Z checkpoint 5 (commit `9a664b7`): real-X11 clipboard harness (`scripts/test-clipboard.sh`, 4 ignored tests + a 7-second expiry case) and the defect it found - secrets used to be published under the password-manager hint target only, i.e. not pasteable at all; now plain text with honest "exclusion unavailable" reporting. fmt/clippy clean, 27 library tests green.
 - 2026-10-14T16:37Z checkpoint 6 (commit `63bbc58`): packaging + autostart coverage (`packaging/dev-console.desktop`, `packaging/install.sh` install/uninstall with manifest, `scripts/test-packaging.sh`, `autostart::tests`). Two real defects fixed on the way: the shipped polkit policy was **malformed XML** (a `--` sequence inside a comment) so polkit would have rejected it, and the helper-path rewrite targeted a `<value>` element polkit policies do not use. Library tests 28/28.
 - 2026-10-14T16:52ZZ checkpoint 7: fixed the vault unlock ordering. `unlock()` used to clear the persistent manual-lock flag **before** decrypting, so an unlock whose decryption or keyring access failed silently downgraded a manual lock into an auto-opening vault. It now authenticates, stages the decryption without touching live state, installs the opened vault, and only then removes the flag; a failure at any step leaves the flag file, the in-memory lock and the reported state untouched. `unlock_with(authenticate)` makes that ordering testable without a polkit agent, and two new tests cover the failed-unlock and success paths. 30/30 library tests, clippy clean.
+- 2026-10-14T16:57Z checkpoint 8: the project now runs on **Bun**. `package-lock.json` is deleted and `bun.lock` (lockfileVersion 2, bun 1.4.3) is committed; `npm`/`npx` appear nowhere in package scripts, `src-tauri/tauri.conf.json`, `playwright.config.ts`, `scripts/verify.sh`, the packaging scripts or the agent notes. Verified: `bun install --frozen-lockfile` (no changes), `bun run check` 0/0, `bun run lint` clean, `bun run test` 13/13, `bun run build`, `bun run test:e2e` 20/20, and `bash scripts/verify.sh` exits 0 with the keyring, clipboard and packaging harnesses all green. The acceptance contract in `COMPLETION_CHECKLIST.md` still literally says `npm ci`; the Bun requirement supersedes it and the equivalent command here is `bun install --frozen-lockfile`.

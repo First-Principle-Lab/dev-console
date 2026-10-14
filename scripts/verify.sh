@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Single documented verification entrypoint. Fails on the first failing check.
 #
-# SKIP_NPM_CI=1        reuse the existing node_modules instead of `npm ci`
+# SKIP_BUN_INSTALL=1     reuse the existing node_modules instead of installing
 # SKIP_KEYRING_TEST=1  do not try to start a Secret Service provider
 # SKIP_RELEASE_BUILD=1 stop after the Rust tests (release compile is slow on small hosts)
 set -euo pipefail
@@ -10,23 +10,26 @@ cd "$(dirname "$0")/.."
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 
-echo "== npm ci (set SKIP_NPM_CI=1 to reuse node_modules) =="
-if [[ "${SKIP_NPM_CI:-0}" == "1" ]]; then
-  [[ -d node_modules ]] || npm ci
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+echo "== bun install --frozen-lockfile (set SKIP_BUN_INSTALL=1 to reuse node_modules) =="
+if [[ "${SKIP_BUN_INSTALL:-0}" == "1" ]]; then
+  [[ -d node_modules ]] || bun install --frozen-lockfile
 else
-  npm ci
+  bun install --frozen-lockfile
 fi
 
 echo "== svelte-check =="
-npm run check
+bun run check
 echo "== eslint =="
-npm run lint
+bun run lint
 echo "== frontend unit tests =="
-npm run test
+bun run test
 echo "== frontend production build =="
-npm run build:frontend
+bun run build:frontend
 echo "== browser E2E (runs against the IPC test double: proves UI behaviour only) =="
-npx playwright test
+bunx playwright test
 echo "== cargo fmt --check =="
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 echo "== clippy (warnings denied) =="
@@ -78,7 +81,7 @@ echo "== release compile =="
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"
 else
-  npx tauri build --no-bundle
+  bunx tauri build --no-bundle
 fi
 
 echo "== native smoke against the compiled binary =="

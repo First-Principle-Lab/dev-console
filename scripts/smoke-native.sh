@@ -16,7 +16,7 @@ for tool in dbus-run-session xvfb-run; do
   command -v "$tool" >/dev/null || { echo "missing dependency: $tool" >&2; exit 77; }
 done
 [[ -x "$BIN" ]] || {
-  echo "UNVERIFIED: no release binary at $BIN — run 'npx tauri build --no-bundle' first" >&2
+  echo "UNVERIFIED: no release binary at $BIN — run 'bunx tauri build --no-bundle' first" >&2
   exit 77
 }
 

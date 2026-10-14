@@ -34,7 +34,7 @@ install_file() {
 case "$ACTION" in
   install)
     [[ -x "$BINARY" ]] || {
-      echo "no executable at $BINARY (build it first: npx tauri build --no-bundle)" >&2
+      echo "no executable at $BINARY (build it first: bunx tauri build --no-bundle)" >&2
       exit 1
     }
     rm -f "$(manifest)"
