@@ -10,7 +10,7 @@
     can require real, interactive system authentication before Dev Console will clear the
     persistent manual-lock flag. A dismissed dialog leaves the vault locked.
 
-    Installation is opt-in and privileged; see scripts/install-desktop.sh --with-auth-helper.
+    Installation is opt-in and privileged; see the install script's with-auth-helper option.
   -->
   <vendor>Dev Console</vendor>
   <vendor_url>https://github.com/parththirwani/dev-console</vendor_url>

@@ -61,6 +61,19 @@ else
   fi
 fi
 
+echo "== packaging: staged install, desktop file, polkit policy, exact uninstall =="
+if [[ "${SKIP_PACKAGING_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_PACKAGING_TEST=1)"
+else
+  code=0
+  bash scripts/test-packaging.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: desktop-file-validate is not installed"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== release compile =="
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"

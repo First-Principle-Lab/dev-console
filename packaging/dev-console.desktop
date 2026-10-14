@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Dev Console
+GenericName=Command and secret console
+Comment=Saved commands and secrets, searchable from anywhere
+Exec=dev-console --library
+Icon=dev-console
+Terminal=false
+Categories=Utility;
+Keywords=commands;snippets;secrets;clipboard;terminal;
+StartupNotify=true
+StartupWMClass=dev-console
+Actions=finder;
+
+[Desktop Action finder]
+Name=Open the finder
+Exec=dev-console --finder
