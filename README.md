@@ -71,6 +71,20 @@ Each harness exits **77** when its environment is missing; that is reported as U
 silently converted into a pass. `TEST_REPORT.md` records which acceptance criteria are proven, where,
 and what is still open.
 
+## Continuous integration
+
+`packaging/ci/github-actions.yml` is the pipeline (Bun job, Rust job, the environment-dependent
+harness job, and a release-plus-native-smoke job). It lives outside `.github/workflows/` because the
+token this repository is pushed with has no `workflow` scope, so GitHub rejects any push that would
+create a workflow file. To enable it:
+
+```bash
+git mv packaging/ci/github-actions.yml .github/workflows/ci.yml && git push
+```
+
+Nothing else is required: the jobs call the same scripts documented above, and a harness that
+cannot run in CI exits 77 and is reported rather than hidden.
+
 ## Visual review
 
 `artifacts/ui-review/before/` and `artifacts/ui-review/after/` hold the review grid — eleven UI
