@@ -181,6 +181,14 @@ impl VaultService {
 
     /// Reads (or on first run creates) the key, then loads and decrypts the vault.
     fn open(&self) -> AppResult<()> {
+        let loaded = self.open_staged()?;
+        *self.file.lock().expect("vault file lock poisoned") = loaded;
+        Ok(())
+    }
+
+    /// Decrypts into a value without touching the live state, so a failed open can never leave
+    /// half-loaded secrets behind or release a manual lock.
+    fn open_staged(&self) -> AppResult<VaultFile> {
         let identity = self.resolve_identity()?;
         let loaded = if self.path.exists() {
             let bytes = std::fs::read(&self.path).map_err(|e| AppError::Other(e.to_string()))?;
@@ -202,8 +210,7 @@ impl VaultService {
             self.persist(&empty)?;
             empty
         };
-        *self.file.lock().expect("vault file lock poisoned") = loaded;
-        Ok(())
+        Ok(loaded)
     }
 
     fn resolve_identity(&self) -> AppResult<Identity> {
@@ -318,7 +325,7 @@ impl VaultService {
     /// Explicit unlock. A manual lock is only cleared by verified system authentication;
     /// reading the credential from an already-unlocked keyring is never enough.
     pub fn unlock(&self) -> AppResult<()> {
-        if self.manual_lock() {
+        self.unlock_with(|| {
             if !auth::mechanism_available() {
                 return Err(AppError::VaultUnavailable(
                     auth::unavailable_reason().into(),
@@ -326,10 +333,55 @@ impl VaultService {
             }
             auth::authenticate(
                 "Dev Console is asking you to confirm your identity to unlock the secret vault.",
-            )?;
-            self.set_manual_lock(false)?;
+            )
+        })
+    }
+
+    /// Ordering matters and is deliberately strict:
+    ///
+    /// 1. authentication must succeed,
+    /// 2. the vault must then actually open and decrypt,
+    /// 3. only after that may the persistent manual-lock flag be removed.
+    ///
+    /// If decryption, keyring access or the flag update fails, both the flag file and the
+    /// in-memory lock stay exactly as they were, so a failed unlock can never silently
+    /// downgrade a manual lock into an auto-unlocking vault.
+    pub fn unlock_with<F>(&self, authenticate: F) -> AppResult<()>
+    where
+        F: FnOnce() -> AppResult<()>,
+    {
+        let was_manual = self.manual_lock();
+        if was_manual {
+            authenticate()?;
         }
-        self.open().map(|()| self.set_status(Status::Unlocked))
+
+        let staged = match self.open_staged() {
+            Ok(file) => file,
+            Err(error) => {
+                self.clear_decrypted();
+                self.set_status(if was_manual {
+                    Status::Locked { manual: true }
+                } else {
+                    Status::Unavailable(error.to_string())
+                });
+                return Err(error);
+            }
+        };
+
+        if was_manual {
+            if let Err(error) = self.set_manual_lock(false) {
+                // The vault opened but the flag could not be cleared: stay locked rather than
+                // run unlocked against a flag that still says otherwise.
+                self.clear_decrypted();
+                self.set_status(Status::Locked { manual: true });
+                return Err(error);
+            }
+        }
+
+        *self.file.lock().expect("vault file lock poisoned") = staged;
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.set_status(Status::Unlocked);
+        Ok(())
     }
 
     pub fn state(&self) -> VaultState {
@@ -724,6 +776,90 @@ mod tests {
         // Unlocking without a verified authentication mechanism fails closed.
         assert!(after_restart.unlock().is_err());
         assert!(after_restart.manual_lock());
+        h.erase();
+    }
+
+    #[test]
+    fn a_failed_unlock_keeps_the_manual_lock_and_the_flag_file() {
+        let h = Harness::new();
+        let flag = h.dir.join("manual-lock");
+        let vault = h.unlocked();
+        let saved = vault
+            .save(&mut secret("Registry token", "synthetic-value-1"))
+            .expect("save");
+        vault.lock().expect("manual lock");
+        assert!(flag.exists());
+
+        // Authentication succeeds, but the vault cannot be opened: the wrong credential makes
+        // decryption fail. The manual lock must survive that exactly as it was.
+        let (_, foreign_key) = generate_identity();
+        let wrong_key = VaultService::new(
+            h.dir.join("secrets.vault"),
+            flag.clone(),
+            Credential::Provided { key: foreign_key },
+        );
+        assert!(
+            wrong_key.manual_lock(),
+            "the flag file alone locks a new service"
+        );
+        let failure = wrong_key.unlock_with(|| Ok(()));
+        assert!(
+            failure.is_err(),
+            "a vault that will not decrypt must not report success"
+        );
+        assert!(
+            flag.exists(),
+            "the manual lock flag must survive a failed unlock"
+        );
+        assert!(
+            wrong_key.manual_lock(),
+            "in-memory lock must survive a failed unlock"
+        );
+        let state = wrong_key.state();
+        assert!(
+            !state.unlocked && state.manual_lock && state.authentication_required,
+            "a failed unlock must still look like a manual lock to the UI"
+        );
+        assert!(wrong_key.list_secrets().is_err());
+
+        // A dismissed authentication dialog must behave the same way.
+        let refused = h.vault();
+        assert!(refused.manual_lock());
+        assert!(refused
+            .unlock_with(|| Err(AppError::Other("authentication dismissed".into())))
+            .is_err());
+        assert!(refused.manual_lock());
+        assert!(flag.exists());
+
+        // And a restart in that state must still be a manual lock, never an auto-open.
+        let after_restart = h.vault();
+        after_restart.bootstrap();
+        assert!(after_restart.manual_lock());
+        assert!(after_restart.get(&saved.id).is_err());
+        h.erase();
+    }
+
+    #[test]
+    fn a_successful_unlock_opens_the_vault_before_clearing_the_flag() {
+        let h = Harness::new();
+        let flag = h.dir.join("manual-lock");
+        let vault = h.unlocked();
+        let saved = vault
+            .save(&mut secret("Registry token", "synthetic-value-1"))
+            .expect("save");
+        vault.lock().expect("manual lock");
+
+        let reopened = h.vault();
+        assert!(reopened.manual_lock());
+        reopened
+            .unlock_with(|| Ok(()))
+            .expect("authenticated unlock");
+        assert!(!flag.exists(), "only a successful open may clear the flag");
+        assert!(reopened.is_unlocked());
+        assert_eq!(
+            reopened.get(&saved.id).expect("read after unlock").value,
+            "synthetic-value-1"
+        );
         h.erase();
     }
 
