@@ -39,8 +39,19 @@ pub fn unix_ms() -> i64 {
 impl Repository {
     pub fn open(path: &Path) -> AppResult<Repository> {
         let conn = Connection::open(path).map_err(AppError::storage)?;
-        conn.pragma_update(None, "journal_mode", "WAL")
+        // Deliberately not WAL: a WAL database keeps a live `-wal` side file holding committed
+        // rows, and its permissions are not derived from the database file, so command names,
+        // tags and notes could be readable by anyone else logged into the machine. With delete
+        // journaling nothing outlives a commit; the measured behaviour of truncate mode here was
+        // a persistent side file (0600 and truncated to zero bytes, see the privacy test).
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
             .map_err(AppError::storage)?;
+        if !mode.eq_ignore_ascii_case("delete") {
+            return Err(AppError::Other(format!(
+                "could not enable delete journaling (got {mode})"
+            )));
+        }
         conn.pragma_update(None, "synchronous", "FULL")
             .map_err(AppError::storage)?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -80,8 +91,8 @@ impl Repository {
             .unwrap_or(0);
 
         if version > SCHEMA_VERSION {
-            return Err(AppError::Storage(
-                "database was written by a newer version of Dev Console".into(),
+            return Err(AppError::Other(
+                "this database was written by a newer version of Dev Console".into(),
             ));
         }
 
@@ -535,4 +546,222 @@ pub fn is_http_url(value: &str) -> bool {
     let rest = lower.split_once("://").map(|r| r.1).unwrap_or_default();
     let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
     !host.is_empty() && !host.starts_with('.') && !host.ends_with('.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn draft(name: &str) -> EntryDraft {
+        EntryDraft {
+            kind: Kind::Command,
+            id: None,
+            expected_revision: 0,
+            name: name.to_string(),
+            entry_type: "Shell".to_string(),
+            tags: vec!["work".to_string()],
+            description: String::new(),
+            notes: String::new(),
+            fields: vec![ExtraField {
+                id: "f1".to_string(),
+                label: "Env".to_string(),
+                value: "staging".to_string(),
+                display: FieldDisplay::Text,
+            }],
+            pinned: false,
+            command: "echo hi".to_string(),
+            working_directory: "/tmp".to_string(),
+            value: String::new(),
+        }
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        std::fs::metadata(path)
+            .expect("file exists")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    fn a_saved_command_survives_closing_and_reopening_the_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("commands.sqlite3");
+        let saved = {
+            let repo = Repository::open(&file).expect("open");
+            let mut created = draft("Deploy staging");
+            created.pinned = true;
+            let saved = repo.save_command(&mut created).expect("save");
+            assert_eq!(saved.revision, 1);
+            assert_eq!(saved.kind, Kind::Command);
+            saved
+        };
+        let repo = Repository::open(&file).expect("reopen");
+        let (record, usage, last_used) = repo
+            .get_command(&saved.id)
+            .expect("query")
+            .expect("record persisted");
+        assert_eq!(record.name, "Deploy staging");
+        assert_eq!(record.command, "echo hi");
+        assert_eq!(record.working_directory, "/tmp");
+        assert!(record.pinned);
+        assert_eq!(record.tags, vec!["work".to_string()]);
+        assert_eq!(record.fields.len(), 1);
+        assert_eq!(record.fields[0].value, "staging");
+        assert_eq!(usage, 0);
+        assert_eq!(last_used, None);
+    }
+
+    #[test]
+    fn app_data_never_lands_in_a_world_readable_file() {
+        // SQLite keeps a rollback journal next to the database in truncate mode, so the
+        // privacy guarantee has to come from the directory mode plus the file modes, not from
+        // "the database is the only file". A WAL side file would have broken this assertion.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let app_dir = dir.path().join("data");
+        std::fs::create_dir(&app_dir).expect("create dir");
+        std::fs::set_permissions(&app_dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        let file = app_dir.join("commands.sqlite3");
+
+        assert_eq!(
+            mode_of(&app_dir),
+            0o700,
+            "the data directory must be private"
+        );
+        let repo = Repository::open(&file).expect("open");
+        let mut created = draft("Private");
+        repo.save_command(&mut created).expect("save");
+        assert_eq!(mode_of(&file), 0o600);
+
+        for extra in ["-wal", "-shm", "-journal"] {
+            let side = std::path::PathBuf::from(format!("{}{}", file.display(), extra));
+            if !side.exists() {
+                continue;
+            }
+            assert_eq!(
+                mode_of(&side),
+                0o600,
+                "{extra} must not be more readable than the database"
+            );
+            assert_eq!(
+                std::fs::metadata(&side).expect("side metadata").len(),
+                0,
+                "{extra} still holds committed content after the transaction"
+            );
+        }
+        assert_eq!(
+            std::fs::read_dir(&app_dir).expect("read dir").count(),
+            1,
+            "only the database may remain after a commit"
+        );
+    }
+
+    #[test]
+    fn two_editors_cannot_both_save_the_same_record() {
+        let repo = Repository::in_memory().expect("repo");
+        let mut created = draft("Shared");
+        let saved = repo.save_command(&mut created).expect("create");
+
+        let mut winner = draft("Shared");
+        winner.id = Some(saved.id.clone());
+        winner.expected_revision = saved.revision;
+        winner.command = "echo winner".to_string();
+        let winner = repo.save_command(&mut winner).expect("first edit wins");
+        assert_eq!(winner.revision, 2);
+
+        let mut loser = draft("Shared");
+        loser.id = Some(saved.id.clone());
+        loser.expected_revision = saved.revision;
+        loser.command = "echo loser".to_string();
+        assert!(matches!(
+            repo.save_command(&mut loser),
+            Err(AppError::Conflict)
+        ));
+        let (record, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert_eq!(record.command, "echo winner");
+        assert_eq!(record.revision, 2);
+    }
+
+    #[test]
+    fn deleting_with_a_stale_revision_is_refused_and_keeps_the_record() {
+        let repo = Repository::in_memory().expect("repo");
+        let mut created = draft("Keep me");
+        let saved = repo.save_command(&mut created).expect("create");
+        assert!(matches!(
+            repo.delete_command(&saved.id, saved.revision + 5),
+            Err(AppError::Conflict)
+        ));
+        assert!(repo.get_command(&saved.id).expect("query").is_some());
+        assert!(matches!(
+            repo.delete_command("does-not-exist", 0),
+            Err(AppError::NotFound)
+        ));
+        repo.delete_command(&saved.id, saved.revision)
+            .expect("delete");
+        assert!(repo.get_command(&saved.id).expect("query").is_none());
+    }
+
+    #[test]
+    fn approval_of_a_command_is_voided_by_editing_it() {
+        let repo = Repository::in_memory().expect("repo");
+        let mut created = draft("Run me");
+        let saved = repo.save_command(&mut created).expect("create");
+        let (record, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert!(!repo.approval_state(&record).expect("state"));
+        repo.approve_execution(&record).expect("approve");
+        assert!(repo.approval_state(&record).expect("state"));
+
+        let mut edit = draft("Run me");
+        edit.id = Some(saved.id.clone());
+        edit.expected_revision = record.revision;
+        edit.command = "echo changed".to_string();
+        repo.save_command(&mut edit).expect("edit");
+        let (edited, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert!(
+            !repo.approval_state(&edited).expect("state"),
+            "an edited command must not inherit the previous approval"
+        );
+    }
+
+    #[test]
+    fn usage_is_counted_and_exposed_to_the_ranker() {
+        let repo = Repository::in_memory().expect("repo");
+        let mut created = draft("Frequent");
+        let saved = repo.save_command(&mut created).expect("create");
+        repo.record_usage(&saved.id).expect("usage 1");
+        repo.record_usage(&saved.id).expect("usage 2");
+        let (record, usage, last_used) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert_eq!(usage, 2);
+        assert!(last_used.is_some());
+        let metas = repo.list_commands("").expect("list");
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].id, record.id);
+        assert_eq!(metas[0].usage_count, 2);
+        assert!(repo
+            .types(Kind::Command)
+            .expect("types")
+            .contains(&"Shell".to_string()));
+    }
+
+    #[test]
+    fn a_database_from_a_newer_version_is_refused_rather_than_downgraded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("commands.sqlite3");
+        {
+            let repo = Repository::open(&file).expect("open");
+            let mut created = draft("Future");
+            repo.save_command(&mut created).expect("save");
+            repo.exec_for_test(&format!(
+                "UPDATE schema_meta SET value = {} WHERE key = 'version'",
+                SCHEMA_VERSION + 1
+            ))
+            .expect("simulate a newer schema");
+        }
+        let error = Repository::open(&file).err().expect("must refuse to open");
+        assert!(
+            error.to_string().contains("newer"),
+            "unexpected error: {error}"
+        );
+    }
 }
