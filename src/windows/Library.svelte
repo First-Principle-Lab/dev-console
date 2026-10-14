@@ -5,6 +5,13 @@
   import EntryEditor from '../components/EntryEditor.svelte';
   import VaultStatus from '../components/VaultStatus.svelte';
   import SettingsPanel from '../components/SettingsPanel.svelte';
+  import Button from '../components/Button.svelte';
+  import Dialog from '../components/Dialog.svelte';
+  import EmptyState from '../components/EmptyState.svelte';
+  import Icon from '../components/Icon.svelte';
+  import Keycap from '../components/Keycap.svelte';
+  import StatusLine from '../components/StatusLine.svelte';
+  import Tabs from '../components/Tabs.svelte';
   import { api } from '../lib/api';
   import { on } from '../lib/events';
   import { EMPTY_DRAFT, draftFromDetails } from '../lib/models';
@@ -43,6 +50,7 @@
   let showSettings = $state(false);
   let narrow = $state(false);
   let authenticating = $state(false);
+  let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
 
   const draftDirty = $derived(JSON.stringify(draft) !== baseline);
   const meta = $derived(entries.find((e) => e.id === selectedId) ?? null);
@@ -60,15 +68,41 @@
     typeSuggestions = await api.types(tab);
   }
 
+  /// Counts for the tab badges. Secret counts read metadata only while the vault is open; a
+  /// locked vault reports nothing rather than guessing.
+  async function loadCounts(): Promise<void> {
+    try {
+      const commands = await api.list({ kind: 'command' });
+      counts.command = commands.length;
+    } catch {
+      counts.command = 0;
+    }
+    if (vault?.unlocked) {
+      try {
+        counts.secret = (await api.list({ kind: 'secret' })).length;
+      } catch {
+        counts.secret = 0;
+      }
+    } else {
+      counts.secret = 0;
+    }
+  }
+
   async function loadList(): Promise<void> {
     loading = true;
     listError = null;
     try {
       entries = await api.list({ kind: tab, query: query.trim().length > 0 ? query : undefined });
+      counts[tab] = entries.length;
+      void loadCounts().catch(() => undefined);
       if (selectedId && !entries.some((e) => e.id === selectedId)) {
         selectedId = entries[0]?.id ?? null;
-      } else if (!selectedId && entries.length > 0) {
+      } else if (!selectedId && entries.length > 0 && !narrow) {
         selectedId = entries[0].id;
+      } else if (!selectedId && entries.length > 0 && narrow) {
+        // A narrow window opens on the list: silently selecting a row would drop the reader
+        // straight into the detail pane they did not ask for.
+        details = null;
       }
       if (selectedId) await loadDetails(selectedId);
       else details = null;
@@ -276,6 +310,7 @@
       }),
       on<VaultState>('vault-state-changed', (state) => {
         vault = state;
+        void loadCounts().catch(() => undefined);
         if (!state.unlocked && tab === 'secret') {
           entries = [];
           details = null;
@@ -337,70 +372,95 @@
 
 <div class="shell" class:narrow data-testid="library">
   <header>
-    <strong>Dev Console</strong>
+    <span class="brand">
+      <span class="brand-glyph" aria-hidden="true"><Icon name="command" size={14} /></span>
+      <strong>Dev Console</strong>
+    </span>
     <span class="spacer"></span>
+    {#if authenticating}<span class="muted waiting" role="status">Waiting for authentication…</span>{/if}
     {#if vault}<VaultStatus {vault} onunlock={unlock} />{/if}
-    {#if authenticating}<span class="muted">Waiting for authentication…</span>{/if}
-    <button onclick={() => (showSettings = true)} data-testid="settings">Settings</button>
+    <Button variant="ghost" size="sm" icon="gear" onclick={() => (showSettings = true)} data-testid="settings"
+      >Settings</Button
+    >
   </header>
 
-  <div class="tabs">
-    <div class="tabbar" role="tablist">
-      <button
-        role="tab"
-        aria-selected={tab === 'command'}
-        class:active={tab === 'command'}
-        onclick={() => selectTab('command')}
-        data-testid="tab-commands">Commands</button
-      >
-      <button
-        role="tab"
-        aria-selected={tab === 'secret'}
-        class:active={tab === 'secret'}
-        onclick={() => selectTab('secret')}
-        data-testid="tab-secrets">Secrets</button
-      >
-    </div>
-    <input
-      class="filter"
-      placeholder="Search this tab"
-      aria-label="Search this tab"
-      bind:value={query}
-      oninput={() => void loadList().catch(() => undefined)}
-      data-testid="tab-search"
+  <div class="toolbar">
+    <Tabs
+      items={[
+        { id: 'command', label: 'Commands', count: counts.command, icon: 'command', testId: 'tab-commands' },
+        {
+          id: 'secret',
+          label: 'Secrets',
+          count: tab === 'secret' && vault && !vault.unlocked ? null : counts.secret,
+          icon: 'secret',
+          testId: 'tab-secrets'
+        }
+      ]}
+      active={tab}
+      onSelect={(id) => selectTab(id === 'secret' ? 'secret' : 'command')}
     />
-    <button onclick={startNew} data-variant="primary" data-testid="add-entry">+ Add</button>
+    <div class="tools">
+      <div class="search">
+        <span class="search-icon" aria-hidden="true"><Icon name="search" size={13} /></span>
+        <input
+          class="filter"
+          placeholder="Search this tab"
+          aria-label="Search this tab"
+          bind:value={query}
+          oninput={() => void loadList().catch(() => undefined)}
+          data-testid="tab-search"
+        />
+      </div>
+      <Button variant="primary" icon="plus" onclick={startNew} data-testid="add-entry">New</Button>
+    </div>
   </div>
 
   {#if listError}
-    <p class="error-banner" role="alert">{listError}</p>
+    <StatusLine tone={/locked/i.test(listError) ? 'warn' : 'error'} message={listError} />
   {:else if status}
-    <p class="status muted" role="status" data-testid="status">{status}</p>
+    <StatusLine tone={status.startsWith('Copied') || status.startsWith('Saved') || status.startsWith('Deleted') || status.startsWith('Launched') ? 'ok' : 'info'} message={status} />
   {/if}
 
-  <main class="panes" class:stacked={narrow}>
-    {#if !narrow || mode === 'view'}
-      <section class="list-pane" hidden={narrow && mode !== 'view' && selectedId !== null}>
+  <main class="panes" class:stacked={narrow} id="entry-pane">
+    {#if !narrow || (mode === 'view' && !selectedId)}
+      <section class="list-pane" aria-label="Entry list">
         <EntryList
           {entries}
           {selectedId}
           {loading}
+          kind={tab}
           locked={tab === 'secret' && vault ? !vault.unlocked : false}
-          emptyText={query ? 'No entries match this filter.' : 'No entries yet. Press + Add.'}
+          emptyText={query
+            ? 'Nothing matches this filter. Clear the search or add a new entry.'
+            : tab === 'secret'
+              ? 'Add a secret and it will be encrypted with the vault key.'
+              : 'Add a command and it will be searchable from the Finder.'}
           onSelect={(entry) => void select(entry)}
         />
       </section>
     {/if}
 
-    <section class="detail-pane">
+    <section class="detail-pane" aria-label="Entry details">
       {#if narrow && mode === 'view' && selectedId}
-        <button onclick={() => (selectedId = null)}>← Back</button>
+        <div class="backrow">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="back"
+            onclick={() => {
+              selectedId = null;
+              details = null;
+            }}
+            data-testid="back-to-list">List</Button
+          >
+        </div>
       {/if}
       {#if mode === 'edit'}
         <EntryEditor
           {draft}
           {typeSuggestions}
           {saving}
+          dirty={draftDirty}
           error={saveError}
           onSave={() => void saveDraft()}
           onCancel={cancelEdit}
@@ -415,87 +475,99 @@
           onreveal={() => void revealEntry()}
           onedit={() => void startEdit()}
           onpin={() => void togglePin()}
-          onrun={() => { pendingRun = details; }}
+          onrun={() => {
+            pendingRun = details;
+          }}
           ondelete={() => (pendingDelete = meta)}
         />
       {:else if tab === 'secret' && vault && !vault.unlocked}
-        <div class="panel-empty">
-          <p class="muted">This vault is locked. Secrets stay encrypted on disk.</p>
-          <button onclick={() => void unlock()} data-variant="primary" data-testid="unlock-vault"
-            >Unlock vault</button
-          >
-        </div>
+        <EmptyState
+          icon="lock"
+          title="Vault locked"
+          hint="Secrets stay encrypted on disk. Unlocking asks the system for confirmation; a manual lock is never cleared automatically."
+        >
+          {#snippet actions()}
+            <Button variant="primary" icon="unlock" loading={authenticating} onclick={() => void unlock()}
+              data-testid="unlock-vault">Unlock vault</Button
+            >
+          {/snippet}
+        </EmptyState>
+      {:else if entries.length === 0 && !loading}
+        <EmptyState
+          icon="plus"
+          title="Nothing selected"
+          hint="Create an entry, or press the shortcut below to search everything at once."
+        >
+          {#snippet actions()}
+            <Button variant="primary" icon="plus" onclick={startNew}>New {tab === 'secret' ? 'secret' : 'command'}</Button>
+            <span class="chip"><Keycap keys={['Super', 'F']} /> Finder</span>
+          {/snippet}
+        </EmptyState>
       {:else}
-        <p class="muted pad">Select an entry.</p>
+        <EmptyState icon="search" title="Select an entry" hint="Pick a row on the left to see it here." />
       {/if}
     </section>
   </main>
 </div>
 
 {#if pendingDelete}
-  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm delete">
-    <div class="modal">
-      <h3>Delete “{pendingDelete.name}”?</h3>
-      <p class="muted">This removes the saved {pendingDelete.kind} permanently.</p>
-      <div class="row">
-        <span class="spacer"></span>
-        <button onclick={() => (pendingDelete = null)} data-testid="cancel-delete">Cancel</button>
-        <button
-          data-variant="danger"
-          onclick={() => void confirmDelete()}
-          data-testid="confirm-delete">Delete</button
-        >
-      </div>
-    </div>
-  </div>
+  <Dialog
+    title={`Delete “${pendingDelete.name}”?`}
+    label="Confirm delete"
+    oncancel={() => (pendingDelete = null)}
+  >
+    <p>This removes the saved {pendingDelete.kind} permanently. Encrypted backups you made earlier still hold it.</p>
+    {#snippet footer()}
+      <span class="spacer"></span>
+      <Button onclick={() => (pendingDelete = null)} data-testid="cancel-delete">Cancel</Button>
+      <Button variant="danger" icon="trash" onclick={() => void confirmDelete()} data-testid="confirm-delete"
+        >Delete</Button
+      >
+    {/snippet}
+  </Dialog>
 {/if}
 
 {#if pendingRun}
-  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm run">
-    <div class="modal">
-      <h3>Run this command?</h3>
-      <pre class="mono block">{pendingRun.command}</pre>
-      {#if pendingRun.workingDirectory}
-        <p class="muted">Working directory: <code>{pendingRun.workingDirectory}</code></p>
-      {/if}
-      <div class="row">
-        <span class="spacer"></span>
-        <button onclick={() => (pendingRun = null)}>Cancel</button>
-        <button data-variant="primary" onclick={() => void confirmRun()} data-testid="confirm-run"
-          >Run in terminal</button
-        >
-      </div>
-    </div>
-  </div>
+  <Dialog title="Run this command?" label="Confirm run" oncancel={() => (pendingRun = null)}>
+    <p>It will be launched in your configured terminal after this confirmation.</p>
+    <pre class="block mono">{pendingRun.command}</pre>
+    {#if pendingRun.workingDirectory}
+      <p>Working directory: <code>{pendingRun.workingDirectory}</code></p>
+    {/if}
+    {#snippet footer()}
+      <span class="spacer"></span>
+      <Button onclick={() => (pendingRun = null)}>Cancel</Button>
+      <Button variant="primary" icon="run" onclick={() => void confirmRun()} data-testid="confirm-run"
+        >Run in terminal</Button
+      >
+    {/snippet}
+  </Dialog>
 {/if}
 
 {#if pendingClose}
-  <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Unsaved changes">
-    <div class="modal">
-      <h3>Unsaved changes</h3>
-      <p class="muted">This entry has edits that are not saved.</p>
-      <div class="row">
-        <span class="spacer"></span>
-        <button onclick={() => (pendingClose = false)} data-testid="close-cancel">Cancel</button>
-        <button
-          onclick={() => {
-            pendingClose = false;
-            cancelEdit();
-            void allowClose();
-          }}
-          data-testid="close-discard">Discard</button
-        >
-        <button
-          data-variant="primary"
-          onclick={() => {
-            pendingClose = false;
-            void saveDraft().then(() => allowClose());
-          }}
-          data-testid="close-save">Save</button
-        >
-      </div>
-    </div>
-  </div>
+  <Dialog title="Unsaved changes" oncancel={() => (pendingClose = false)}>
+    <p>This entry has edits that are not saved.</p>
+    {#snippet footer()}
+      <span class="spacer"></span>
+      <Button onclick={() => (pendingClose = false)} data-testid="close-cancel">Keep editing</Button>
+      <Button
+        onclick={() => {
+          pendingClose = false;
+          cancelEdit();
+          void allowClose();
+        }}
+        data-testid="close-discard">Discard</Button
+      >
+      <Button
+        variant="primary"
+        onclick={() => {
+          pendingClose = false;
+          void saveDraft().then(() => allowClose());
+        }}
+        data-testid="close-save">Save</Button
+      >
+    {/snippet}
+  </Dialog>
 {/if}
 
 {#if showSettings}
@@ -512,43 +584,72 @@
     display: flex;
     align-items: center;
     gap: var(--gap);
-    padding: 9px 14px;
+    min-width: 0;
+    padding: var(--sp-2) var(--sp-3);
     border-bottom: var(--border);
     background: var(--bg-panel);
   }
-  .tabs {
+  .brand {
     display: flex;
     align-items: center;
-    gap: var(--gap);
-    padding: 8px 14px;
-    border-bottom: var(--border);
+    gap: var(--sp-2);
+    font-size: var(--text-sm);
+    letter-spacing: 0.01em;
   }
-  .tabbar {
+  .brand-glyph {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: var(--border);
+  }
+  .waiting {
+    font-size: var(--text-sm);
+  }
+  @media (max-width: 560px) {
+    .brand strong {
+      display: none;
+    }
+    header {
+      gap: var(--sp-2);
+    }
+  }
+  .toolbar {
     display: flex;
-    gap: 4px;
-  }
-  .tabbar button {
-    border-radius: var(--radius) var(--radius) 0 0;
-    border-bottom-color: transparent;
-  }
-  .tabbar button.active {
-    background: var(--bg-raised);
-    border-bottom-color: var(--bg-raised);
-    font-weight: 600;
-  }
-  .filter {
-    flex: 1;
-  }
-  .status,
-  .error-banner {
-    margin: 0;
-    padding: 6px 14px;
+    flex-direction: column;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
     border-bottom: var(--border);
+    background: var(--bg-panel);
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+  }
+  .search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .search-icon {
+    position: absolute;
+    left: var(--sp-2);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-dim);
+    pointer-events: none;
+  }
+  .search input {
+    padding-left: 26px;
   }
   .panes {
     flex: 1;
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: var(--pane-list) minmax(var(--pane-detail-min), 1fr);
     min-height: 0;
   }
   .panes.stacked {
@@ -560,39 +661,24 @@
     min-width: 0;
     overflow: hidden;
   }
+  .list-pane {
+    border-right: var(--border);
+    background: var(--bg-panel);
+  }
   .detail-pane {
     background: var(--bg);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
   }
-  .panel-empty,
-  .pad {
-    padding: 22px;
-  }
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgb(0 0 0 / 35%);
-    display: grid;
-    place-items: center;
-  }
-  .modal {
-    min-width: 340px;
-    max-width: 520px;
+  .backrow {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: var(--border);
     background: var(--bg-panel);
-    border: var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    box-shadow: 0 12px 36px rgb(0 0 0 / 30%);
   }
-  .modal h3 {
-    margin: 0 0 6px;
-    word-break: break-word;
-  }
-  .block {
-    background: var(--bg-raised);
-    border: var(--border);
-    border-radius: var(--radius);
-    padding: 8px 10px;
-    white-space: pre-wrap;
-    word-break: break-word;
+  @media (max-width: 900px) {
+    .panes {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

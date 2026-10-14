@@ -3,12 +3,12 @@
 
   let {
     fields,
-    editable,
+    editable = false,
     onChange
   }: {
     fields: ExtraField[];
-    editable: boolean;
-    onChange: (fields: ExtraField[]) => void;
+    editable?: boolean;
+    onChange?: (fields: ExtraField[]) => void;
   } = $props();
 
   const newId = (): string =>
@@ -16,7 +16,7 @@
 
   function update(index: number, patch: Partial<ExtraField>): void {
     const next = fields.map((f, i) => (i === index ? { ...f, ...patch } : f));
-    onChange(next);
+    onChange?.(next);
   }
 
   function move(index: number, delta: number): void {
@@ -25,15 +25,15 @@
     const next = [...fields];
     const [item] = next.splice(index, 1);
     next.splice(target, 0, item);
-    onChange(next);
+    onChange?.(next);
   }
 
   function remove(index: number): void {
-    onChange(fields.filter((_, i) => i !== index));
+    onChange?.(fields.filter((_, i) => i !== index));
   }
 
   function add(): void {
-    onChange([...fields, { id: newId(), label: '', value: '', display: 'text' }]);
+    onChange?.([...fields, { id: newId(), label: '', value: '', display: 'text' }]);
   }
 </script>
 
@@ -105,15 +105,19 @@
 
 <style>
   .fields {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: var(--gap-sm);
   }
   .field {
     border: var(--border);
     border-radius: var(--radius);
-    padding: var(--gap-sm);
-    background: var(--bg-raised);
+    padding: var(--sp-2);
+    background: var(--bg-sunken);
+    min-width: 0;
+  }
+  .field:hover {
+    border-color: var(--line-strong);
   }
   .label {
     flex: 1;
@@ -132,5 +136,17 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .viewed .label {
+    flex: none;
+    color: var(--fg-muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .value {
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
   }
 </style>

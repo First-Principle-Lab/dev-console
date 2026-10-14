@@ -1,68 +1,173 @@
+/* ------------------------------------------------------------------ tokens
+   Every colour, radius, space, control height and shadow in the application
+   comes from this file. Components must not hardcode colours; if a shade is
+   missing here, add a token instead of a literal.
+
+   Dark graphite is the default surface family (never pure black), with one
+   restrained indigo accent used for selection, focus, primary actions and
+   important status. A light theme is defined with the same token names and
+   meets the same contrast targets.
+   ----------------------------------------------------------------------- */
+
 :root {
   --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+
+  /* type scale (compact, desktop-first) */
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text: 13.5px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --leading: 1.45;
+
+  /* spacing + layout rhythm */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --gap: var(--sp-3);
+  --gap-sm: var(--sp-2);
+  --pane-list: 320px;
+  --pane-detail-min: 380px;
+
+  /* radii + borders */
+  --radius-sm: 4px;
   --radius: 6px;
-  --gap: 12px;
-  --gap-sm: 6px;
+  --radius-lg: 10px;
   --border: 1px solid var(--line);
+  --border-strong: 1px solid var(--line-strong);
+
+  /* control sizes */
+  --control-h: 30px;
+  --control-h-sm: 26px;
+  --row-h: 46px;
+
+  /* motion */
+  --transition: 120ms ease;
+
+  color-scheme: dark;
 }
 
+/* dark graphite ------------------------------------------------------------ */
+:root,
+:root[data-theme='dark'] {
+  --bg: #16171b;
+  --bg-panel: #1c1e23;
+  --bg-raised: #23262d;
+  --bg-sunken: #121317;
+  --bg-hover: #2a2e37;
+  --bg-active: #313640;
+  --line: #2e323b;
+  --line-strong: #404652;
+  --fg: #e9eaef;
+  --fg-muted: #9ba1ae;
+  --fg-dim: #767d8b;
+
+  --accent: #7c8cf8;
+  --accent-strong: #6474f0;
+  --accent-fg: #0e1020;
+  --accent-soft: rgba(124, 140, 248, 0.16);
+  --accent-line: rgba(124, 140, 248, 0.45);
+  --selected: rgba(124, 140, 248, 0.18);
+
+  --danger: #f08a86;
+  --danger-soft: rgba(240, 138, 134, 0.14);
+  --ok: #74d3a2;
+  --ok-soft: rgba(116, 211, 162, 0.14);
+  --warn: #e0b45f;
+  --warn-soft: rgba(224, 180, 95, 0.14);
+
+  /* kind accents: commands read as the accent, secrets stay visibly separate */
+  --command-accent: var(--accent);
+  --secret-accent: #d9a45b;
+  --secret-soft: rgba(217, 164, 91, 0.14);
+
+  --focus-ring: #aab6ff;
+  --backdrop: rgba(8, 9, 12, 0.62);
+  --shadow-dialog: 0 18px 48px rgba(0, 0, 0, 0.48);
+}
+
+/* light (same token names, tuned for contrast on a light surface) ---------- */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f6f6f7;
+    color-scheme: light;
+    --bg: #f5f6f8;
     --bg-panel: #ffffff;
-    --bg-raised: #ececee;
-    --fg: #17171a;
-    --fg-muted: #6a6a74;
-    --line: #d3d3d9;
-    --accent: #2f6feb;
-    --accent-fg: #ffffff;
-    --danger: #b3261e;
-    --ok: #14683a;
-  }
-}
+    --bg-raised: #eceef2;
+    --bg-sunken: #e7e9ee;
+    --bg-hover: #e3e6ec;
+    --bg-active: #dadde5;
+    --line: #d5d8e0;
+    --line-strong: #b9bec9;
+    --fg: #1b1d23;
+    --fg-muted: #5c6270;
+    --fg-dim: #7d8493;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1b1b1f;
-    --bg-panel: #232329;
-    --bg-raised: #2c2c33;
-    --fg: #ececf1;
-    --fg-muted: #9a9aa6;
-    --line: #3a3a44;
-    --accent: #4f8cff;
-    --accent-fg: #0b0b0d;
-    --danger: #ff6b61;
-    --ok: #4cc38a;
+    --accent: #4553d6;
+    --accent-strong: #3846c4;
+    --accent-fg: #ffffff;
+    --accent-soft: rgba(69, 83, 214, 0.1);
+    --accent-line: rgba(69, 83, 214, 0.4);
+    --selected: rgba(69, 83, 214, 0.12);
+
+    --danger: #a72d28;
+    --danger-soft: rgba(167, 45, 40, 0.1);
+    --ok: #14683a;
+    --ok-soft: rgba(20, 104, 58, 0.1);
+    --warn: #7a5310;
+    --warn-soft: rgba(122, 83, 16, 0.12);
+
+    --command-accent: var(--accent);
+    --secret-accent: #8a5a12;
+    --secret-soft: rgba(138, 90, 18, 0.12);
+
+    --focus-ring: #2331a8;
+    --backdrop: rgba(24, 26, 32, 0.4);
+    --shadow-dialog: 0 14px 40px rgba(20, 22, 28, 0.24);
   }
 }
 
 :root[data-theme='light'] {
-  --bg: #f6f6f7;
+  color-scheme: light;
+  --bg: #f5f6f8;
   --bg-panel: #ffffff;
-  --bg-raised: #ececee;
-  --fg: #17171a;
-  --fg-muted: #6a6a74;
-  --line: #d3d3d9;
-  --accent: #2f6feb;
+  --bg-raised: #eceef2;
+  --bg-sunken: #e7e9ee;
+  --bg-hover: #e3e6ec;
+  --bg-active: #dadde5;
+  --line: #d5d8e0;
+  --line-strong: #b9bec9;
+  --fg: #1b1d23;
+  --fg-muted: #5c6270;
+  --fg-dim: #7d8493;
+
+  --accent: #4553d6;
+  --accent-strong: #3846c4;
   --accent-fg: #ffffff;
-  --danger: #b3261e;
+  --accent-soft: rgba(69, 83, 214, 0.1);
+  --accent-line: rgba(69, 83, 214, 0.4);
+  --selected: rgba(69, 83, 214, 0.12);
+
+  --danger: #a72d28;
+  --danger-soft: rgba(167, 45, 40, 0.1);
   --ok: #14683a;
+  --ok-soft: rgba(20, 104, 58, 0.1);
+  --warn: #7a5310;
+  --warn-soft: rgba(122, 83, 16, 0.12);
+
+  --command-accent: var(--accent);
+  --secret-accent: #8a5a12;
+  --secret-soft: rgba(138, 90, 18, 0.12);
+
+  --focus-ring: #2331a8;
+  --backdrop: rgba(24, 26, 32, 0.4);
+  --shadow-dialog: 0 14px 40px rgba(20, 22, 28, 0.24);
 }
 
-:root[data-theme='dark'] {
-  --bg: #1b1b1f;
-  --bg-panel: #232329;
-  --bg-raised: #2c2c33;
-  --fg: #ececf1;
-  --fg-muted: #9a9aa6;
-  --line: #3a3a44;
-  --accent: #4f8cff;
-  --accent-fg: #0b0b0d;
-  --danger: #ff6b61;
-  --ok: #4cc38a;
-}
-
+/* --------------------------------------------------------------- base ---- */
 * {
   box-sizing: border-box;
 }
@@ -78,28 +183,65 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-ui);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--text);
+  line-height: var(--leading);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-ligatures: none;
+}
+
+/* --------------------------------------------------------- controls -----
+   Everything clickable gets a pointer cursor and the same four visible
+   states: hover, pressed, disabled and keyboard focus.
+   ----------------------------------------------------------------------- */
 button {
   font: inherit;
   color: inherit;
   background: var(--bg-raised);
   border: var(--border);
   border-radius: var(--radius);
-  padding: 5px 11px;
-  cursor: default;
+  min-height: var(--control-h);
+  padding: 0 var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+}
+
+button:active:not(:disabled) {
+  background: var(--bg-active);
+  border-color: var(--line-strong);
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -107,10 +249,51 @@ button[data-variant='primary'] {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: transparent;
+  font-weight: 600;
+}
+
+button[data-variant='primary']:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: transparent;
+}
+
+button[data-variant='ghost'] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-muted);
+}
+
+button[data-variant='ghost']:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+  border-color: var(--line);
 }
 
 button[data-variant='danger'] {
   color: var(--danger);
+  border-color: transparent;
+  background: transparent;
+}
+
+button[data-variant='danger']:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+button[data-size='sm'] {
+  min-height: var(--control-h-sm);
+  padding: 0 var(--sp-2);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+}
+
+button[data-icon='true'] {
+  width: var(--control-h);
+  padding: 0;
+}
+
+button[data-icon='true'][data-size='sm'] {
+  width: var(--control-h-sm);
 }
 
 input,
@@ -118,38 +301,91 @@ textarea,
 select {
   font: inherit;
   color: inherit;
-  background: var(--bg-panel);
+  background: var(--bg-sunken);
   border: var(--border);
   border-radius: var(--radius);
-  padding: 5px 8px;
+  min-height: var(--control-h);
+  padding: var(--sp-1) var(--sp-2);
   width: 100%;
+  transition:
+    border-color var(--transition),
+    background var(--transition);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--fg-dim);
+}
+
+input:hover:not(:disabled),
+textarea:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent-line);
+  background: var(--bg-panel);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 textarea {
   resize: vertical;
-  min-height: 62px;
+  min-height: 68px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }
 
 input[type='checkbox'] {
   width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
-code,
-pre,
-.mono {
-  font-family: var(--font-mono);
-  font-size: 13px;
+select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: var(--sp-4);
+  background-image: linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) calc(50% + 1px),
+    calc(100% - 9px) calc(50% + 1px);
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
 }
 
+/* Keyboard focus is deliberately loud: it must survive both themes and any
+   colour-vision difference, so it is a ring plus an outline, not a hue alone. */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---------------------------------------------------------- utilities --- */
 .muted {
   color: var(--fg-muted);
+}
+
+.dim {
+  color: var(--fg-dim);
 }
 
 .row {
@@ -158,14 +394,114 @@ pre,
   gap: var(--gap-sm);
 }
 
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
 .spacer {
   flex: 1;
 }
 
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.label {
+  display: block;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .error-banner {
   color: var(--danger);
-  padding: 6px 10px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--danger);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: var(--danger-soft);
+  font-size: var(--text-sm);
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: var(--border);
+  border-radius: var(--radius);
+}
+
+.block {
+  background: var(--bg-sunken);
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* keycap for keyboard hints */
+kbd,
+.kbd {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+  border: var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  padding: 3px 5px 2px;
+  white-space: nowrap;
+}
+
+/* badges and chips */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+  border: var(--border);
+  border-radius: 999px;
+  padding: 2px var(--sp-2);
+  white-space: nowrap;
+}
+
+.chip[data-tone='command'] {
+  color: var(--command-accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.chip[data-tone='secret'] {
+  color: var(--secret-accent);
+  border-color: var(--secret-accent);
+  background: var(--secret-soft);
+}
+
+.chip[data-tone='status'] {
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid CanvasText;
+  }
 }

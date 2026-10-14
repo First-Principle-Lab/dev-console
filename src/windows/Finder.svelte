@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import Icon from '../components/Icon.svelte';
+  import Keycap from '../components/Keycap.svelte';
   import { api } from '../lib/api';
   import { on } from '../lib/events';
   import { displayedQuery, nextSelection, selected, shouldCommit, tabCompletion } from '../lib/finder-state';
@@ -105,7 +107,8 @@
     }
     try {
       await api.copy(entry.kind, entry.id, 0);
-      status = null;
+      // The value itself never appears here: the state says what happened, not what it was.
+      status = entry.kind === 'secret' ? 'Copied the secret to the clipboard.' : 'Copied the command to the clipboard.';
       error = null;
       await api.hideSelf();
     } catch (problem: unknown) {
@@ -204,199 +207,372 @@
 </script>
 
 <div class="finder" data-testid="finder">
-  <div class="search">
-    <div class="mirror" aria-hidden="true">
-      <span class="measure">{query}</span><span class="tail">{tail}</span>
+  <div class="palette">
+    <div class="search">
+      <span class="search-icon" aria-hidden="true"><Icon name="search" size={16} /></span>
+      <div class="field">
+        <div class="mirror" aria-hidden="true">
+          <span class="measure">{query}</span><span class="tail">{tail}</span>
+        </div>
+        <input
+          bind:this={input}
+          bind:value={query}
+          oninput={() => void runSearch(query).catch(() => undefined)}
+          onkeydown={(event) => void onKeydown(event)}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="finder-results"
+          aria-autocomplete="both"
+          aria-activedescendant={selectedId ? `row-${selectedId}` : undefined}
+          aria-label="Search commands and secrets"
+          placeholder="Search commands and secrets…"
+          spellcheck="false"
+          autocapitalize="off"
+          autocomplete="off"
+          data-testid="finder-input"
+        />
+      </div>
+      {#if vault}
+        <span class="vaultchip" data-tone={vault.unlocked ? 'ok' : 'warn'} data-testid="finder-vault">
+          <Icon name={vault.unlocked ? 'unlock' : 'lock'} size={12} />
+          {vault.unlocked ? 'Vault unlocked' : 'Vault locked'}
+        </span>
+      {/if}
     </div>
-    <input
-      bind:this={input}
-      bind:value={query}
-      oninput={() => void runSearch(query).catch(() => undefined)}
-      onkeydown={(event) => void onKeydown(event)}
-      role="combobox"
-      aria-expanded="true"
-      aria-controls="finder-results"
-      aria-autocomplete="list"
-      aria-activedescendant={selectedId ? `row-${selectedId}` : undefined}
-      aria-label="Search commands and secrets"
-      placeholder="Search commands and secrets…"
-      spellcheck="false"
-      data-testid="finder-input"
-    />
-    <span class="vaultstate muted" data-testid="finder-vault">
-      {#if vault}{vault.unlocked ? 'Vault unlocked' : 'Vault locked'}{/if}
-    </span>
-  </div>
 
-  <ul id="finder-results" class="results" role="listbox" aria-label="Results" bind:this={list}>
-    {#each rows as row, index (row.id)}
-      <li
-        id={`row-${row.id}`}
-        data-row-id={row.id}
-        role="option"
-        aria-selected={row.id === selectedId}
-        class:active={row.id === selectedId}
-        class:system={row.id === UNLOCK_ID}
-        onclick={() => (selectedId = row.id)}
-        ondblclick={() => void activate()}
-        onkeydown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            selectedId = row.id;
-            void activate();
-          }
-        }}
-        tabindex={row.id === selectedId ? 0 : -1}
-        data-testid="result-row"
-      >
-        <span class="marker">{#if row.id === selectedId}> {:else}&nbsp;{/if}</span>
-        <span class="name">{row.name}</span>
-        <span class="kind">{row.id === UNLOCK_ID ? 'Vault' : row.kind === 'command' ? 'Command' : 'Secret'}</span>
-        <span class="type muted">{row.type}</span>
-        <button
-          class="copy"
-          tabindex="-1"
-          onclick={(e) => {
-            e.stopPropagation();
-            selectedId = row.id;
-            void activate();
-          }}>Copy</button
+    <ul id="finder-results" class="results" role="listbox" aria-label="Results" bind:this={list}>
+      {#each rows as row (row.id)}
+        <li
+          id={`row-${row.id}`}
+          data-row-id={row.id}
+          role="option"
+          aria-selected={row.id === selectedId}
+          class="row"
+          class:active={row.id === selectedId}
+          class:system={row.id === UNLOCK_ID}
+          onclick={() => (selectedId = row.id)}
+          ondblclick={() => void activate()}
+          onkeydown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              selectedId = row.id;
+              void activate();
+            }
+          }}
+          tabindex={row.id === selectedId ? 0 : -1}
+          data-testid="result-row"
         >
-        <span class="index muted">{index + 1}</span>
-      </li>
-    {:else}
-      <li class="empty muted" class:loading>
-        {#if loading}Searching…{:else if query}No matches{:else}Nothing pinned yet{/if}
-      </li>
-    {/each}
-  </ul>
+          <span class="glyph" class:secret={row.kind === 'secret'} aria-hidden="true">
+            <Icon name={row.id === UNLOCK_ID ? 'lock' : row.kind === 'secret' ? 'secret' : 'command'} size={14} />
+          </span>
+          <span class="body">
+            <span class="line">
+              <span class="name truncate">{row.name}</span>
+              {#if row.tags.length > 0}
+                <span class="tags truncate">{#each row.tags.slice(0, 3) as tag (tag)}<span class="tag">#{tag}</span>{/each}</span>
+              {/if}
+            </span>
+            {#if row.id === UNLOCK_ID}
+              <span class="sub">Secret metadata stays encrypted until you unlock the vault.</span>
+            {:else if row.description}
+              <span class="sub truncate">{row.description}</span>
+            {/if}
+          </span>
+          <span class="trail">
+            {#if row.id === UNLOCK_ID}
+              <span class="chip" data-tone="status">Unlock</span>
+            {:else}
+              <span class="chip" data-tone={row.kind === 'secret' ? 'secret' : 'command'}>
+                <Icon name={row.kind === 'secret' ? 'secret' : 'command'} size={10} />
+                {row.kind === 'secret' ? 'Secret' : 'Command'}
+              </span>
+            {/if}
+            {#if row.type}<span class="type">{row.type}</span>{/if}
+            {#if row.id === selectedId}
+              <span class="hintkeys" aria-hidden="true"><Keycap keys={['Enter']} /></span>
+            {/if}
+          </span>
+        </li>
+      {:else}
+        {#if loading}
+          <li class="state" role="presentation"><Icon name="search" size={14} /> Searching…</li>
+        {:else if query}
+          <li class="state" role="presentation" data-testid="finder-empty">
+            <Icon name="search" size={14} />
+            <span>
+              No match for <strong>{query}</strong>
+              <span class="sub">— try a tag, a type, or part of the name</span>
+            </span>
+          </li>
+        {:else}
+          <li class="state" role="presentation">Nothing saved yet</li>
+        {/if}
+      {/each}
+    </ul>
 
-  {#if error}
-    <p class="error-banner" role="alert" data-testid="finder-error">{error}</p>
-  {:else if status}
-    <p class="hint muted" role="status">{status}</p>
-  {/if}
+    {#if error}
+      <p class="error-banner" role="alert" data-testid="finder-error"><Icon name="alert" size={12} /> {error}</p>
+    {:else if status}
+      <p class="copied" role="status" data-testid="finder-status"><Icon name="check" size={12} /> {status}</p>
+    {/if}
 
-  <footer class="muted">
-    <span>Tab complete</span><span>Up/Down select</span><span>Enter copy</span>
-    <span>Ctrl+O details</span><span>Esc close</span>
-  </footer>
+    <footer>
+      <span class="hint"><Keycap keys={['Up', 'Down']} /> select</span>
+      <span class="hint"><Keycap keys={['Tab']} /> complete</span>
+      <span class="hint"><Keycap keys={['Enter']} /> copy</span>
+      <span class="hint"><Keycap keys={['Ctrl', 'O']} /> details</span>
+      <span class="hint"><Keycap keys={['Esc']} /> close</span>
+      <span class="spacer"></span>
+      <span class="count muted">{rows.length}</span>
+    </footer>
+  </div>
 </div>
 
 <style>
+  /* The palette frame. In Tauri the window is 680x420 and borderless; in the browser
+     preview the same frame is centred, and on narrow screens it fills the viewport. */
   .finder {
+    height: 100%;
+    background: var(--bg);
+    display: grid;
+    place-items: center;
+    padding: var(--sp-3);
+  }
+  .palette {
+    width: min(680px, 100%);
+    height: min(420px, 100%);
     display: flex;
     flex-direction: column;
-    height: 100%;
     background: var(--bg-panel);
+    border: var(--border-strong);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
   }
   .search {
-    position: relative;
     display: flex;
     align-items: center;
-    gap: var(--gap);
-    padding: 12px 14px;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
     border-bottom: var(--border);
+    background: var(--bg-raised);
   }
-  .search input {
+  .search-icon {
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+  }
+  .field {
+    position: relative;
     flex: 1;
+    min-width: 0;
+  }
+  .field input {
     background: transparent;
     border: none;
-    font-size: 16px;
-    padding: 4px 0;
+    border-radius: 0;
+    padding: 0;
+    min-height: 28px;
+    font-size: var(--text-lg);
+  }
+  .field input:focus {
+    background: transparent;
+    border: none;
+    outline: none;
+  }
+  .search:focus-within {
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
   .mirror {
     position: absolute;
-    left: 14px;
-    right: 150px;
-    top: 16px;
-    font-size: 16px;
+    inset: 0;
+    font-size: var(--text-lg);
+    line-height: 28px;
     white-space: pre;
     pointer-events: none;
     overflow: hidden;
+    color: var(--fg);
   }
   .measure {
-    visibility: hidden;
+    color: transparent;
   }
   .tail {
-    color: var(--fg-muted);
+    color: var(--fg-dim);
   }
-  .vaultstate {
-    font-size: 12px;
+  .vaultchip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    font-size: var(--text-xs);
+    padding: 2px var(--sp-2);
+    border: var(--border);
+    border-radius: 999px;
+    color: var(--fg-muted);
+    background: var(--bg-panel);
     white-space: nowrap;
+  }
+  .vaultchip[data-tone='ok'] {
+    color: var(--ok);
+    border-color: var(--line);
+  }
+  .vaultchip[data-tone='warn'] {
+    color: var(--warn);
+    border-color: var(--line-strong);
   }
   .results {
     list-style: none;
     margin: 0;
-    padding: 4px 0;
-    overflow-y: auto;
-    max-height: 372px;
+    padding: var(--sp-2);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: auto;
     flex: 1;
   }
-  li {
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  .row:hover {
+    background: var(--bg-hover);
+  }
+  .row.active {
+    background: var(--selected);
+    border-color: var(--accent-line);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .glyph {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border-radius: var(--radius-sm);
+    color: var(--command-accent);
+    background: var(--accent-soft);
+  }
+  .glyph.secret {
+    color: var(--secret-accent);
+    background: var(--secret-soft);
+  }
+  .row.system .glyph {
+    color: var(--warn);
+    background: var(--warn-soft);
+  }
+  .body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    gap: 1px;
+  }
+  .line {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    padding: 6px 14px;
-    cursor: default;
-  }
-  li.active {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-  li.system .name {
-    color: var(--accent);
-  }
-  .marker {
-    width: 12px;
-    color: var(--accent);
+    gap: var(--sp-2);
+    min-width: 0;
   }
   .name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: var(--fg);
+    font-size: var(--text);
+    font-weight: 550;
   }
-  .kind {
-    font-size: 12px;
+  .tags {
+    display: inline-flex;
+    gap: 5px;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+  }
+  .sub {
     color: var(--fg-muted);
-    min-width: 62px;
+    font-size: var(--text-xs);
+  }
+  .trail {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex: none;
   }
   .type {
-    font-size: 12px;
-    min-width: 74px;
-    text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: var(--fg-muted);
+    font-size: var(--text-xs);
   }
-  .copy {
-    padding: 1px 7px;
-    font-size: 12px;
-    visibility: hidden;
+  .row.system .name {
+    color: var(--warn);
   }
-  li.active .copy,
-  li:hover .copy {
-    visibility: visible;
+  .state {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-4) var(--sp-3);
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
   }
-  .index {
-    font-size: 11px;
-    min-width: 14px;
-    text-align: right;
+  .state strong {
+    color: var(--fg);
+    font-weight: 600;
   }
-  .empty {
-    padding: 16px 14px;
+  .copied {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    color: var(--ok);
+    background: var(--ok-soft);
+    border-top: var(--border);
+    font-size: var(--text-sm);
   }
   .error-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
     margin: 0;
     border-radius: 0;
-    border: none;
-    border-top: 1px solid var(--danger);
+    border-left: 0;
+    border-right: 0;
   }
   footer {
     display: flex;
-    gap: 12px;
-    padding: 7px 14px;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
     border-top: var(--border);
-    font-size: 12px;
+    background: var(--bg-raised);
+    color: var(--fg-muted);
+    font-size: var(--text-xs);
     flex-wrap: wrap;
+  }
+  .hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .hintkeys {
+    opacity: 0.8;
+  }
+  .count {
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 720px) {
+    .finder {
+      padding: 0;
+    }
+    .palette {
+      width: 100%;
+      height: 100%;
+      border-radius: 0;
+      border: none;
+    }
+    .trail .type,
+    .hint:nth-child(n + 4) {
+      display: none;
+    }
   }
 </style>
