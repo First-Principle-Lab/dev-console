@@ -1,0 +1,71 @@
+import type {
+  AppStateInfo,
+  CopyResult,
+  EntryDetails,
+  EntryDraft,
+  EntryMeta,
+  Kind,
+  SavedEntry,
+  SearchResponse,
+  Settings,
+  VaultState
+} from './models';
+
+export type IpcCall = (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
+
+declare global {
+  interface Window {
+    __devConsoleIpc?: IpcCall;
+    __devConsoleEmit?: (event: string, payload: unknown) => void;
+  }
+}
+
+export function inTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+async function call<T>(command: string, payload?: Record<string, unknown>): Promise<T> {
+  if (typeof window !== 'undefined' && window.__devConsoleIpc) {
+    return (await window.__devConsoleIpc(command, payload)) as T;
+  }
+  if (inTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return (await invoke(command, payload ?? {})) as T;
+  }
+  throw new Error(`ipc unavailable: ${command}`);
+}
+
+export interface ListRequest {
+  kind: Kind;
+  query?: string;
+  type?: string;
+  tag?: string;
+}
+
+export const api = {
+  appState: (): Promise<AppStateInfo> => call('app_state'),
+  search: (query: string, requestId: number): Promise<SearchResponse> =>
+    call('search_entries', { request: { query, requestId } }),
+  list: (req: ListRequest): Promise<EntryMeta[]> => call('list_entries', { request: req }),
+  types: (kind: Kind): Promise<string[]> => call('types_for', { request: { kind } }),
+  details: (kind: Kind, id: string): Promise<EntryDetails> =>
+    call('get_entry', { request: { kind, id } }),
+  reveal: (kind: Kind, id: string): Promise<EntryDetails> =>
+    call('reveal_secret', { request: { kind, id } }),
+  save: (draft: EntryDraft): Promise<SavedEntry> => call('save_entry', { request: { draft } }),
+  remove: (kind: Kind, id: string, expectedRevision: number): Promise<void> =>
+    call('delete_entry', { request: { kind, id, expectedRevision } }),
+  copy: (kind: Kind, id: string, expectedRevision: number): Promise<CopyResult> =>
+    call('copy_entry', { request: { kind, id, expectedRevision } }),
+  run: (id: string, expectedRevision: number, approved: boolean): Promise<void> =>
+    call('run_command', { request: { id, expectedRevision, approved } }),
+  lockVault: (): Promise<VaultState> => call('lock_vault'),
+  unlockVault: (): Promise<VaultState> => call('unlock_vault'),
+  openLibrary: (kind: Kind, entryId?: string): Promise<void> =>
+    call('open_library', { request: { kind, entryId } }),
+  hideSelf: (): Promise<void> => call('hide_self'),
+  allowClose: (): Promise<void> => call('allow_close'),
+  quit: (): Promise<void> => call('quit_app'),
+  settings: (): Promise<Settings> => call('get_settings'),
+  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings })
+};
