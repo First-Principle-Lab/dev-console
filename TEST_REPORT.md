@@ -52,3 +52,50 @@ compositor, no Waybar, no polkit authentication agent, no systemd/logind session
 C03, C11 (desktop login-keyring half), C12 (fresh-login + real-clipboard half), C13, C14 (race
 half), C15 (real clipboard manager), C17 (Hyprland focus half), C20, C21. Each row above names
 the exact remaining desktop test. Nothing in this report claims those pass.
+
+
+## UI redesign pass (this checkpoint)
+
+Executed in the working copy at `/dev/shm/dev-console` (the container's root filesystem was
+remounted read-only mid-session, so the workspace itself could no longer be written; the repository
+was copied to tmpfs and every command below was really run there):
+
+- `bun run check` → 0 errors, 0 warnings. `bun run lint` → clean. `bun run test` → 13/13.
+  `bun run build` → ok.
+- `bun run test:e2e` → **37/37** (library 11, finder 11, redesign 9, screenshot review 6).
+  The redesign suite covers: tab counts + single selected tab, masked-and-badged secret rows,
+  dirty-state indicator appearing only after an edit, the locked vault's single unlock action,
+  Finder combobox/listbox attributes with a live `aria-activedescendant`, the explicit
+  "Copied" state that never echoes the value, the locked-vault unlock row, keycap hints, and the
+  narrow (390 px) list-first layout with its Back action.
+- `SHOT_SET=before` and `SHOT_SET=after` captured 36 PNGs each at 1440/768/390 into
+  `artifacts/ui-review/{before,after}/`. These are **UI-shell** checks against the documented IPC
+  test double - the browser preview cannot reach native IPC - and the native binary is exercised
+  separately by `scripts/smoke-native.sh`.
+- The screenshots were opened and inspected, and five real defects found that way were fixed:
+  the vault pill rendered sentence-case text as `VAULT UNLOCKED` (it inherited the uppercase
+  `.label` token class); the "unlock" icon was actually a briefcase glyph; the Finder's Enter
+  keycap rendered as an unreadable box; a locked vault produced **two** full empty states plus a
+  red error banner for an expected state; and 390 px headers overflowed horizontally, hiding
+  Settings. Review rows and detail timestamps also moved from epoch-looking absolutes to relative
+  time with the ISO value in a tooltip.
+
+## Rust verification boundary for this checkpoint
+
+This checkpoint touched only `src/**` (Svelte/TS), `tests/e2e/**`, `scripts/`, `packaging/`,
+`.github/`, `docs/`, `README.md` and the docs files; no `.rs` file changed since `8e7b4eb`, where
+`cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`
+(36 library tests + the 2-test native suite via `scripts/test-native-ipc.sh`, both green), the
+keyring, clipboard and packaging harnesses, and the release build all ran to completion. The Rust
+toolchain cache lives on the now-read-only filesystem, so those commands were **not** re-executed
+here and are not claimed as re-run; they are carried forward with that stated.
+
+## Arch packaging (new in this checkpoint)
+
+`bash scripts/test-arch-package.sh` → the static half passes (PKGBUILD declares every required
+field, builds with `bun install --frozen-lockfile` and `cargo build --release --locked`, installs
+only absolute `$pkgdir/usr/...` destinations, packages the binary/launcher/policy/helper/icons,
+rewrites the policy `exec.path` and the launcher `Exec=` to installed paths, the policy XML parses,
+`desktop-file-validate` is clean), and the real build reports `UNVERIFIED: makepkg is not available
+on this host` with exit 77. **`makepkg` has not been run anywhere yet** - the AUR path is documented
+and statically validated, not built.

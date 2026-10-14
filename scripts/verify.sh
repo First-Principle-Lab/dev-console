@@ -77,6 +77,32 @@ else
   fi
 fi
 
+echo "== arch packaging: PKGBUILD layout, installed paths, policy XML =="
+if [[ "${SKIP_ARCH_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_ARCH_TEST=1)"
+else
+  code=0
+  bash scripts/test-arch-package.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: makepkg is not available here (the static half still ran)"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
+echo "== native backend integration (real provider, real files) =="
+if [[ "${SKIP_NATIVE_IPC_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_NATIVE_IPC_TEST=1)"
+else
+  code=0
+  bash scripts/test-native-ipc.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: no Secret Service provider could be started here"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== release compile =="
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"

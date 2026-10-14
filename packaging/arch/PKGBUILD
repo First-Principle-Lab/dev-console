@@ -1,0 +1,80 @@
+# Maintainer: Parth Thirwani <parth@codemate.ai>
+# Build from a release tarball (the same PKGBUILD works locally and in AUR):
+#   makepkg -si
+#
+# The package ships: the Tauri release binary, the built frontend inside it (Tauri embeds
+# dist/ at compile time), the desktop launcher, the polkit policy plus its setuid-free helper,
+# and the hicolor icons. Nothing is downloaded at build time beyond the declared source.
+
+pkgname=dev-console
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Local-first tray app for saved commands and secrets (age vault, Secret Service key)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/parththirwani/dev-console'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'glib2' 'gtk3' 'webkit2gtk-4.1' 'libsoup3' 'libappindicator-gtk3'
+         'dbus' 'sqlite' 'libsecret')
+makedepends=('bun' 'rust' 'cargo' 'desktop-file-utils' 'pkgconf')
+optdepends=('gnome-keyring: Secret Service provider for the vault key'
+            'kwallet: alternative Secret Service provider'
+            'polkit: authenticated unlock from the tray and CLI'
+            'xclip: X11 clipboard support (Wayland uses its own primary/clipboard protocol)')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')   # replace with the real digest before publishing
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  export BUN_INSTALL="$srcdir/bun"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  export CARGO_HOME="$srcdir/cargo"
+  export RUSTUP_HOME="$srcdir/rustup"
+
+  bun install --frozen-lockfile
+  bun run build:frontend
+
+  cargo build --release --manifest-path src-tauri/Cargo.toml --locked
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver"
+  export BUN_INSTALL="$srcdir/bun"
+  export PATH="$BUN_INSTALL/bin:$PATH:$CARGO_HOME/bin"
+  bun run check
+  bun run lint
+  bun run test
+  cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  install -Dm755 src-tauri/target/release/dev-console "$pkgdir/usr/bin/dev-console"
+
+  # Desktop entry, polkit policy and the helper it authorises.
+  install -Dm644 packaging/dev-console.desktop \
+    "$pkgdir/usr/share/applications/dev-console.desktop"
+  install -Dm644 packaging/polkit/ai.codemate.devconsole.policy \
+    "$pkgdir/usr/share/polkit-1/actions/ai.codemate.devconsole.policy"
+  install -Dm755 packaging/dev-console-auth-helper \
+    "$pkgdir/usr/lib/dev-console/dev-console-auth-helper"
+
+  # Point the policy at the path this package uses (policies carry an absolute exec path).
+  sed -i 's#/usr/libexec/dev-console-auth-helper#/usr/lib/dev-console/dev-console-auth-helper#' \
+    "$pkgdir/usr/share/polkit-1/actions/ai.codemate.devconsole.policy"
+  sed -i 's#^Exec=.*#Exec=/usr/bin/dev-console --background#' \
+    "$pkgdir/usr/share/applications/dev-console.desktop"
+
+  install -Dm644 src-tauri/icons/32x32.png \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/dev-console.png"
+  install -Dm644 src-tauri/icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/dev-console.png"
+  install -Dm644 src-tauri/icons/icon.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/dev-console.png"
+  install -Dm644 src-tauri/icons/icon@2x.png \
+    "$pkgdir/usr/share/icons/hicolor/512x512/apps/dev-console.png"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" || true
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
