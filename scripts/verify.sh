@@ -55,4 +55,18 @@ else
   npx tauri build --no-bundle
 fi
 
+echo "== native smoke against the compiled binary =="
+if [[ "${SKIP_NATIVE_SMOKE:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_NATIVE_SMOKE=1)"
+else
+  binary="${DEV_CONSOLE_BINARY:-src-tauri/target/release/dev-console}"
+  code=0
+  bash scripts/smoke-native.sh "$binary" || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: this environment cannot host the native smoke test"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "all checks passed"
