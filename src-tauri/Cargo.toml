@@ -9,7 +9,9 @@ default-run = "dev-console"
 
 [lib]
 name = "dev_console_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop-only (Linux/X11+Wayland): the mobile cdylib/staticlib shapes would triple the
+# link step for no benefit, and on a small machine they are the first thing to OOM.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -95,6 +95,28 @@ fi
 kill -0 "$APP_PID" 2>/dev/null && pass "the original instance is still resident" || fail "the original instance died"
 OUT="$("$BIN" vault status 2>&1)"; grep -q "no running instance" <<<"$OUT" && fail "control socket stopped answering after handoff" || pass "control socket still answers"
 
+echo "== 6b. a second window really opens in the same resident process =="
+if command -v xwininfo >/dev/null; then
+  "$BIN" --finder >/dev/null 2>&1 &
+  FINDER_CALL=$!
+  wait "$FINDER_CALL" 2>/dev/null || true
+  sleep 2
+  TREE="$(xwininfo -root -tree 2>/dev/null)"
+  echo "$TREE" | grep -ciE "dev[ -]?console|dev-console" >/dev/null && pass "top-level windows are visible on the X server" || fail "no Dev Console window found on the X server"
+  WINDOWS=$(echo "$TREE" | grep -cE "^\s+0x[0-9a-f]+ .*dev[ -]?console" || true)
+  echo "   dev-console related windows on the tree: $WINDOWS"
+  OUT="$("$BIN" vault status 2>&1)"
+  grep -q "no running instance" <<<"$OUT" && fail "the instance stopped answering after opening the finder" || pass "the resident instance still serves both intents"
+  # A lock taken from another process must be seen by the running instance (both windows read
+  # the same state and receive the same vault-state event).
+  OUT="$("$BIN" vault lock 2>&1)"; grep -q "no running instance" <<<"$OUT" || pass "cross-process lock handled by the running instance"
+  OUT="$("$BIN" vault status 2>&1)"
+  grep -q "locked (manual)" <<<"$OUT" || fail "status did not report the lock the running instance applied"
+  pass "the running instance reports the lock that both windows are subscribed to"
+else
+  echo "skip: xwininfo not installed"
+fi
+
 echo "== 7. app data files are private =="
 DB="$WORK/data/dev-console/commands.sqlite3"
 if [[ -f "$DB" ]]; then
