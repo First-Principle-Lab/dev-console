@@ -268,7 +268,7 @@ pub struct CopyResult {
     pub exclusion: ClipboardExclusion,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultState {
     pub unlocked: bool,

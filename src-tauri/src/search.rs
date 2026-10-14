@@ -207,6 +207,7 @@ mod tests {
         EntryMeta {
             id: id.to_string(),
             kind: crate::models::Kind::Command,
+            revision: 1,
             name: name.to_string(),
             entry_type: entry_type.to_string(),
             tags: tags.iter().map(|t| t.to_string()).collect(),

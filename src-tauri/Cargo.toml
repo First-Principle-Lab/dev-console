@@ -22,7 +22,10 @@ serde_json = "1"
 thiserror = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+age = { version = "0.12", default-features = false, features = ["armor"] }
+keyring = "4"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

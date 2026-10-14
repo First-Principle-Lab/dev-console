@@ -78,6 +78,7 @@ fn build(argv: Vec<String>) {
                 eprintln!("dev-console: tray unavailable ({error}); continuing without the icon");
             }
             clipboard::spawn_expiry_worker(Arc::clone(&state));
+            control::serve(app.handle(), Arc::clone(&state));
             match intent {
                 Intent::Finder => windows::show_finder(app.handle())?,
                 Intent::Background => {}
@@ -137,6 +138,7 @@ fn build(argv: Vec<String>) {
                     state.vault.clear_decrypted();
                     state.clipboard.clear_owned();
                 }
+                control::remove_socket();
                 windows::hide_all(app);
             }
         });

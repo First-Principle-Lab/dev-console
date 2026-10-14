@@ -23,7 +23,7 @@ pub struct Repository {
     conn: Mutex<Connection>,
 }
 
-fn now_rfc3339() -> String {
+pub fn now_rfc3339() -> String {
     OffsetDateTime::from(SystemTime::now())
         .format(&Rfc3339)
         .unwrap_or_default()

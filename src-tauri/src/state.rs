@@ -5,7 +5,7 @@ use crate::error::AppResult;
 use crate::models::{EntryMeta, Kind};
 use crate::repository::Repository;
 use crate::settings::SettingsStore;
-use crate::vault::VaultService;
+use crate::vault::{self as vault, VaultService};
 
 /// The single owner of persistence and vault state. Both windows talk to this through
 /// commands; neither window owns the database or the vault.
@@ -20,15 +20,21 @@ pub struct AppState {
 impl AppState {
     pub fn bootstrap() -> AppResult<Arc<AppState>> {
         let db = crate::paths::database_path()?;
+        let vault_file = crate::paths::vault_path()?;
         let lock_flag = crate::paths::lock_flag_path()?;
         let settings = crate::paths::settings_path()?;
-        Ok(Arc::new(AppState {
+        let state = AppState {
             repo: Repository::open(&db)?,
-            vault: VaultService::new(lock_flag),
+            vault: VaultService::new(vault_file, lock_flag, vault::Credential::FromKeyring),
             settings: SettingsStore::load(settings)?,
             clipboard: Clipboard::new(),
             quitting: std::sync::atomic::AtomicBool::new(false),
-        }))
+        };
+        // Opens the vault when the keyring is available and no manual lock is set. A manual
+        // lock, a locked keyring, or a damaged vault all leave secret features unavailable;
+        // commands stay usable in every one of those cases.
+        state.vault.bootstrap();
+        Ok(Arc::new(state))
     }
 
     /// Metadata only. Secret metadata is included solely while the vault is unlocked, and a

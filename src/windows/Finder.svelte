@@ -19,7 +19,7 @@
   let requestId = 0;
 
   const rows = $derived<SearchResult[]>(
-    vault && !vault.unlocked && vault.vaultAvailable
+    vault && !vault.unlocked
       ? [
           ...results,
           {

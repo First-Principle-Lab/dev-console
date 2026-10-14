@@ -6,7 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::*;
 use crate::repository::validate_draft;
 use crate::state::AppState;
-use crate::{execution, search, windows};
+use crate::{execution, search, tray, windows};
 
 /// Frontend windows are untrusted. Every privileged operation is re-checked here against the
 /// calling window label, so the restriction does not depend on hidden buttons or on the
@@ -163,11 +163,12 @@ pub fn get_entry(
         }
         Kind::Secret => {
             let record = state.vault.get(&request.id)?;
-            let usage = state.vault.read(|_, usage| {
-                Ok(usage
+            let usage = state.vault.read(|file| {
+                Ok(file
+                    .usage
                     .iter()
-                    .find(|(id, _, _)| id == &record.id)
-                    .map(|(_, c, l)| (*c, l.clone()))
+                    .find(|u| u.id == record.id)
+                    .map(|u| (u.count, u.last_used_at.clone()))
                     .unwrap_or((0, None)))
             })?;
             let mut details = details_from(&record, false, false);
@@ -274,8 +275,9 @@ pub fn copy_entry(
             Ok(result)
         }
         Kind::Secret => {
-            let result = state.vault.read(|records, _| {
-                let record = records
+            let result = state.vault.read(|file| {
+                let record = file
+                    .records
                     .iter()
                     .find(|r| r.id == request.id && r.kind == Kind::Secret)
                     .ok_or(AppError::NotFound)?;
@@ -322,7 +324,9 @@ pub fn lock_vault(app: AppHandle, _window: WebviewWindow) -> AppResult<VaultStat
     state.vault.lock()?;
     state.clipboard.clear_owned();
     emit_vault_state(&app);
-    Ok(state.vault.state())
+    let vault = state.vault.state();
+    let _ = tray::refresh_menu(&app);
+    Ok(vault)
 }
 
 #[tauri::command]
@@ -330,7 +334,9 @@ pub fn unlock_vault(app: AppHandle, _window: WebviewWindow) -> AppResult<VaultSt
     let state = state(&app);
     state.vault.unlock()?;
     emit_vault_state(&app);
-    Ok(state.vault.state())
+    let vault = state.vault.state();
+    let _ = tray::refresh_menu(&app);
+    Ok(vault)
 }
 
 #[tauri::command]
