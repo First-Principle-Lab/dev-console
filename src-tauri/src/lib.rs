@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod autostart;
+pub mod backup;
 pub mod cli;
 pub mod clipboard;
 pub mod control;
@@ -77,6 +78,18 @@ fn build(argv: Vec<String>) {
             if let Err(error) = tray::build(app.handle()) {
                 eprintln!("dev-console: tray unavailable ({error}); continuing without the icon");
             }
+            // Rotate a sealed backup at startup. A locked or unavailable vault cannot be
+            // backed up, and that is deliberately not an error: the app still starts and the
+            // library says so when backups are used.
+            if state.vault.is_unlocked() {
+                match state
+                    .build_archive()
+                    .and_then(|a| state.backups.create(&a, &state.vault))
+                {
+                    Ok(name) => eprintln!("dev-console: sealed backup written ({name})"),
+                    Err(error) => eprintln!("dev-console: startup backup skipped ({error})"),
+                }
+            }
             clipboard::spawn_expiry_worker(Arc::clone(&state));
             control::serve(app.handle(), Arc::clone(&state));
             match intent {
@@ -106,7 +119,12 @@ fn build(argv: Vec<String>) {
             ipc::quit_app,
             ipc::get_settings,
             ipc::save_settings,
-            ipc::open_settings
+            ipc::open_settings,
+            ipc::create_backup,
+            ipc::list_backups,
+            ipc::restore_backup,
+            ipc::export_archive,
+            ipc::import_archive
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -10,6 +10,7 @@
   const now = '2026-01-01T00:00:00Z';
 
   const state = {
+    backups: [],
     commands: (seed.commands || []).map((c) => ({ value: '', ...c })),
     secrets: (seed.secrets || []).map((s) => ({ command: '', workingDirectory: '', ...s })),
     vaultUnlocked: seed.vaultUnlocked !== false,
@@ -247,6 +248,27 @@
     if (command === 'cancel_quit') { return null; }
     if (command === 'quit_app') { state.quits += 1; return null; }
     if (command === 'get_settings') return clone(state.settings);
+    if (command === 'create_backup') {
+      if (!state.vaultUnlocked || state.manualLock) throw new Error('the vault is locked');
+      const name = `dev-console-backup-${state.backups.length + 1}.age`;
+      state.backups.push({ name, size: 20480, modifiedAtMs: Date.now() });
+      return name;
+    }
+    if (command === 'list_backups') return clone(state.backups);
+    if (command === 'restore_backup') {
+      const found = state.backups.find((b) => b.name === payload.name);
+      if (!found) throw new Error('that backup file could not be read');
+      emit('entries-changed', { kind: 'command', id: '', revision: 0, operation: 'reloaded', vaultGeneration: state.generation });
+      return { source: payload.name, commands: 2, secrets: 1 };
+    }
+    if (command === 'export_archive') {
+      if (!payload.path) throw new Error('choose a destination file first');
+      return 20480;
+    }
+    if (command === 'import_archive') {
+      if (!payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
+      return { source: payload.path, commands: 2, secrets: 1 };
+    }
     if (command === 'save_settings') { state.settings = clone(payload.settings); return clone(state.settings); }
     throw new Error(`unmocked command ${command}`);
   }

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use crate::backup::{Archive, BackupManager};
 use crate::clipboard::Clipboard;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::models::{EntryMeta, Kind};
 use crate::repository::Repository;
 use crate::settings::SettingsStore;
@@ -14,6 +15,7 @@ pub struct AppState {
     pub vault: VaultService,
     pub settings: SettingsStore,
     pub clipboard: Clipboard,
+    pub backups: BackupManager,
     pub quitting: std::sync::atomic::AtomicBool,
 }
 
@@ -28,6 +30,7 @@ impl AppState {
             vault: VaultService::new(vault_file, lock_flag, vault::Credential::FromKeyring),
             settings: SettingsStore::load(settings)?,
             clipboard: Clipboard::new(),
+            backups: BackupManager::new(crate::paths::backup_dir()?, crate::backup::DEFAULT_KEEP)?,
             quitting: std::sync::atomic::AtomicBool::new(false),
         };
         // Opens the vault when the keyring is available and no manual lock is set. A manual
@@ -35,6 +38,43 @@ impl AppState {
         // commands stay usable in every one of those cases.
         state.vault.bootstrap();
         Ok(Arc::new(state))
+    }
+
+    /// Collects everything into an archive. Requires an unlocked vault: a backup taken while
+    /// the vault is closed would look like a successful backup while silently containing no
+    /// secrets at all.
+    pub fn build_archive(&self) -> AppResult<Archive> {
+        self.vault.authorise()?;
+        let commands = self
+            .repo
+            .all_command_records()?
+            .into_iter()
+            .map(|(record, _, _)| record)
+            .collect();
+        Ok(Archive::new(commands, self.vault.snapshot()?))
+    }
+
+    /// Applies an already-validated archive. The vault is replaced first (its own write is
+    /// atomic and reverts itself on failure); if the command table then fails to load, the
+    /// previous command table is put back so the two stores never diverge.
+    pub fn apply_archive(&self, archive: &Archive) -> AppResult<(usize, usize)> {
+        self.vault.authorise()?;
+        let previous_commands: Vec<_> = self
+            .repo
+            .all_command_records()?
+            .into_iter()
+            .map(|(record, _, _)| record)
+            .collect();
+        self.vault.restore(archive.secrets.clone())?;
+        match self.repo.replace_all_commands(&archive.commands) {
+            Ok(commands) => Ok((commands, archive.secrets.records.len())),
+            Err(error) => {
+                let _ = self.repo.replace_all_commands(&previous_commands);
+                Err(AppError::Other(format!(
+                    "the archive's secrets were not applied ({error}); the previous data is intact"
+                )))
+            }
+        }
     }
 
     /// Metadata only. Secret metadata is included solely while the vault is unlocked, and a

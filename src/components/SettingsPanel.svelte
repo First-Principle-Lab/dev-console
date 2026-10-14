@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
-  import type { ClipboardExclusion, Settings } from '../lib/models';
+  import type { BackupInfo, ClipboardExclusion, Settings } from '../lib/models';
   import { applyTheme } from '../lib/state.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -10,12 +10,67 @@
   let exclusion = $state<ClipboardExclusion | null>(null);
   let error = $state<string | null>(null);
   let saved = $state(false);
+  let backups = $state<BackupInfo[]>([]);
+  let backupPath = $state('');
+  let backupBusy = $state(false);
+  let backupMessage = $state<string | null>(null);
+  let backupError = $state<string | null>(null);
+
+  async function refreshBackups(): Promise<void> {
+    try {
+      backups = await api.listBackups();
+    } catch (problem: unknown) {
+      backupError = String(problem);
+    }
+  }
+
+  async function runBackup(action: () => Promise<string>, done: string): Promise<void> {
+    if (!settings) return;
+    backupBusy = true;
+    backupError = null;
+    backupMessage = null;
+    try {
+      await action();
+      backupMessage = done;
+      await refreshBackups();
+    } catch (problem: unknown) {
+      backupError = String(problem);
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  function backUpNow(): void {
+    void runBackup(() => api.createBackup().then((name) => name), 'Encrypted backup written.');
+  }
+
+  function exportArchive(): void {
+    void runBackup(
+      () => api.exportArchive(backupPath).then((bytes) => String(bytes)),
+      `Archive exported to ${backupPath}.`
+    );
+  }
+
+  function restore(name: string): void {
+    void runBackup(
+      () => api.restoreBackup(name).then((out) => `${out.commands} commands, ${out.secrets} secrets`),
+      `Restored ${name}.`
+    );
+  }
+
+  function importArchive(): void {
+    void runBackup(
+      () => api.importArchive(backupPath).then((out) => `${out.commands} commands, ${out.secrets} secrets`),
+      `Imported ${backupPath}.`
+    );
+  }
 
   onMount(() => {
     void Promise.all([api.settings(), api.appState()])
       .then(([loaded, state]) => {
         settings = loaded;
         exclusion = state.clipboardExclusion;
+        void refreshBackups();
       })
       .catch((problem: unknown) => (error = String(problem)));
   });
@@ -77,6 +132,48 @@
       <p class="muted">Loading…</p>
     {/if}
 
+    <section class="backups" aria-label="Backups">
+      <h4>Backups</h4>
+      <p class="muted detail">
+        Backups and exports are encrypted with this machine's vault key. The newest
+        {backups.length ? backups.length : 0} are kept.
+      </p>
+      <div class="row">
+        <button onclick={backUpNow} disabled={backupBusy} data-testid="backup-now">Back up now</button>
+        <input
+          class="mono"
+          placeholder="/path/to/dev-console.age"
+          bind:value={backupPath}
+          aria-label="Archive path"
+          data-testid="archive-path"
+        />
+        <button onclick={exportArchive} disabled={backupBusy || !backupPath} data-testid="export-archive">
+          Export
+        </button>
+        <button onclick={importArchive} disabled={backupBusy || !backupPath} data-testid="import-archive">
+          Import
+        </button>
+      </div>
+      {#if backups.length}
+        <ul class="backup-list" data-testid="backup-list">
+          {#each backups as item (item.name)}
+            <li>
+              <span class="mono">{item.name}</span>
+              <span class="muted">{Math.round(item.size / 1024)} KB</span>
+              <button onclick={() => restore(item.name)} disabled={backupBusy} data-testid="restore-backup">
+                Restore
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="muted detail" data-testid="backup-empty">No backups yet.</p>
+      {/if}
+      {#if backupBusy}<p class="muted" role="status">Working…</p>{/if}
+      {#if backupMessage}<p class="muted" role="status" data-testid="backup-message">{backupMessage}</p>{/if}
+      {#if backupError}<p class="error-banner" role="alert" data-testid="backup-error">{backupError}</p>{/if}
+    </section>
+
     <p class="muted detail" data-testid="clipboard-exclusion">
       {#if exclusion}
         Clipboard history exclusion: {exclusion.mechanism} — {exclusion.detail}
@@ -127,5 +224,34 @@
   }
   .detail {
     font-size: 12px;
+  }
+  h4 {
+    margin: 8px 0 0;
+  }
+  .backups {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .backup-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 140px;
+    overflow: auto;
+  }
+  .backup-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .backup-list span:first-child {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

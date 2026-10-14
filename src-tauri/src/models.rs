@@ -327,3 +327,11 @@ pub struct WindowIntent {
     pub kind: Kind,
     pub entry_id: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupOutcome {
+    pub source: String,
+    pub commands: usize,
+    pub secrets: usize,
+}

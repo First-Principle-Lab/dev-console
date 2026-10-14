@@ -182,3 +182,15 @@ export function draftFromDetails(details: EntryDetails, kind: Kind): EntryDraft 
     value: entry.value ?? ''
   };
 }
+
+export interface BackupInfo {
+  name: string;
+  size: number;
+  modifiedAtMs: number;
+}
+
+export interface BackupOutcome {
+  source: string;
+  commands: number;
+  secrets: number;
+}

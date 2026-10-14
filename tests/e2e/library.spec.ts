@@ -120,3 +120,34 @@ test('narrow layout shows one pane instead of squeezing both', async ({ page }) 
   await page.getByTestId('entry-row').first().click();
   await expect(page.getByTestId('entry-details')).toBeVisible();
 });
+
+test('settings exposes encrypted backups: create, list, restore, and a rejected import', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('settings').click();
+  await expect(page.getByTestId('backup-empty')).toBeVisible();
+
+  await page.getByTestId('backup-now').click();
+  await expect(page.getByTestId('backup-message')).toContainText('Encrypted backup written');
+  await expect(page.getByTestId('backup-list').getByTestId('restore-backup')).toHaveCount(1);
+
+  await page.getByTestId('export-archive').waitFor();
+  await expect(page.getByTestId('export-archive')).toBeDisabled();
+  await page.getByTestId('archive-path').fill('/tmp/dev-console.age');
+  await page.getByTestId('export-archive').click();
+  await expect(page.getByTestId('backup-message')).toContainText('Archive exported');
+
+  await page.getByTestId('restore-backup').first().click();
+  await expect(page.getByTestId('backup-message')).toContainText('Restored dev-console-backup-1.age');
+
+  await page.getByTestId('archive-path').fill('/tmp/not-an-archive.txt');
+  await page.getByTestId('import-archive').click();
+  await expect(page.getByTestId('backup-error')).toContainText('not a valid Dev Console backup');
+});
+
+test('backups are refused while the vault is locked', async ({ page }) => {
+  await boot(page, SEED);
+  await page.evaluate(() => (window as unknown as { __mock: { lockVault: () => void } }).__mock.lockVault());
+  await page.getByTestId('settings').click();
+  await page.getByTestId('backup-now').click();
+  await expect(page.getByTestId('backup-error')).toContainText('the vault is locked');
+});

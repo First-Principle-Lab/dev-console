@@ -67,6 +67,12 @@ pub fn lock_flag_path() -> AppResult<PathBuf> {
     Ok(ensure_dir(&config_dir()?)?.join("manual-lock"))
 }
 
+/// Sealed backups live here (0700). The files inside are already encrypted, but the
+/// directory stays private so that neither backups nor their filenames leak to other users.
+pub fn backup_dir() -> AppResult<PathBuf> {
+    Ok(ensure_dir(&data_dir()?)?.join("backups"))
+}
+
 pub fn settings_path() -> AppResult<PathBuf> {
     Ok(ensure_dir(&config_dir()?)?.join("settings.json"))
 }

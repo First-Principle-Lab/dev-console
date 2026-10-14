@@ -346,6 +346,46 @@ impl Repository {
         Ok(())
     }
 
+    /// Replaces the whole command table with `records`, in one transaction. Used by archive
+    /// import, which validates everything before anything is applied.
+    pub fn replace_all_commands(&self, records: &[EntryRecord]) -> AppResult<usize> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let tx = conn.unchecked_transaction().map_err(AppError::storage)?;
+        tx.execute("DELETE FROM approvals", [])
+            .map_err(AppError::storage)?;
+        tx.execute("DELETE FROM usage", [])
+            .map_err(AppError::storage)?;
+        tx.execute("DELETE FROM entries WHERE kind='command'", [])
+            .map_err(AppError::storage)?;
+        let mut applied = 0;
+        for record in records {
+            tx.execute(
+                "INSERT INTO entries (id, kind, revision, name, type, tags, description, notes,
+                    fields, pinned, command, working_directory, created_at, updated_at)
+                 VALUES (?1,'command',?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                params![
+                    record.id,
+                    record.revision,
+                    record.name,
+                    record.entry_type,
+                    serde_json::to_string(&record.tags)?,
+                    record.description,
+                    record.notes,
+                    serde_json::to_string(&record.fields)?,
+                    record.pinned as i64,
+                    record.command,
+                    record.working_directory,
+                    record.created_at,
+                    record.updated_at
+                ],
+            )
+            .map_err(AppError::storage)?;
+            applied += 1;
+        }
+        tx.commit().map_err(AppError::storage)?;
+        Ok(applied)
+    }
+
     pub fn record_usage(&self, id: &str) -> AppResult<()> {
         let conn = self.conn.lock().expect("db lock poisoned");
         conn.execute(

@@ -7,6 +7,8 @@ import type {
   Kind,
   SavedEntry,
   SearchResponse,
+  BackupInfo,
+  BackupOutcome,
   Settings,
   VaultState
 } from './models';
@@ -43,6 +45,11 @@ export interface ListRequest {
 }
 
 export const api = {
+  createBackup: (): Promise<string> => call('create_backup'),
+  listBackups: (): Promise<BackupInfo[]> => call('list_backups'),
+  restoreBackup: (name: string): Promise<BackupOutcome> => call('restore_backup', { name }),
+  exportArchive: (path: string): Promise<number> => call('export_archive', { path }),
+  importArchive: (path: string): Promise<BackupOutcome> => call('import_archive', { path }),
   appState: (): Promise<AppStateInfo> => call('app_state'),
   search: (query: string, requestId: number): Promise<SearchResponse> =>
     call('search_entries', { request: { query, requestId } }),

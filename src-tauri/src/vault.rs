@@ -539,6 +539,19 @@ impl VaultService {
         self.read(|file| Ok(file.clone()))
     }
 
+    /// Encrypts bytes with this vault's own credential, for backups and exports.
+    pub fn seal(&self, plaintext: &[u8]) -> AppResult<Vec<u8>> {
+        let identity = self.resolve_identity()?;
+        encrypt_to(&[&identity], plaintext)
+    }
+
+    /// Opens something this vault sealed earlier. A foreign key fails here, and a failure
+    /// never modifies anything.
+    pub fn open_sealed(&self, ciphertext: &[u8]) -> AppResult<Vec<u8>> {
+        let identity = self.resolve_identity()?;
+        decrypt_with(&identity, ciphertext)
+    }
+
     /// Installs a decrypted snapshot as the new vault content (restore).
     pub fn restore(&self, file: VaultFile) -> AppResult<()> {
         let incoming = std::mem::take(&mut *self.file.lock().expect("vault file lock poisoned"));

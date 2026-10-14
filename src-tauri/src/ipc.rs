@@ -412,3 +412,91 @@ pub fn save_settings(
     }
     Ok(saved)
 }
+
+/// Emits one refresh signal after a bulk operation (backup restore or archive import).
+fn emit_reload_all(app: &AppHandle) {
+    emit_entries_changed(
+        app,
+        &SavedEntry {
+            id: String::new(),
+            revision: 0,
+            kind: Kind::Command,
+        },
+        "reloaded",
+    );
+    emit_vault_state(app);
+    let _ = tray::refresh_menu(app);
+}
+
+#[tauri::command]
+pub fn create_backup(app: AppHandle, window: WebviewWindow) -> AppResult<String> {
+    require_library(&window)?;
+    let state = state(&app);
+    let archive = state.build_archive()?;
+    state.backups.create(&archive, &state.vault)
+}
+
+#[tauri::command]
+pub fn list_backups(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> AppResult<Vec<crate::backup::BackupInfo>> {
+    require_library(&window)?;
+    state(&app).backups.list()
+}
+
+#[tauri::command]
+pub fn restore_backup(
+    app: AppHandle,
+    window: WebviewWindow,
+    name: String,
+) -> AppResult<BackupOutcome> {
+    require_library(&window)?;
+    let state = state(&app);
+    let archive = state.backups.read_backup(&name, &state.vault)?;
+    let (commands, secrets) = state.apply_archive(&archive)?;
+    emit_reload_all(&app);
+    Ok(BackupOutcome {
+        source: name,
+        commands,
+        secrets,
+    })
+}
+
+#[tauri::command]
+pub fn export_archive(app: AppHandle, window: WebviewWindow, path: String) -> AppResult<u64> {
+    require_library(&window)?;
+    if path.trim().is_empty() {
+        return Err(AppError::Validation(
+            "choose a destination file first".into(),
+        ));
+    }
+    let state = state(&app);
+    let archive = state.build_archive()?;
+    state
+        .backups
+        .export_to(std::path::Path::new(&path), &archive, &state.vault)?;
+    Ok(std::fs::metadata(&path)
+        .map(|m| m.len())
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn import_archive(
+    app: AppHandle,
+    window: WebviewWindow,
+    path: String,
+) -> AppResult<BackupOutcome> {
+    require_library(&window)?;
+    let state = state(&app);
+    let archive = state
+        .backups
+        .import_from(std::path::Path::new(&path), &state.vault)?;
+    let (commands, secrets) = state.apply_archive(&archive)?;
+    emit_reload_all(&app);
+    Ok(BackupOutcome {
+        source: path,
+        commands,
+        secrets,
+    })
+}
