@@ -288,6 +288,7 @@ pub struct AppStateInfo {
     pub version: String,
     pub authenticated_unlock_available: bool,
     pub clipboard_exclusion: ClipboardExclusion,
+    pub backup_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

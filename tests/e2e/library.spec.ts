@@ -121,7 +121,7 @@ test('narrow layout shows one pane instead of squeezing both', async ({ page }) 
   await expect(page.getByTestId('entry-details')).toBeVisible();
 });
 
-test('settings exposes encrypted backups: create, list, restore, and a rejected import', async ({ page }) => {
+test('settings exposes encrypted backups: create, list, reviewed restore, and a rejected import', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('settings').click();
   await expect(page.getByTestId('backup-empty')).toBeVisible();
@@ -136,10 +136,17 @@ test('settings exposes encrypted backups: create, list, restore, and a rejected 
   await page.getByTestId('export-archive').click();
   await expect(page.getByTestId('backup-message')).toContainText('Archive exported');
 
+  // Restore now goes through a review step: nothing is applied until confirmed.
   await page.getByTestId('restore-backup').first().click();
-  await expect(page.getByTestId('backup-message')).toContainText('Restored dev-console-backup-1.age');
+  await expect(page.getByTestId('review-card')).toBeVisible();
+  await expect(page.getByTestId('review-warning')).toContainText('replaces your entire library');
+  await page.getByTestId('review-cancel').click();
+  await expect(page.getByTestId('review-card')).toHaveCount(0);
+  await page.getByTestId('restore-backup').first().click();
+  await page.getByTestId('review-confirm').click();
+  await expect(page.getByTestId('backup-message')).toContainText('dev-console-backup-1.age');
 
-  await page.getByTestId('archive-path').fill('/tmp/not-an-archive.txt');
+  await page.getByTestId('import-path').fill('/tmp/not-an-archive.txt');
   await page.getByTestId('import-archive').click();
   await expect(page.getByTestId('backup-error')).toContainText('not a valid Dev Console backup');
 });

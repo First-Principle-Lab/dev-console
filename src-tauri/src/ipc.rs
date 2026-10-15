@@ -49,6 +49,7 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>, _window: WebviewWindow<R>) -> Ap
         version: app.package_info().version.to_string(),
         authenticated_unlock_available: crate::auth::mechanism_available(),
         clipboard_exclusion: crate::clipboard::exclusion_status(),
+        backup_dir: state(&app).backups.dir().to_string_lossy().to_string(),
     }
 }
 

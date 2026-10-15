@@ -11,6 +11,7 @@
 
   const state = {
     backups: [],
+    exportedPaths: [],
     commands: (seed.commands || []).map((c) => ({ value: '', ...c })),
     secrets: (seed.secrets || []).map((s) => ({ command: '', workingDirectory: '', ...s })),
     vaultUnlocked: seed.vaultUnlocked !== false,
@@ -146,7 +147,8 @@
         },
         version: 'mock',
         authenticatedUnlockAvailable: false,
-        clipboardExclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' }
+        clipboardExclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' },
+        backupDir: '/home/mock/.local/share/dev-console/backups'
       };
     }
     if (command === 'search_entries') {
@@ -261,8 +263,28 @@
       emit('entries-changed', { kind: 'command', id: '', revision: 0, operation: 'reloaded', vaultGeneration: state.generation });
       return { source: payload.name, commands: 2, secrets: 1 };
     }
+    if (command === 'inspect_backup') {
+      const found = state.backups.find((b) => b.name === payload.name);
+      if (!found) throw new Error('that backup file could not be read');
+      return { source: payload.name, createdAt: now, commands: state.commands.length, secrets: state.secrets.length, sizeBytes: found.size };
+    }
+    if (command === 'inspect_archive') {
+      if (!payload.path || !payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
+      return { source: payload.path, createdAt: now, commands: state.commands.length, secrets: state.secrets.length, sizeBytes: 20480 };
+    }
+    if (command === 'recovery_key') {
+      if (!state.vaultUnlocked || state.manualLock) throw new Error('the vault is locked');
+      return {
+        secret: 'AGE-SECRET-KEY-1SYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTH1',
+        path: '/home/mock/.config/dev-console/recovery.agekey'
+      };
+    }
     if (command === 'export_archive') {
       if (!payload.path) throw new Error('choose a destination file first');
+      if (state.exportedPaths.includes(payload.path) && !payload.overwrite) {
+        throw new Error('that file already exists - nothing was overwritten. choose another name, or confirm that the existing file may be replaced');
+      }
+      if (!state.exportedPaths.includes(payload.path)) state.exportedPaths.push(payload.path);
       return 20480;
     }
     if (command === 'import_archive') {

@@ -72,6 +72,26 @@ test('library with a long name and long values (overflow check)', async ({ page 
   await capture(page, '14-library-long-content', 1440, 900);
 });
 
+test('settings at the real library size and at the minimum window size', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('settings').click();
+  await page.getByTestId('settings-panel').waitFor();
+  await capture(page, '15-settings', 1040, 700);
+  await boot(page, SEED);
+  await page.getByTestId('settings').click();
+  await page.getByTestId('settings-panel').waitFor();
+  await capture(page, '15-settings-minimum', 760, 520);
+});
+
+test('settings import review card at the real library size', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('settings').click();
+  await page.getByTestId('import-path').fill('/tmp/portable-review.age');
+  await page.getByTestId('import-archive').click();
+  await page.getByTestId('review-card').waitFor();
+  await capture(page, '16-settings-import-review', 1040, 700);
+});
+
 const EMPTY = { commands: [], secrets: [] };
 
 /** Deliberately awkward content: long names, tags, values and paths must not break the layout. */

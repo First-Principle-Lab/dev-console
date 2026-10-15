@@ -105,6 +105,20 @@ export interface AppStateInfo {
   version: string;
   authenticatedUnlockAvailable: boolean;
   clipboardExclusion: ClipboardExclusion;
+  backupDir: string;
+}
+
+export interface ArchiveSummary {
+  source: string;
+  createdAt: string;
+  commands: number;
+  secrets: number;
+  sizeBytes: number;
+}
+
+export interface RecoveryKeyInfo {
+  secret: string;
+  path: string;
 }
 
 export interface ClipboardExclusion {
