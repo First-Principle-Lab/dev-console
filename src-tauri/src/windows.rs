@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -11,7 +11,7 @@ pub const FINDER: &str = "finder";
 
 /// Creates a window once and reuses it afterwards, so repeated launches never duplicate a
 /// window or a process.
-fn ensure(app: &AppHandle, label: &str, url: &str) -> AppResult<tauri::WebviewWindow> {
+fn ensure<R: Runtime>(app: &AppHandle<R>, label: &str, url: &str) -> AppResult<WebviewWindow<R>> {
     if let Some(window) = app.get_webview_window(label) {
         return Ok(window);
     }
@@ -39,7 +39,7 @@ fn ensure(app: &AppHandle, label: &str, url: &str) -> AppResult<tauri::WebviewWi
         .map_err(|error| AppError::Other(error.to_string()))
 }
 
-fn present(window: &tauri::WebviewWindow) -> AppResult<()> {
+fn present<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {
     let _ = window.unminimize();
     window.show().map_err(|e| AppError::Other(e.to_string()))?;
     window
@@ -48,13 +48,13 @@ fn present(window: &tauri::WebviewWindow) -> AppResult<()> {
     Ok(())
 }
 
-pub fn show_library(app: &AppHandle) -> AppResult<()> {
+pub fn show_library<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let window = ensure(app, LIBRARY, "index.html")?;
     present(&window)
 }
 
-pub fn show_library_with(
-    app: &AppHandle,
+pub fn show_library_with<R: Runtime>(
+    app: &AppHandle<R>,
     kind: crate::models::Kind,
     entry_id: Option<String>,
 ) -> AppResult<()> {
@@ -76,7 +76,7 @@ pub fn show_library_with(
     Ok(())
 }
 
-pub fn show_finder(app: &AppHandle) -> AppResult<()> {
+pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let window = ensure(app, FINDER, "index.html#view=finder")?;
     present(&window)?;
     // The frontend clears its query and refocuses the input on every appearance.
@@ -86,12 +86,12 @@ pub fn show_finder(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-pub fn hide(window: &tauri::WebviewWindow) -> AppResult<()> {
+pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {
     window.hide().map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Super+F semantics: a visible finder hides, anything else shows it.
-pub fn toggle_finder(app: &AppHandle) -> AppResult<()> {
+pub fn toggle_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     if let Some(window) = app.get_webview_window(FINDER) {
         if window.is_visible().unwrap_or(false) {
             return hide(&window);
@@ -100,7 +100,7 @@ pub fn toggle_finder(app: &AppHandle) -> AppResult<()> {
     show_finder(app)
 }
 
-pub fn hide_all(app: &AppHandle) {
+pub fn hide_all<R: Runtime>(app: &AppHandle<R>) {
     for label in [LIBRARY, FINDER] {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.hide();
@@ -111,7 +111,7 @@ pub fn hide_all(app: &AppHandle) {
 /// Quit is the only normal action that ends the resident app. The library gets a chance to
 /// resolve unsaved edits first; Quit still completes after a grace period so a dead webview
 /// cannot make the app unquittable.
-pub fn request_quit(app: &AppHandle) -> AppResult<()> {
+pub fn request_quit<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     app.state::<Arc<AppState>>()
         .quitting
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -130,7 +130,7 @@ pub fn request_quit(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-pub fn cancel_quit(app: &AppHandle) {
+pub fn cancel_quit<R: Runtime>(app: &AppHandle<R>) {
     app.state::<Arc<AppState>>()
         .quitting
         .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -138,7 +138,7 @@ pub fn cancel_quit(app: &AppHandle) {
 
 /// Flushes completed writes, clears decrypted vault state and app-owned clipboard content,
 /// then exits. Never opens or writes the vault.
-pub fn finish_quit(app: &AppHandle) -> AppResult<()> {
+pub fn finish_quit<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     {
         let state = app.state::<Arc<AppState>>();
         state.vault.clear_decrypted();
@@ -149,7 +149,7 @@ pub fn finish_quit(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-pub fn is_quitting(app: &AppHandle) -> bool {
+pub fn is_quitting<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.state::<Arc<AppState>>()
         .quitting
         .load(std::sync::atomic::Ordering::SeqCst)

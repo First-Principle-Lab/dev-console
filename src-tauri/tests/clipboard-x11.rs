@@ -16,20 +16,21 @@ fn synthetic(label: &str) -> String {
     format!("dev-console-{label}-{}", uuid::Uuid::new_v4())
 }
 
-fn skip_without_display() -> bool {
+/// There is deliberately no silent skip here: an ignored test that reports `ok` without ever
+/// touching an X selection would turn a missing environment into a false pass. These tests are
+/// `#[ignore]`d, so the only way to run them is on purpose - and running them on purpose without
+/// a display must say so loudly. `scripts/test-clipboard.sh` is what supplies Xvfb, and it exits
+/// 77 (UNVERIFIED) when Xvfb is missing rather than pretending.
+fn require_display() {
     if std::env::var_os("DISPLAY").is_none() {
-        eprintln!("skipping: no DISPLAY (run through scripts/test-clipboard.sh)");
-        return true;
+        panic!("no DISPLAY: these tests must run through scripts/test-clipboard.sh (which reports UNVERIFIED rather than passing when Xvfb is unavailable)");
     }
-    false
 }
 
 #[test]
 #[ignore = "needs a real X display and xclip"]
 fn a_copied_secret_is_pasteable_and_is_cleared_when_the_vault_locks() {
-    if skip_without_display() {
-        return;
-    }
+    require_display();
     let clip = Clipboard::new();
     let value = synthetic("secret");
     let result = clip
@@ -62,9 +63,7 @@ fn a_copied_secret_is_pasteable_and_is_cleared_when_the_vault_locks() {
 #[test]
 #[ignore = "needs a real X display and xclip"]
 fn the_app_never_clears_content_it_does_not_own() {
-    if skip_without_display() {
-        return;
-    }
+    require_display();
     let clip = Clipboard::new();
     let secret = synthetic("replaced");
     clip.copy(Kind::Secret, "record-2", &secret, 60)
@@ -84,9 +83,7 @@ fn the_app_never_clears_content_it_does_not_own() {
 #[test]
 #[ignore = "needs a real X display and xclip"]
 fn the_expiry_ticker_retracts_the_copy_and_only_then() {
-    if skip_without_display() {
-        return;
-    }
+    require_display();
     let clip = Clipboard::new();
     let secret = synthetic("expiry");
     // copy() clamps the window to at least five seconds, which is the shortest honest test.
@@ -108,9 +105,7 @@ fn the_expiry_ticker_retracts_the_copy_and_only_then() {
 #[test]
 #[ignore = "needs a real X display and xclip"]
 fn an_x11_session_reports_that_history_exclusion_is_unavailable() {
-    if skip_without_display() {
-        return;
-    }
+    require_display();
     let status = exclusion_status();
     assert!(!status.supported);
     assert_eq!(status.mechanism, "none");

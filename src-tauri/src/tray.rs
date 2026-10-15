@@ -1,6 +1,6 @@
 use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::error::{AppError, AppResult};
 use crate::models::Kind;
@@ -16,11 +16,11 @@ pub const ID_VAULT: &str = "vault-toggle";
 pub const ID_SETTINGS: &str = "settings";
 pub const ID_QUIT: &str = "quit";
 
-fn item(app: &AppHandle, id: &str, text: &str) -> AppResult<MenuItem<tauri::Wry>> {
+fn item<R: Runtime>(app: &AppHandle<R>, id: &str, text: &str) -> AppResult<MenuItem<R>> {
     MenuItem::with_id(app, id, text, true, None::<&str>).map_err(|e| AppError::Other(e.to_string()))
 }
 
-pub fn build_menu(app: &AppHandle, unlocked: bool) -> AppResult<Menu<tauri::Wry>> {
+pub fn build_menu<R: Runtime>(app: &AppHandle<R>, unlocked: bool) -> AppResult<Menu<R>> {
     let vault_text = if unlocked {
         "Lock vault"
     } else {
@@ -123,7 +123,7 @@ fn tooltip_text(unlocked: bool) -> String {
     )
 }
 
-pub fn refresh_menu(app: &AppHandle) -> AppResult<()> {
+pub fn refresh_menu<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };

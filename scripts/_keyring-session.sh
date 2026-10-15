@@ -29,7 +29,10 @@ secret-tool lookup service dev-console-probe account probe-key | grep -q synthet
 echo "secret-tool store and lookup OK"
 
 echo "== Dev Console keyring adapter (ignored tests: they need a real provider) =="
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- \
-  --nocapture --skip mock_ --ignored
+# Only the library's own provider probe runs here. The X11 clipboard and native-IPC suites are
+# ignored for their own reasons and are run by their own harnesses, which can supply the display
+# and the disposable profile they need.
+cargo test --manifest-path src-tauri/Cargo.toml --locked --lib -- \
+  --nocapture --ignored
 
 exit 0

@@ -54,6 +54,26 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> EntryDraft {
     }
 }
 
+/// A disposable profile per test, so a bare `cargo test` can never open (or create) the
+/// developer's own database, vault or settings.
+struct Profile(std::path::PathBuf);
+
+impl Profile {
+    fn new(tag: &str) -> Self {
+        let _guard = PROFILE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        Profile(dev_console_lib::paths::set_disposable_profile(tag))
+    }
+}
+
+impl Drop for Profile {
+    fn drop(&mut self) {
+        dev_console_lib::paths::remove_disposable_profile(&self.0);
+    }
+}
+
+/// The profile is process-global environment, so these tests take turns.
+static PROFILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn bootstrap() -> std::sync::Arc<AppState> {
     AppState::bootstrap().expect("backend bootstrap")
 }
@@ -61,6 +81,7 @@ fn bootstrap() -> std::sync::Arc<AppState> {
 #[test]
 #[ignore = "needs a real Secret Service provider, started by scripts/test-native-ipc.sh"]
 fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
+    let _profile = Profile::new("native-crud-restart");
     let state = bootstrap();
 
     // ---- commands: create, pin, usage ----
@@ -194,6 +215,7 @@ fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
 
 #[test]
 fn the_command_store_refuses_a_stale_writer_and_keeps_the_winner() {
+    let _profile = Profile::new("native-crud-conflict");
     let state = bootstrap();
     let mut base = draft(Kind::Command, "Contended", "echo base", "");
     let created = state.repo.save_command(&mut base).expect("create");

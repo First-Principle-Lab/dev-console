@@ -76,3 +76,37 @@ pub fn backup_dir() -> AppResult<PathBuf> {
 pub fn settings_path() -> AppResult<PathBuf> {
     Ok(ensure_dir(&config_dir()?)?.join("settings.json"))
 }
+
+/// Points both state directories at fresh 0700 temporary directories and returns their common
+/// parent.
+///
+/// Integration tests and the packaged smoke harness call this before bootstrapping, so a test
+/// run can never open (or create) a real user's database, vault or settings no matter what
+/// `XDG_DATA_HOME`/`HOME` the machine has. The harnesses may still pin the profile from outside
+/// with `DEV_CONSOLE_DATA_DIR`/`DEV_CONSOLE_CONFIG_DIR`; this only guarantees that a bare
+/// `cargo test` stays disposable.
+pub fn set_disposable_profile(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let unique = format!(
+        "dev-console-test-{tag}-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
+    let base = std::env::temp_dir().join(unique);
+    let data = base.join("data");
+    let config = base.join("config");
+    for dir in [&data, &config] {
+        std::fs::create_dir_all(dir).ok();
+        let _ = set_dir_private(dir);
+    }
+    // Safe here: the caller owns the process and calls this before any state is constructed.
+    std::env::set_var("DEV_CONSOLE_DATA_DIR", &data);
+    std::env::set_var("DEV_CONSOLE_CONFIG_DIR", &config);
+    base
+}
+
+/// Best-effort cleanup for `set_disposable_profile`.
+pub fn remove_disposable_profile(base: &std::path::Path) {
+    std::fs::remove_dir_all(base).ok();
+}

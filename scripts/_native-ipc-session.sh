@@ -27,8 +27,9 @@ for phase in default ignored; do
   chmod 700 "$DEV_CONSOLE_DATA_DIR" "$DEV_CONSOLE_CONFIG_DIR"
   args=(--test-threads=1)
   [[ "$phase" == "ignored" ]] && args+=(--ignored)
-  echo "== native backend tests ($phase) =="
-  if ! cargo test --manifest-path src-tauri/Cargo.toml --locked --test native-crud -- "${args[@]}"; then
+  echo "== native backend + two-window IPC tests ($phase) =="
+  if ! cargo test --manifest-path src-tauri/Cargo.toml --locked \
+    --test native-crud --test native-two-window -- "${args[@]}"; then
     failures=$((failures + 1))
   fi
 done
