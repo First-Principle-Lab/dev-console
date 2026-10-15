@@ -1,13 +1,11 @@
 # HANDOFF — Dev Console
 
 Exact source version: branch `codex/overnight-mvp` of
-https://github.com/parththirwani/dev-console. The binary in the release artifact was built
-from `673ed9c` (no code changed afterwards, only docs). App version 0.1.0.
-**Status at this writing:** PR #1 head is `7213142`; the PR review fixes described below sit in
-the local working tree **on top of that head, not yet committed or pushed**, and therefore are in
-no artifact.
+https://github.com/parththirwani/dev-console. The binary in the release artifact (rc3) was built
+from tag `v0.1.0-rc3` = commit `36736ef4e8eac0099424f4c205f179fb5c80194b`, which contains the
+PR #1 review fixes (`27e580c` code + `36736ef` docs). App version 0.1.0.
 
-## Changes since the rc2 artifact (PR #1 review fixes; working tree, not yet committed)
+## PR #1 review fixes (shipped in rc3)
 
 - The recovery credential is now a real secret end to end: `recovery_key` refuses while the
   vault is locked (also asserted over real two-window IPC), copying goes through the new
@@ -24,12 +22,11 @@ no artifact.
   scale, footer reachable at the 760x520 minimum. Five new e2e cases (56 total), each
   mutation-checked against its fix.
 
-How to verify once these land: fresh clone of the branch, `bash scripts/verify.sh` (expect
-"all checks passed": 18 vitest, 56 Playwright, 52 library tests, all harnesses), then
-`bunx tauri build --no-bundle` and `bash scripts/smoke-native.sh
-src-tauri/target/release/dev-console` (expect "ALL NATIVE SMOKE CHECKS PASSED"; this was
-already executed on the working tree - see TEST_REPORT.md's "PR #1 review fixes" section -
-but the clean-checkout round has to be repeated after the push).
+How this was verified (done at `36736ef`): fresh `git clone` of the branch, `bash scripts/verify.sh`
+→ "all checks passed" (18 vitest, 56 Playwright, 52 library tests, all harnesses green including
+native-IPC in both phases with the new mid-write SIGABRT test), then `bunx tauri build --no-bundle`
+and `bash scripts/smoke-native.sh` on the release binary → "ALL NATIVE SMOKE CHECKS PASSED"
+(log `/tmp/cora/verify-clean2.log`).
 
 ## Get, build, install, launch, test, uninstall
 
@@ -52,17 +49,16 @@ a Secret Service provider (`gnome-keyring` / KWallet over D-Bus) for vault stora
 (X11) or `wl-clipboard` (Wayland) for copies. Arch: `packaging/arch/PKGBUILD` (statically
 validated; `makepkg` has **not** been run anywhere yet).
 
-Pre-built artifact (draft release `v0.1.0-rc2`, supersedes rc1):
-`dev-console_0.1.0_amd64.deb` (2,557,002 bytes),
-SHA-256 `3c23ba673b1b9b45ea53f2a7becc14cbd7595ef015b7076310dc1615a629c535`. The upload →
+Pre-built artifact (draft release `v0.1.0-rc3`, supersedes rc2/rc1):
+`dev-console_0.1.0_amd64.deb` (2,566,894 bytes),
+SHA-256 `216323da9e8ee22e8f978a5ecd8b360d453b4d7298bc84cd0d337250a655bfc7`. The upload →
 download round trip was verified: the downloaded file passes `sha256sum -c` against the
-published `.sha256`, matches the build that was uploaded (note: `dpkg-deb` embeds file mtimes,
-so a rebuild is not byte-identical - reproducible packing is still owed), and is the exact
-binary that passed
-`scripts/smoke-native.sh` after extraction. The release stays a **draft** until the desktop
-checks below pass. **This artifact predates the PR #1 review fixes above; once they are
-committed, pushed and re-verified in a clean checkout, rebuild via `scripts/build-deb.sh` and
-publish as rc3 (the checksum on this line does not cover the review fixes).
+published `.sha256`, matches the build that was uploaded and the API-reported asset digest
+(note: `dpkg-deb` embeds file mtimes, so a rebuild is not byte-identical - reproducible packing
+is still owed), and the binary extracted from the downloaded package passed the full
+`scripts/smoke-native.sh` (live control channel, single-instance handoff, 0600 data files, real
+window render) - exit 0. The release stays a **draft** until the desktop
+checks below pass.
 
 ## Verified vs. not verified — read TEST_REPORT.md for the full table
 
@@ -86,18 +82,15 @@ step of `docs/packaging.md` runs.
 
 ## Remaining actions, in order
 
-1. Commit + push the PR #1 review fixes, re-run the full clean-checkout chain, rebuild the
-   deb + SHA-256, smoke the packaged binary and upload as `v0.1.0-rc3`; update the checksum
-   line above.
-2. CI: move `packaging/ci/github-actions.yml` to `.github/workflows/ci.yml` with a
+1. CI: move `packaging/ci/github-actions.yml` to `.github/workflows/ci.yml` with a
    `workflow`-scoped token and get one green run (C01/C23).
-3. Desktop session on the target Arch/Hyprland machine: execute the per-row remaining tests
+2. Desktop session on the target Arch/Hyprland machine: execute the per-row remaining tests
    for C03, C11, C12, C13, C15, C17, C20, C21, C22, plus the review-fix rehearsals
    (interrupted import, recovery reveal/copy with the login keyring); then publish the draft.
-4. Produce the Arch artifact with real `makepkg` + SHA-256 and attach it to the release (C02).
+3. Produce the Arch artifact with real `makepkg` + SHA-256 and attach it to the release (C02).
    Re-verified this session: `makepkg` does not exist on this host (no Arch container available).
-5. Settings UX (review-before-replace, recovery reveal, non-overwriting export, quoted terminal
+4. Settings UX (review-before-replace, recovery reveal, non-overwriting export, quoted terminal
    argv) is cloud-tested (11 e2e cases + screenshots); a human pass on the real desktop is
    still part of the desktop session above.
-6. Until 3 finishes, keep the PR draft: cloud implementation is finished and green, desktop
+5. Until 2 finishes, keep the PR draft: cloud implementation is finished and green, desktop
    verification is pending.

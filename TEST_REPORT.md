@@ -8,10 +8,12 @@ those C-numbers stay in the unverified set at the bottom.
 
 Tested commit: HEAD of `codex/overnight-mvp` containing this file (hash in `PROGRESS.md` →
 "UTC checkpoints"). The clean-checkout statements below were executed in a **fresh `git clone` of
-the pushed branch** (`/tmp/cora/clean-checkout`). **Exception:** the PR #1 review fixes are in the
-working tree on top of PR head `7213142` and were **not yet committed or pushed** when this file
-was last updated; every gate was re-run in that working tree (section "PR #1 review fixes" at the
-bottom) and the clean-checkout round must be repeated from a fresh clone once they land.
+the pushed branch** (`/tmp/cora/clean-checkout`). The PR #1 review fixes (section "PR #1 review
+fixes" at the bottom) are committed there as `27e580c` and were re-verified end-to-end in a
+**fresh clone of `36736ef`** - `bash scripts/verify.sh` "all checks passed", log
+`/tmp/cora/verify-clean2.log` - including the release compile, the native smoke and the deb
+stage; the deb was then uploaded as draft release `v0.1.0-rc3` and its downloaded copy was
+smoked from inside the package (`/tmp/cora/smoke-rc3.log`).
 Cloud environment, re-verified
 2026-10-15: Ubuntu 22.04.5 LTS container, x86_64, 4 CPUs, 3 GiB RAM + 6 GiB swapfile,
 rustc 1.99.0, bun 1.4.3 (node v24.21.0 exists on the image but the project never invokes
@@ -29,10 +31,10 @@ Executed stages, all green unless stated:
 | `bun run check` / `bun run lint` | 0 errors, 0 warnings / clean |
 | `bun run test` (vitest) | 13/13 at this table's first run; 18/18 since the argv suite (checkpoint 18) |
 | `bun run build:frontend` | ok |
-| Playwright E2E (`bunx playwright test`, 4 projects) | **43/43** at this table's first run; **51/51** after the Settings/review suites (`tests/e2e/settings.spec.ts`, 6 cases); **56/56** on the review-fix working tree (settings suite now 11 cases) |
+| Playwright E2E (`bunx playwright test`, 4 projects) | **43/43** at this table's first run; **51/51** after the Settings/review suites (`tests/e2e/settings.spec.ts`, 6 cases); **56/56** on the review-fix commits, re-run from a fresh clone of `36736ef` (settings suite now 11 cases) |
 | `cargo fmt --check` | ok |
 | `cargo clippy --all-targets --locked -- -D warnings` | clean |
-| `cargo test --locked` | 36 library tests + 1 ignored + native suites at this table's first run; **52 library tests + the provider/abort-ignored tests** on the review-fix working tree — and it no longer needs a Secret Service provider nor touches the user profile (provider tests are `#[ignore]`d and run under their own harnesses) |
+| `cargo test --locked` | 36 library tests + 1 ignored + native suites at this table's first run; **52 library tests + the provider/abort-ignored tests** on the review-fix commits (fresh clone of `36736ef`) — and it no longer needs a Secret Service provider nor touches the user profile (provider tests are `#[ignore]`d and run under their own harnesses) |
 | `scripts/test-keyring.sh` | exit 0: real `gnome-keyring-daemon` on a private bus, `real_keyring_round_trip` ok |
 | `scripts/test-clipboard.sh` | 4/4 incl. the 7 s expiry case, real X11 selection via xclip |
 | `scripts/test-packaging.sh` | "PACKAGING CHECKS PASSED" |
@@ -65,7 +67,7 @@ described at the bottom; nothing was silently skipped.
 | C15 | PASS (real X11 selection, cloud half) | `scripts/test-clipboard.sh` → 4/4 under Xvfb with a genuine selection owner: pasteable + cleared on lock, never clears content it does not own, expiry ticker retracts only after its window, exclusion honestly reported `supported: false / mechanism: none`. (The harness found a real defect: publishing only under `x-kde-passwordManagerHint` made secrets unpasteable; now ordinary text.) This suite previously *printed* "skipping" and still reported ok — it now hard-fails via `require_display()` so a missing display can never look like a pass. The Settings recovery-credential copy went through this same backend path in the review fixes (frontend no longer holds a `navigator.clipboard` shortcut; expiry label reflects the real ticker) | whether a clipboard history manager on the real desktop keeps a copy; Wayland `wl-copy` behaviour with the session manager in use |
 | C18 | PASS (cloud half) | Recovery credential: every archive is sealed to TWO age recipients (vault identity + a per-profile `recovery.agekey`, 0600, revealed only via explicit Settings action). Tests on real files: `a_recovery_credential_restores_an_archive_into_a_fresh_profile` (brand-new vault identity + recovery key opens the archive, records intact), `wrong_or_missing_recovery_credentials_are_rejected`, `a_recovery_key_is_created_once_kept_private_and_reusable`; plaintext marker scans still cover names/metadata/values. Atomicity: `apply_archive` = vault snapshot -> vault rename -> command table in one transaction, with rollback; fault-injected at EVERY stage - `a_command_table_fault_rolls_the_vault_back_on_disk_and_in_memory` proves both stores keep their previous data, and the failure path that cannot roll back now reports divergence honestly (the old false "previous data is intact" string is gone and a test forbids its return). Command JSON export/import round-trips inside the archive; Settings gained a review step (date + counts + replace warning + pre-restore backup, e2e) and non-overwriting export (unique O_EXCL staging file; the publish step is now an atomic `hard_link` that fails with EEXIST rather than clobbering a destination that appeared mid-export - test `a_destination_that_appears_mid_export_is_never_overwritten`). **Crash-recoverable replacement** (review fix): `recovery.rs` writes a journal file plus a `pending_apply` marker inside the `apply_state` table *in one SQLite transaction* before either store is touched; at startup the pending operation is completed or rolled back deterministically (journal absent/unmarked ⇒ completed; marked + journal present ⇒ roll back to the snapshot). `src-tauri/tests/interrupted-apply.rs` kills a real child process with SIGABRT at both boundaries and asserts exactly one complete version remains; an unreadable journal is quarantined (never deleted) and retried after the next unlock. Six new state.rs unit tests cover the decision table. | restore/backup rehearsal on the real desktop with the real keyring, incl. a real-device interrupted-import rehearsal |
 | C19 | PASS (packaging half) | `scripts/test-packaging.sh`: `desktop-file-validate` clean (source and installed), staged `DESTDIR`/`PREFIX` install places binary/launcher/0755 helper/polkit policy/4 icon sizes with expected modes, policy XML re-validated with `exec.path` rewritten to the prefix, uninstall removes **exactly** the manifest (foreign file survives, second uninstall refuses without a manifest). Two real defects were found by this harness (malformed policy XML; wrong rewrite target). `cargo test autostart::` covers the runtime autostart entry | logging into a real desktop: launcher appears and starts the app, icon cache, polkit actually prompts for the helper |
-| C02 | PASS (cloud .deb half) | `scripts/build-deb.sh`: staged install packed into `dev-console_0.1.0_amd64.deb` (2,549,908 B) + `.sha256`; extracted into a clean filesystem root (binary 0755, `desktop-file-validate` clean, polkit policy present, package metadata valid); **uploaded to draft release `v0.1.0-rc2` (rc1 was superseded by the Settings/recovery branch), downloaded back, `sha256sum -c` OK, downloaded hash identical to the build that was uploaded and to the API-reported asset digest**, and the downloaded binary extracted and run through the full `smoke-native.sh` (live control channel, single-instance handoff, 0600 data files, real window render) - exit 0. (Re-running `build-deb.sh` produced a differing hash: `dpkg-deb` embeds file mtimes, so byte-reproducible packing is an open improvement, not a claim.) | Arch `.pkg.tar.zst` via real `makepkg` (still owed, C02 Arch half); publishing the draft after the desktop checks; a real distro package-manager install with dependency resolution; reproducible deb packing |
+| C02 | PASS (cloud .deb half) | `scripts/build-deb.sh`: staged install packed into `dev-console_0.1.0_amd64.deb` (2,549,908 B) + `.sha256`; extracted into a clean filesystem root (binary 0755, `desktop-file-validate` clean, polkit policy present, package metadata valid); **uploaded to draft release `v0.1.0-rc2` (rc1 was superseded by the Settings/recovery branch), downloaded back, `sha256sum -c` OK, downloaded hash identical to the build that was uploaded and to the API-reported asset digest**, and the downloaded binary extracted and run through the full `smoke-native.sh` (live control channel, single-instance handoff, 0600 data files, real window render) - exit 0. **rc3 round (current artifact):** rebuilt from a fresh clone of `36736ef` (review fixes) - `dev-console_0.1.0_amd64.deb` 2,566,894 B, SHA-256 `216323da9e8ee22e8f978a5ecd8b360d453b4d7298bc84cd0d337250a655bfc7`, uploaded to **draft** `v0.1.0-rc3` (tag at the tested commit), server asset digest matches, downloaded back, `sha256sum -c` OK, and the binary extracted from the downloaded package passed the full `smoke-native.sh`. (Re-running `build-deb.sh` produced a differing hash: `dpkg-deb` embeds file mtimes, so byte-reproducible packing is an open improvement, not a claim.) | Arch `.pkg.tar.zst` via real `makepkg` (still owed, C02 Arch half); publishing the draft after the desktop checks; a real distro package-manager install with dependency resolution; reproducible deb packing |
 | C23 | PASS (push + artifact preservation half) | branch pushed with checkpoints; lockfiles committed (`src-tauri/Cargo.lock`, `bun.lock`); draft release `v0.1.0-rc1` created with the `.deb` + `.sha256` assets and a server-reported asset digest matching the local build | CI workflow green on a clean runner (token lacks `workflow` scope - re-verified this session, push to `.github/workflows/` still rejected); publishing the release after desktop checks |
 
 ## Not yet exercised (no status claimed)
@@ -132,10 +134,10 @@ the real build reports `UNVERIFIED: makepkg is not available on this host` (exit
 in the clean-checkout run above). **`makepkg` has not been run anywhere yet** — the AUR path is
 documented and statically validated, not built.
 
-## PR #1 review fixes (this session, working tree on top of `7213142`, NOT yet committed)
+## PR #1 review fixes (committed `27e580c`, shipped in `v0.1.0-rc3`)
 
-The PR #1 review handoff listed seven findings; all seven are addressed in the working tree and
-verified there. None of this is in a pushed commit or a release artifact yet.
+The PR #1 review handoff listed seven findings; all seven are addressed in `27e580c` and were
+first verified in the working tree there, then re-verified from a fresh clone of `36736ef`.
 
 | # | Finding | Fix | Test added (actually executed) |
 | --- | --- | --- | --- |
@@ -147,7 +149,9 @@ verified there. None of this is in a pushed commit or a release artifact yet.
 | 6 | Non-overwriting export still used `rename`, which clobbers a destination created mid-export | Publish via `std::fs::hard_link` (atomic EEXIST when the target appeared); staging stays O_EXCL-unique | `a_destination_that_appears_mid_export_is_never_overwritten` (backup.rs, real files) |
 | 7 | Settings type scale and minimum window: footer unreachable at 760×520, hardcoded font sizes | Token-based type/spacing (`--text`, `--text-sm`, `--sp-*`), `.body { min-height: 0 }` so the body owns scrolling | e2e scroll/footer cases; screenshots regenerated at 1040×700 and 760×520 and personally inspected (`artifacts/ui-review/after/15-*`) |
 
-Gates re-executed on this working tree (log `/tmp/cora/verify-fixed.log`): `bun run check` 0/0,
+Gates re-executed on this working tree (log `/tmp/cora/verify-fixed.log`), then re-executed from a
+fresh clone of the pushed result (log `/tmp/cora/verify-clean2.log`, `SKIP_*` flags none):
+`bun run check` 0/0,
 eslint clean, vitest **18/18**, Playwright **56/56**, `cargo fmt --check` ok, clippy
 `-D warnings` clean, `cargo test --locked` **52 library tests** + ignored suites ok, keyring
 harness exit 0, clipboard 4/4 on a real X11 selection, packaging green, native-IPC harness green
@@ -156,5 +160,5 @@ in **both** phases including the new abort test, then `bunx tauri build --no-bun
 capture at `artifacts/ui-review/native/native-library__xvfb.png`.
 
 Still honestly open for these fixes (environment-bound, not un-executed work): the interrupted-apply
-rehearsal on the target desktop, the real-keyring recovery reveal/copy session, and re-running the
-clean-checkout chain after these changes are committed and pushed.
+rehearsal on the target desktop and the real-keyring recovery reveal/copy session; the clean-checkout
+round and the rc3 artifact round trip were both executed on 2026-10-15/16.
