@@ -9,27 +9,28 @@ Unattended cloud run by Cora agent, started 2026-10-13, resumed 2026-10-14.
 - Working branch: `codex/overnight-mvp` (created from origin/main; no other codex/* branches exist on remote)
 - Never force-push, never merge to main automatically.
 
-## Cloud environment facts (re-verified 2026-10-14T15:35Z)
+## Cloud environment facts (re-verified 2026-10-15T17:25Z)
 
-The container was recreated between sessions; the toolchain recorded in the first session's notes had to be reinstalled.
+The container was recreated again between sessions and the toolchain was reinstalled a second time.
 
-- Ubuntu 22.04.5 (jammy) container, x86_64, **2 CPUs, 985 MiB RAM**, 27 GiB free disk.
-- Swap: `/swapfile` 6 GiB created with `fallocate` + `mkswap` + `swapon` (required: linking webkit2gtk OOMs without it). Not persistent across container restarts.
+- Ubuntu 22.04.5 (jammy) container, x86_64, **4 CPUs, 3 GiB RAM**, ample free disk.
+- Swap: `/swapfile` 6 GiB (`fallocate` + `mkswap` + `swapon`) - still required for release linking. Not persistent across container restarts.
 - `$HOME` is **not set** in this shell; every command must export `HOME=/root` (git credentials and cargo both need it).
-- Rust: rustup stable 1.99.0 with `rustfmt` + `clippy` at `/root/.cargo` (minimal profile).
-- Node v24.21.0. **Bun 1.4.3 is the package manager and task runner** (installed at $HOME/.bun/bin); `package-lock.json` is gone and `bun.lock` is committed. npm/npx are not used anywhere in the project.
-- Installed with apt for Tauri 2: `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev (2.50.4) libjavascriptcoregtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libsqlite3-dev libdbus-1-dev dbus dbus-x11 dbus-user-session xvfb xclip wl-clipboard gnome-keyring libsecret-tools libsecret-1-0 patchelf zstd file scrot x11-apps`.
+- Rust: rustup stable 1.99.0 with `rustfmt` + `clippy` at `/root/.cargo`.
+- **Bun 1.4.3 is the package manager and task runner** (installed at $HOME/.bun/bin via `curl -fsSL https://bun.sh/install | bash`; installing it through npm fails without `unzip`). `package-lock.json` is gone and `bun.lock` is committed. npm/npx are not used anywhere in the project (node v24.21.0 exists on the image but nothing invokes it).
+- Installed with apt for Tauri 2: `build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev (2.50.4) libjavascriptcoregtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev libsqlite3-dev libdbus-1-dev dbus dbus-x11 dbus-user-session xvfb xclip wl-clipboard gnome-keyring libsecret-tools libsecret-1-0 patchelf zstd file scrot x11-apps python3-dbus`, plus chromium runtime libs for Playwright (`libnspr4 libnss3 libasound2 fonts-liberation`).
 - No swap of the *user* keyring: `gnome-keyring-daemon` and `secret-tool` exist but no Secret Service provider is registered on a session bus unless we start one ourselves.
 - Not available: Hyprland/Wayland compositor, Waybar, polkit authentication agent, systemd user session/logind, real clipboard history manager.
+- Long-running commands: `setsid nohup ...` survives; a plain `nohup ... &` gets killed with the tool's shell.
 
 ## Implementation checklist (mirrors required checkpoint slices)
 
 - [x] S1 Tauri app boots natively: library + finder windows, tray menu, single instance, launch intent, close-vs-quit lifecycle
 - [x] S2 Command SQLite persistence + full library/editor
-- [~] S3 Finder ranking, keyboard completion, copy, details handoff — implemented and browser-tested; native IPC path exercised only partially
+- [x] S3 Finder ranking, keyboard completion, copy, details handoff - browser-tested and natively tested (real IPC dispatch across two windows + on-device copy through a real X11 selection)
 - [x] S4 Encrypted vault (age X25519), keyring credential + auto-unlock, persistent manual lock, authenticated unlock gate, live control channel (CLI talks to the running instance)
-- [ ] S5 Clipboard expiry/exclusion, execution, backups, settings, installer
-- [ ] S6 Full verification, CI, release artifacts, documentation, handoff
+- [~] S5 Clipboard expiry/exclusion, execution, backups, settings, installer - all implemented and cloud-tested; real-terminal launch, polkit prompt and package production remain desktop/host-side
+- [~] S6 Full verification, CI, release artifacts, documentation, handoff - full clean-checkout verification done; CI workflow cannot be enabled with the current token scope, no tagged artifacts yet
 
 ## Decisions and reasons
 
@@ -69,6 +70,23 @@ Per-criterion verdicts and evidence live in `TEST_REPORT.md` (C01–C24).
 | CLI vault | `dev-console vault status/lock` in isolated `DEV_CONSOLE_DATA_DIR`/`_CONFIG_DIR` | PASS: `unavailable` → exit 20, `lock` → exit 0, `status` → `locked (manual)` exit 10, flag file mode 0600 in a 0700 directory |
 | Native GUI | `xvfb-run` + `dbus-run-session` + `dev-console --library` | PASS: a real 1040×700 Tauri window appears (screenshot verified). Debug builds show the Vite dev URL, so this run does not render the app UI; the release binary is required for UI smoke evidence |
 
+## Clean-checkout full verification (2026-10-15T16:55Z-17:35Z, commit `d0022d6`)
+
+Run from a **fresh clone of the pushed branch** (`/tmp/cora/clean-checkout`), log at
+`/tmp/cora/verify-clean.log`:
+
+- `bash scripts/verify.sh` → **"all checks passed"**: `bun install --frozen-lockfile`,
+  svelte-check 0/0, eslint clean, vitest 13/13, production build, Playwright **43/43 (38.0s)**,
+  `cargo fmt --check`, clippy `-D warnings` clean, `cargo test --locked` green (36 lib + 1
+  ignored + native suites; the plain test run now needs no Secret Service provider and never
+  touches the user profile), keyring harness exit 0 (`real_keyring_round_trip` ok), clipboard
+  harness 4/4 on a real X11 selection, packaging "PACKAGING CHECKS PASSED", arch exit 77
+  (makepkg absent - reported as UNVERIFIED), native-IPC harness exit 0 in **both** phases.
+- `bunx tauri build --no-bundle` → 8.0 MB release binary; `bash scripts/smoke-native.sh` on it
+  → "ALL NATIVE SMOKE CHECKS PASSED" exit 0, **including step 6b** (one resident process
+  serving both windows, seen by the X server via `xwininfo`; cross-process lock observed by the
+  running instance) - the step that had been written but never executed in the previous session.
+
 ## Blockers and next steps
 
 - B1 (expected, permanent for this run): real Hyprland/Waybar/desktop-keyring/polkit-agent behavior cannot be exercised in this container → C11/C12/C13/C19/C20/C21 desktop portions will stay UNVERIFIED with exact test steps recorded. Cloud substitutes: headless gnome-keyring-daemon under an isolated session bus, file-state and code-path tests, negative polkit tests (no agent ⇒ unlock fails closed).
@@ -76,9 +94,14 @@ Per-criterion verdicts and evidence live in `TEST_REPORT.md` (C01–C24).
 
 ## Next (smallest concrete step)
 
-1. Drive the real UI of the release binary (keyboard-driven, no test double): create a command in the library, see it in the finder, reveal a secret, and confirm cross-window refresh — that closes the persistence/reveal/synchronisation halves of C04, C05 and C08 which currently rest on the Playwright IPC double.
-2. S5 remainder: backup rotation plus import/export (C18) - still the only outright missing feature.
-3. S6: CI workflow, release artifacts, README/how-to, and the final COMPLETION_CHECKLIST.md verdict per criterion.
+1. Enable CI: the workflow lives at `packaging/ci/github-actions.yml` because GitHub refuses
+   `.github/workflows/` pushes without a `workflow`-scoped token. Needs a token with that scope,
+   then the documented `git mv` and one green workflow run (C01's remaining line).
+2. Produce real installable packages (.deb via fpm/dpkg, .pkg.tar.zst via makepkg on an Arch
+   host) with SHA-256, installed and launched in a clean prefix (C02).
+3. Desktop session list for the owner: C03 tray, C11 login-keyring, C12 fresh login, C13 polkit
+   prompt, C15 clipboard manager, C17/C20 Hyprland focus/shortcut, C21 suspend/resume, C22
+   a11y + latency audit. Each row in `TEST_REPORT.md` names the exact steps.
 
 ## UTC checkpoints
 
@@ -101,4 +124,8 @@ Per-criterion verdicts and evidence live in `TEST_REPORT.md` (C01–C24).
   - Blocked by that, still to run once the disk is writable: `bunx tauri build --no-bundle` (release rebuild after the crate-type change), `bash scripts/smoke-native.sh <that binary>` including the new step 6b, `bash scripts/test-native-ipc.sh` as part of `scripts/verify.sh`, and the whole UI redesign pass.
 - 2026-10-14T17:40Z checkpoint 11 (UI redesign, packaging docs, CI): design tokens rewritten as a real dark-graphite + indigo system (single source of colour/spacing/radius/control height, light theme with the same names, loud `:focus-visible` ring, `cursor: pointer` on every control, `prefers-reduced-motion`, forced-colors fallback) and eleven reused components added (Button, Badge, Dialog, EmptyState, Icon, Keycap, StatusLine, Tabs, plus reworked EntryList/EntryDetails/EntryEditor/VaultStatus). Library gains tab counts and an accent underline, rich rows (kind glyph, pinned marker, type/tag chips, usage, relative updated time), a read-only inspector with grouped actions and a fixed-width secret mask that no longer leaks length, a sticky editor header with a dirty chip, and list-first navigation with a Back action under 900 px. The Finder became a framed 680x420 palette with ghost completion, a strong-but-restrained active row, kind badges, keycap footer, an explicit "Copied" state and a polished locked row. 37/37 Playwright including a new redesign suite; before/after review grid of 36 screenshots each at 1440/768/390 captured and inspected (five real defects found and fixed that way). Also added: `packaging/arch/PKGBUILD` + `scripts/test-arch-package.sh` (static half passes, `makepkg` not available so that half reports UNVERIFIED), `docs/packaging.md` (Arch/AUR install, Hyprland `Super+F` binding, and exactly what session lock does and does not do), `.github/workflows/ci.yml` (bun + cargo + harness jobs, 77 reported not hidden), and a README that describes the built app. Working in `/dev/shm/dev-console` because the container root filesystem went read-only; see the environment note above.
 - Push blocker worth remembering: GitHub refuses any push that creates a file under `.github/workflows/` unless the token carries the `workflow` scope ("refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope"). The pipeline is therefore committed as `packaging/ci/github-actions.yml` and the README documents the one-line `git mv` that enables it; the workflow itself is not claimed to have run.
+- 2026-10-15T15:05Z checkpoint 12 (commit `6fadc09`): the plain `cargo test --locked` run is now environment-free. Two defects made it lie: `native-crud.rs` needed a Secret Service provider that a bare `cargo test` cannot have (so CI would red), and both its tests wrote through `paths::profile_dir()` into the **real** user profile - it silently created `~/.local/share/dev-console/commands.sqlite3`. The provider-dependent tests are `#[ignore]`d with the reason in the attribute, `scripts/_native-ipc-session.sh` gained a `default` and an `ignored` phase (each in its own disposable profile via the new `paths::set_disposable_profile`), and the clipboard suite's fake passes ("printing skipping", reporting ok) became a hard `require_display()` failure.
+- 2026-10-15T15:50Z checkpoint 13 (commit `96dea89`): real two-window IPC coverage. `ipc.rs`/`windows.rs`/`tray.rs` are generic over `tauri::Runtime` (the `#[tauri::command]` macro tolerates it), so new `src-tauri/tests/native-two-window.rs` drives the **production handlers** through `tauri::test::get_ipc_response` across windows labelled `library` and `finder`: library-only commands rejected from the finder context, refresh events delivered to the other window, and an `#[ignore]`d variant doing the whole vault round trip over a real provider inside the mock runtime. The harness runs both phases; window-label authorization is no longer "emitted and assumed".
+- 2026-10-15T16:40Z checkpoint 14 (commit `d0022d6`): UI fixes found by personally opening every screenshot, each pinned by a new e2e test: flex rows could not ellipsize (long names/meta pushed tags out of the row - now inline truncating text + `tags.slice(0, 2)`); the locked vault drew a red error banner and a stale "Copied" status for an expected state (now a lock glyph in the tab, suppressed banner, status cleared on new search); a fresh editor showed validation warnings before any save attempt (now attempt-gated + `novalidate`, killing the native bubble that intercepted the styled error); stale `saveError` survived edits. Shared `src/lib/time.ts` (relative time with months/years, ISO tooltip); `test:e2e` now builds before serving (it had been passing against a stale `dist/`); e2e 37 → **43**; review grid extended to 38 after-shots incl. 680x420 palette and a long-content library.
+- 2026-10-15T17:35Z checkpoint 15: full clean-checkout verification (see the section above) - fresh clone, `verify.sh` all green, release compile, native smoke incl. the previously unexecuted step 6b. `TEST_REPORT.md` rewritten from this run; every remaining UNVERIFIED is environment-bound (makepkg, real desktop), not un-executed work.
 
