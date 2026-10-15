@@ -16,7 +16,11 @@
 //! and is recorded in PROGRESS.md.
 //!
 //! Run through `scripts/test-native-ipc.sh`, which starts the provider and the display and
-//! passes `--test-threads=1` (the state paths are process-global environment variables).
+//! passes `--ignored --test-threads=1` (the state paths are process-global environment
+//! variables). Both tests are `#[ignore]`d by default for the same reason the X11 clipboard
+//! suite is: `cargo test` on a machine without a Secret Service provider must stay green rather
+//! than report a failure that is really a missing environment, and the harness reports a
+//! missing provider as exit 77 (UNVERIFIED) instead.
 
 use dev_console_lib::models::{EntryDraft, ExtraField, FieldDisplay, Kind};
 use dev_console_lib::search;
@@ -55,6 +59,7 @@ fn bootstrap() -> std::sync::Arc<AppState> {
 }
 
 #[test]
+#[ignore = "needs a real Secret Service provider, started by scripts/test-native-ipc.sh"]
 fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
     let state = bootstrap();
 
