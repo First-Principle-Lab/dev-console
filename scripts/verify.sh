@@ -124,4 +124,17 @@ else
   fi
 fi
 
+echo "== .deb artifact: build, checksum, extract, validate =="
+if [[ "${SKIP_DEB_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_DEB_TEST=1)"
+else
+  code=0
+  SKIP_NATIVE_SMOKE=1 bash scripts/build-deb.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: dpkg-deb is not available here"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "all checks passed"

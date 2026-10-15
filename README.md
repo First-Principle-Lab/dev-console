@@ -144,7 +144,7 @@ makepkg -si                     # in packaging/arch (builds from the tagged sour
 
 For AUR use the same PKGBUILD with `source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")`.
 On other distributions `sudo PREFIX=/usr/local bash packaging/install.sh` installs the same
-file set (and writes an uninstall manifest, so `bash packaging/install.sh --uninstall` removes
+file set (and writes an uninstall manifest, so `sudo PREFIX=/usr/local bash packaging/install.sh uninstall` removes
 exactly what it placed). See `docs/packaging.md`.
 
 ## Layout
