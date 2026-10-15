@@ -25,6 +25,10 @@
 
   let tagInput = $state('');
   let valueVisible = $state(false);
+  // A brand-new entry has no type yet, so flagging that the moment the editor opens reads as a
+  // failure rather than as guidance. The hint and the invalid markers appear with the first save
+  // attempt; saving stays gated on the same validation either way.
+  let attempted = $state(false);
   const isCommand = $derived(draft.kind === 'command');
   const problem = $derived(validateDraft(draft));
 
@@ -35,11 +39,16 @@
   }
 </script>
 
+<!-- The app owns validation and its messaging: the native bubbles are unstyled, would be the
+     only error UI inside a borderless window, and would bypass the draft-preserving save path.
+     The fields keep `required` so the semantics stay in the accessibility tree. -->
 <form
   class="editor"
   data-testid="entry-editor"
+  novalidate
   onsubmit={(e) => {
     e.preventDefault();
+    attempted = true;
     onSave();
   }}
 >
@@ -69,8 +78,8 @@
     <p class="error-banner" role="alert" data-testid="save-error">
       <Icon name="alert" size={12} /> {error}
     </p>
-  {:else if problem}
-    <p class="hint warn" data-testid="validation-hint"><Icon name="alert" size={12} /> {problem}</p>
+  {:else if problem && attempted}
+    <p class="hint warn" role="alert" data-testid="validation-hint"><Icon name="alert" size={12} /> {problem}</p>
   {/if}
 
   <fieldset class="group">
@@ -78,11 +87,13 @@
     <div class="grid">
       <label class="field">
         <span class="label">Name</span>
-        <input bind:value={draft.name} data-testid="field-name" required autocomplete="off" />
+        <input bind:value={draft.name} data-testid="field-name" required autocomplete="off"
+          aria-invalid={attempted && draft.name.trim().length === 0} />
       </label>
       <label class="field">
         <span class="label">Type</span>
-        <input bind:value={draft.type} list="type-suggestions" data-testid="field-type" required autocomplete="off" />
+        <input bind:value={draft.type} list="type-suggestions" data-testid="field-type" required autocomplete="off"
+          aria-invalid={attempted && draft.type.trim().length === 0} />
         <datalist id="type-suggestions">
           {#each typeSuggestions as suggestion (suggestion)}
             <option value={suggestion}></option>

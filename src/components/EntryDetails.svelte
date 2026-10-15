@@ -4,6 +4,7 @@
   import Icon from './Icon.svelte';
   import ExtraFields from './ExtraFields.svelte';
   import type { EntryDetails as Details, Kind } from '../lib/models';
+  import { absoluteTime, relativeTime } from '../lib/time';
 
   let {
     details,
@@ -34,18 +35,6 @@
   // Fixed-width mask: the masked view must not leak the length of the secret.
   const masked = '•'.repeat(10);
 
-  function updated(iso: string): string {
-    const then = Date.parse(iso);
-    if (Number.isNaN(then)) return iso;
-    const minutes = Math.round((Date.now() - then) / 60000);
-    if (minutes < 1) return 'just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.round(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    return new Date(then).toLocaleDateString();
-  }
 </script>
 
 <article class="details" data-testid="entry-details">
@@ -67,7 +56,7 @@
           <Badge tone="status" icon="pin">Pinned</Badge>
         {/if}
         <Badge tone="status">r{meta.revision}</Badge>
-        <span class="muted when" title={meta.updatedAt}>updated {updated(meta.updatedAt)}</span>
+        <span class="muted when" title={absoluteTime(meta.updatedAt)}>updated {relativeTime(meta.updatedAt)}</span>
       </div>
     </div>
   </header>

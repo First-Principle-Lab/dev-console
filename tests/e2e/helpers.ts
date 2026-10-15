@@ -8,7 +8,13 @@ export async function boot(page: Page, seed: Record<string, unknown>, view = 'li
     (window as unknown as Record<string, unknown>).__devConsoleSeed = data;
   }, seed);
   await page.addInitScript({ path: MOCK });
-  await page.goto(`/${view === 'finder' ? 'index.html#view=finder' : 'index.html'}`);
+  const url = `/${view === 'finder' ? 'index.html#view=finder' : 'index.html'}`;
+  await page.goto(url);
+  // A goto() to the URL the page already has - same document, same fragment - does not reload
+  // it, so a second boot() on the same page would inherit the previous component state (a stale
+  // "Copied" banner, an open editor). Every boot must start from a fresh document, or a
+  // screenshot shows the previous test's state rather than the state under review.
+  await page.reload();
   await page.waitForFunction(() => '__devConsoleIpc' in window);
 }
 

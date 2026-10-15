@@ -20,15 +20,17 @@
   };
 
   const iconName = $derived(icon ?? defaults[tone]);
+  // Backend messages arrive as lowercase sentences; the UI speaks in sentences too.
+  const text = $derived(message.length > 0 ? message[0].toUpperCase() + message.slice(1) : message);
 </script>
 
 {#if tone === 'error'}
   <p class="error-banner" role="alert" data-testid="status-error">
-    <Icon name={iconName} size={12} /> {message}
+    <Icon name={iconName} size={12} /> {text}
   </p>
 {:else}
   <p class="status" data-tone={tone} role="status" data-testid="status">
-    <Icon name={iconName} size={12} /> <span class="truncate">{message}</span>
+    <Icon name={iconName} size={12} /> <span class="truncate">{text}</span>
   </p>
 {/if}
 

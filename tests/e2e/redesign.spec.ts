@@ -41,7 +41,7 @@ test('secret rows stay masked and are visibly a different kind', async ({ page }
   await page.getByTestId('tab-secrets').click();
   const row = page.getByTestId('entry-row').first();
   await expect(row).toContainText('Registry token');
-  await expect(row).toContainText('hidden');
+  await expect(row.getByLabel('Value hidden')).toBeVisible();
   const body = await page.content();
   expect(body).not.toContain('synthetic-value-1');
 });
@@ -122,4 +122,56 @@ test('narrow windows keep one pane with an explicit way back to the list', async
   await page.getByTestId('back-to-list').click();
   await expect(page.getByTestId('entry-details')).toHaveCount(0);
   await expect(page.getByTestId('entry-row')).toHaveCount(2);
+});
+
+test('a locked vault is presented as a state, never as an error', async ({ page }) => {
+  // It used to render a red failure banner for an expected condition, on top of the locked
+  // notice and the unlock action: three competing messages for one state.
+  await boot(page, SEED);
+  await page.getByTestId('tab-secrets').click();
+  await page.evaluate(() => (window as unknown as { __mock: { lockVault: () => void } }).__mock.lockVault());
+  await expect(page.getByTestId('status-error')).toHaveCount(0);
+  await expect(page.getByTestId('list-locked')).toBeVisible();
+  await expect(page.getByTestId('unlock-vault')).toBeVisible();
+});
+
+test('list rows show relative times and never overflow their own line', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('entry-row').first().click();
+  const meta = page.locator('[data-testid="entry-row"]').first().locator('.meta');
+  await expect(meta).toContainText(/ago$/);
+  const clipped = await page.$$eval('[data-testid="entry-row"] .meta', (nodes) =>
+    nodes.map((n) => ({ over: n.scrollWidth > n.clientWidth, text: n.textContent?.trim() }))
+  );
+  for (const row of clipped) {
+    expect(row.over, `metadata line clipped: ${row.text}`).toBe(false);
+  }
+});
+
+test('a fresh editor gives guidance on save, not a warning on open', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('add-entry').click();
+  await expect(page.getByTestId('validation-hint')).toHaveCount(0);
+  await expect(page.getByTestId('save-error')).toHaveCount(0);
+  await page.getByTestId('field-name').fill('No type yet');
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('save-error')).toContainText('Type is required.');
+  const after = await mockState(page);
+  expect(after.commands).toHaveLength(2);
+  // …and the hint follows further typing once the user has tried to save.
+  await page.getByTestId('field-type').fill('Shell');
+  await page.getByTestId('field-command').fill('make deploy');
+  await page.getByTestId('save').click();
+  const saved = await mockState(page);
+  expect(saved.commands).toHaveLength(3);
+});
+
+test('a copied confirmation does not describe the next search', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  await page.getByTestId('finder-input').fill('Deploy');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('finder-status')).toContainText('Copied');
+  // The window is reopened for an unrelated query; the old confirmation must not still be up.
+  await page.getByTestId('finder-input').fill('Reg');
+  await expect(page.getByTestId('finder-status')).toHaveCount(0);
 });

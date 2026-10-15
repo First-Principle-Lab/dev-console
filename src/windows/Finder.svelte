@@ -52,6 +52,9 @@
     const id = ++requestId;
     loading = true;
     error = null;
+    // A "Copied" confirmation belongs to the query it happened for; leaving it on screen under a
+    // different query reads as a statement about the new one.
+    status = null;
     try {
       const response = await api.search(next, id);
       // Ignore any response for a query the user has already replaced.

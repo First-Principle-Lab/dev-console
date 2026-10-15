@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Badge from './Badge.svelte';
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
   import type { EntryMeta } from '../lib/models';
+  import { absoluteTime, relativeTime } from '../lib/time';
 
   let {
     entries,
@@ -21,19 +21,6 @@
     kind: 'command' | 'secret';
     onSelect: (entry: EntryMeta) => void;
   } = $props();
-
-  function updated(iso: string): string {
-    const then = Date.parse(iso);
-    if (Number.isNaN(then)) return '';
-    const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
-    if (minutes < 1) return 'just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.round(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.round(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    return new Date(then).toLocaleDateString();
-  }
 
   function usage(entry: EntryMeta): string {
     if (entry.usageCount === 1) return 'used once';
@@ -87,19 +74,24 @@
           </span>
           <span class="meta truncate">
             <span class="type">{entry.type}</span>
-            {#each entry.tags.slice(0, 3) as tag (tag)}
+            {#each entry.tags.slice(0, 2) as tag (tag)}
               <span class="tag">#{tag}</span>
             {/each}
             <span class="dot" aria-hidden="true">·</span>
             <span>{usage(entry)}</span>
             {#if entry.updatedAt}
               <span class="dot" aria-hidden="true">·</span>
-              <span>{updated(entry.updatedAt)}</span>
+              <span title={absoluteTime(entry.updatedAt)}>{relativeTime(entry.updatedAt)}</span>
             {/if}
           </span>
         </span>
         {#if entry.kind === 'secret'}
-          <Badge tone="secret">hidden</Badge>
+          <!-- A wide "hidden" pill ate enough width that the updated time ellipsised away on
+               every secret row at the default pane width. The glyph says the same thing here,
+               and the detail pane spells the rule out in full. -->
+          <span class="masked" title="Value hidden" role="img" aria-label="Value hidden">
+            <Icon name="lock" size={11} />
+          </span>
         {/if}
       </div>
     {/each}
@@ -153,11 +145,16 @@
     gap: 1px;
     min-width: 0;
     flex: 1;
+    /* The ellipsis needs a little air before the trailing badge, otherwise the clipped
+       character reads as the end of the word. */
+    padding-right: var(--sp-2);
   }
+  /* The name and metadata lines clip with a real ellipsis. A flex container cannot ellipsize its
+     own overflow, which is why the review screenshots showed rows cut mid-word with a dangling
+     separator; these lines are inline text, so the `.truncate` utility only works on them while
+     they are laid out inline. */
   .name {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-1);
+    display: block;
     color: var(--fg);
     font-size: var(--text);
     font-weight: 550;
@@ -165,13 +162,16 @@
   .pin {
     color: var(--accent);
     display: inline-flex;
+    vertical-align: -1px;
+    margin-right: 3px;
   }
   .meta {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    display: block;
     color: var(--fg-muted);
     font-size: var(--text-xs);
+  }
+  .meta > * + * {
+    margin-left: 5px;
   }
   .type {
     color: var(--fg-muted);
@@ -181,6 +181,18 @@
   }
   .dot {
     color: var(--fg-dim);
+  }
+  .masked {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    border: var(--border);
+    border-color: var(--secret-accent);
+    border-radius: 999px;
+    background: var(--secret-soft);
+    color: var(--secret-accent);
   }
   .locked-note {
     display: flex;

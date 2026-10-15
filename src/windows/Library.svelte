@@ -43,6 +43,7 @@
   let baseline = $state('');
   let saving = $state(false);
   let saveError = $state<string | null>(null);
+  let saveErrorDraft = $state('');
   let status = $state<string | null>(null);
   let pendingDelete = $state<EntryMeta | null>(null);
   let pendingRun = $state<Details | null>(null);
@@ -53,6 +54,16 @@
   let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
 
   const draftDirty = $derived(JSON.stringify(draft) !== baseline);
+
+  // A validation message describes the draft as it was when saving was attempted. Once the user
+  // edits, keeping it on screen reads as if the new text is still wrong.
+  $effect(() => {
+    if (!saveError) return;
+    if (JSON.stringify(draft) !== saveErrorDraft) saveError = null;
+  });
+  // A locked vault hides secret metadata. That is the designed state, never a failure: the list
+  // pane shows the notice and the detail pane the single unlock action, so no banner is added.
+  const secretMetadataHidden = $derived(tab === 'secret' && vault !== null && !vault.unlocked);
   const meta = $derived(entries.find((e) => e.id === selectedId) ?? null);
 
   function message(error: unknown, fallback: string): string {
@@ -107,9 +118,14 @@
       if (selectedId) await loadDetails(selectedId);
       else details = null;
     } catch (error: unknown) {
-      listError = message(error, 'Could not load entries.');
-      entries = [];
-      details = null;
+      if (secretMetadataHidden && /locked/i.test(message(error, ''))) {
+        entries = [];
+        details = null;
+      } else {
+        listError = message(error, 'Could not load entries.');
+        entries = [];
+        details = null;
+      }
     } finally {
       loading = false;
     }
@@ -122,7 +138,9 @@
       baseline = JSON.stringify(draftFromDetails(details, tab));
       if (mode === 'edit') mode = 'view';
     } catch (error: unknown) {
-      listError = message(error, 'Could not load the selected entry.');
+      if (!secretMetadataHidden || !/locked/i.test(message(error, ''))) {
+        listError = message(error, 'Could not load the selected entry.');
+      }
       details = null;
     }
   }
@@ -188,6 +206,7 @@
   }
 
   async function saveDraft(): Promise<void> {
+    saveErrorDraft = JSON.stringify(draft);
     const problem = validateDraft(draft);
     if (problem) {
       saveError = problem;
@@ -391,7 +410,7 @@
         {
           id: 'secret',
           label: 'Secrets',
-          count: tab === 'secret' && vault && !vault.unlocked ? null : counts.secret,
+          count: secretMetadataHidden ? null : counts.secret,
           icon: 'secret',
           testId: 'tab-secrets'
         }
@@ -415,8 +434,8 @@
     </div>
   </div>
 
-  {#if listError}
-    <StatusLine tone={/locked/i.test(listError) ? 'warn' : 'error'} message={listError} />
+  {#if listError && !(secretMetadataHidden && /locked/i.test(listError))}
+    <StatusLine tone="error" message={listError} />
   {:else if status}
     <StatusLine tone={status.startsWith('Copied') || status.startsWith('Saved') || status.startsWith('Deleted') || status.startsWith('Launched') ? 'ok' : 'info'} message={status} />
   {/if}
@@ -429,7 +448,7 @@
           {selectedId}
           {loading}
           kind={tab}
-          locked={tab === 'secret' && vault ? !vault.unlocked : false}
+          locked={secretMetadataHidden}
           emptyText={query
             ? 'Nothing matches this filter. Clear the search or add a new entry.'
             : tab === 'secret'

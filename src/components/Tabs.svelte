@@ -47,7 +47,13 @@
     >
       <Icon name={item.icon} size={13} />
       <span>{item.label}</span>
-      <span class="count" aria-label="{item.count ?? 0} entries">{item.count ?? '—'}</span>
+      {#if item.count === null}
+        <span class="count" title="Count hidden while the vault is locked" aria-label="Count hidden while the vault is locked">
+          <Icon name="lock" size={10} />
+        </span>
+      {:else}
+        <span class="count" aria-label="{item.count} entries">{item.count}</span>
+      {/if}
     </button>
   {/each}
 </div>
@@ -98,6 +104,9 @@
     padding: 1px 6px;
     min-width: 20px;
     text-align: center;
+  }
+  .count :global(svg) {
+    display: block;
   }
   .tab.active .count {
     color: var(--accent);

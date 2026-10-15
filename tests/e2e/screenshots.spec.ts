@@ -59,7 +59,52 @@ const SEED = {
   ]
 };
 
+test('finder at the real palette size (680x420)', async ({ page }) => {
+  // The Finder ships as a 680x420 borderless window; reviewing it inside a 1440px page shows the
+  // shell but not how the palette actually sits at the size it is created with.
+  await boot(page, SEED, 'finder');
+  await capture(page, '13-finder-palette-680x420', 680, 420);
+});
+
+test('library with a long name and long values (overflow check)', async ({ page }) => {
+  await boot(page, LONG);
+  await page.getByTestId('entry-row').first().click();
+  await capture(page, '14-library-long-content', 1440, 900);
+});
+
 const EMPTY = { commands: [], secrets: [] };
+
+/** Deliberately awkward content: long names, tags, values and paths must not break the layout. */
+const LONG = {
+  commands: [
+    {
+      id: 'L1', revision: 9,
+      name: 'Rebuild and republish the staging image for the payments service with verbose logging',
+      type: 'Docker / compose with a very long custom type name',
+      tags: ['work', 'ci', 'payments', 'europe-west1', 'needs-review'],
+      description: 'Recreates the compose project, runs migrations and smoke-tests the health endpoint before switching the traffic over.',
+      notes: 'Only from the VPN.\nThe bastion key must already be loaded.\n\nssh-add ~/.ssh/id_ed25519_work',
+      fields: [
+        { id: 'f1', label: 'URL', value: 'https://staging.payments.example.test/very/long/path/that/keeps/going?query=aaaaaaaaaaaaaaaaaaaaaaaa', display: 'link' },
+        { id: 'f2', label: 'Environment', value: 'europe-west1/staging/payments', display: 'text' }
+      ],
+      pinned: true,
+      command: 'DOCKER_BUILDKIT=1 docker compose -f compose.yml -f compose.staging.yml build --pull payments && docker compose up -d --force-recreate payments',
+      workingDirectory: '/home/user/src/very/long/project/path/services/payments-api',
+      usageCount: 1284, updatedAt: ago(2)
+    }
+  ],
+  secrets: [
+    {
+      id: 'L2', revision: 2,
+      name: 'Very long named production signing key for the payments service',
+      type: 'PEM private key', tags: ['prod', 'payments'],
+      description: '', notes: '', fields: [], pinned: false,
+      value: 'synthetic-long-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      updatedAt: ago(7200)
+    }
+  ]
+};
 
 const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
