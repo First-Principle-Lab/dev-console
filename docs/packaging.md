@@ -40,12 +40,13 @@ UNVERIFIED rather than pretending the package was built.
 
 ```bash
 bunx tauri build --no-bundle
-sudo PREFIX=/usr/local bash packaging/install.sh          # stages, validates, installs
-sudo bash packaging/install.sh --uninstall                # removes exactly what it placed
+sudo PREFIX=/usr/local bash packaging/install.sh install    # stages, validates, installs
+sudo PREFIX=/usr/local bash packaging/install.sh uninstall  # removes exactly what it placed
 ```
 
 `packaging/install.sh` writes a manifest (`/usr/local/share/dev-console/installed-files`) so
-uninstall never guesses, and it refuses to run without one.
+uninstall never guesses, and it refuses to run without one. (`install` and `uninstall` are
+positional arguments - `--uninstall` is not accepted and exits with a usage error.)
 
 ## Launcher entry
 
@@ -84,15 +85,50 @@ guarantees locally:
   successfully**, so a failed unlock leaves the lock exactly where it was (covered by
   `vault::tests::a_failed_unlock_keeps_the_manual_lock_and_the_flag_file`).
 
-To move both states together, run the lock command from your locker's pre-hook:
+To move both states together, put the lock command in your **locker's own** pre-hook (not in
+`hyprland.conf`):
 
 ```ini
-# hyprland.conf, with hyprlock
-exec-once = hyprctl dispatch ... ; and in hyprlock.cfg: before_lock_cmd = dev-console vault lock
+# hyprlock.cfg  (hyprlock >= 0.6)
+[GENERAL]
+before_lock_cmd = dev-console vault lock
 ```
 
-or with `swaylock`: `swaylock -C ... && dev-console vault lock` in whatever script your compositor
-binds to the lock key. `dev-console vault status` reports the state in either case.
+with `swaylock` it is a command hook in its config or wrapper:
+
+```ini
+# swaylock-style wrapper script bound to your lock key
+dev-console vault lock
+exec swaylock
+```
+
+`dev-console vault status` (exit 10 means locked) lets you verify from a terminal that the hook
+actually fired. This pairing is **UNVERIFIED on real hardware**: the vault-side guarantees are
+covered by tests (`vault::tests::a_failed_unlock_keeps_the_manual_lock_and_the_flag_file`,
+`manual_lock_survives_a_restart_and_blocks_every_secret_operation`), but no Hyprland/hyprlock
+session has run the hook yet, so do not treat screen lock and vault lock as proven to be paired.
+
+## Desktop acceptance checklist (must be run on the owner's Arch/Hyprland machine)
+
+Every item below is UNVERIFIED by design - this container has no Wayland compositor, no
+Waybar, no polkit agent and no logind - and the release stays a draft until they pass:
+
+1. `Super+F` (the `bind = SUPER, F, exec, dev-console --finder` line above) raises the Finder
+   from anywhere, toggles it away, and never steals focus from a fullscreen window.
+2. Tray menu under the status-notifier: Show Library, Show Finder, Lock, Quit all act on the
+   resident instance.
+3. `before_lock_cmd = dev-console vault lock` fires on screen lock: after locking and
+   unlocking the screen, `dev-console vault status` reports `locked (manual)` (exit 10), and
+   the Finder refuses secret search until unlock.
+4. Unlock through the UI prompts polkit (the `ai.codemate.devconsole.unlock` action), a
+   cancelled prompt keeps the vault locked, and unrelated keyring items are untouched.
+5. Copy a secret, paste it into an app, wait past the configured expiry: the selection is
+   retracted; confirm whether your clipboard history manager kept a copy regardless (the app
+   reports exclusion as unavailable on X11 and cannot prevent it).
+6. Login keyring: after a fresh graphical login (no manual start), opening the library
+   auto-unlocks the vault without any prompt beyond the session's own.
+7. `makepkg -si` from `packaging/arch` builds and installs; the desktop entry launches it;
+   `dev-console vault lock` + relaunch still shows `locked (manual)`.
 
 ## polkit
 
