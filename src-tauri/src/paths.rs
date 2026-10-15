@@ -77,6 +77,13 @@ pub fn settings_path() -> AppResult<PathBuf> {
     Ok(ensure_dir(&config_dir()?)?.join("settings.json"))
 }
 
+/// Where the recovery credential lives. Unlike the vault key (OS keyring, never exportable),
+/// this file is meant to be copied somewhere safe: it is the only way to open an archive
+/// after the original keyring is gone. 0600, config directory, shown in Settings.
+pub fn recovery_key_path() -> AppResult<PathBuf> {
+    Ok(ensure_dir(&config_dir()?)?.join("recovery.agekey"))
+}
+
 /// Points both state directories at fresh 0700 temporary directories and returns their common
 /// parent.
 ///

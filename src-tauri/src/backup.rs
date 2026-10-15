@@ -1,9 +1,10 @@
 //! Encrypted backups, export and import.
 //!
 //! An **archive** is one JSON document holding the command records and the whole decrypted
-//! vault. It is sealed with the vault's own age credential before it ever reaches the
-//! filesystem, so a backup directory, an exported file, or a USB stick never contains readable
-//! commands or secrets. Nothing here writes an unsealed archive, and there is no unsealed
+//! vault. It is sealed to **two** age recipients - the vault's own credential and the profile's
+//! recovery credential ([`RecoveryKey`]) - before it ever reaches the filesystem, so a backup
+//! directory, an exported file, or a USB stick never contains readable commands or secrets,
+//! and losing the original keyring never loses the archives. Nothing here writes an unsealed archive, and there is no unsealed
 //! staging file anywhere in the flow: sealing happens in memory and the ciphertext goes through
 //! an atomic rename into place.
 //!
@@ -97,6 +98,114 @@ impl Seal for KeySeal {
     }
 }
 
+/// A second, exportable credential for archives. Generated once per profile, stored 0600 in
+/// the config directory, and shown in Settings so the owner can keep it somewhere completely
+/// independent of the keyring. Every archive is sealed to **both** the vault identity and this
+/// identity, so losing the original keyring never loses the backups: a fresh profile can open
+/// them with the recovery credential alone.
+pub struct RecoveryKey {
+    path: PathBuf,
+    secret: String,
+}
+
+impl RecoveryKey {
+    pub fn load_or_create(path: PathBuf) -> AppResult<RecoveryKey> {
+        if path.exists() {
+            let secret = std::fs::read_to_string(&path)
+                .map_err(|_| {
+                    AppError::Other(
+                        "the recovery credential file exists but could not be read".into(),
+                    )
+                })?
+                .trim()
+                .to_string();
+            // Refuse to hand out a corrupt credential.
+            crate::vault::parse_identity(&secret)?;
+            crate::paths::set_file_private(&path)?;
+            return Ok(RecoveryKey { path, secret });
+        }
+        let (_, secret) = crate::vault::generate_identity();
+        // 0600 from the very first byte - never world-readable, even briefly.
+        write_private(&path, secret.as_bytes())?;
+        Ok(RecoveryKey { path, secret })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn secret(&self) -> &str {
+        &self.secret
+    }
+
+    pub fn identity(&self) -> AppResult<Identity> {
+        crate::vault::parse_identity(&self.secret)
+    }
+}
+
+/// The seal every archive goes through: sealed to the vault identity *and* the recovery
+/// identity, openable with either one.
+pub struct ArchiveSeal {
+    primary: Identity,
+    recovery: Identity,
+}
+
+impl ArchiveSeal {
+    pub fn new(vault: &VaultService, recovery: &RecoveryKey) -> AppResult<ArchiveSeal> {
+        Ok(ArchiveSeal {
+            primary: vault.identity()?,
+            recovery: recovery.identity()?,
+        })
+    }
+
+    /// Offline construction (tests, future recovery tooling): any two age secrets.
+    pub fn from_secrets(primary: &str, recovery: &str) -> AppResult<ArchiveSeal> {
+        Ok(ArchiveSeal {
+            primary: crate::vault::parse_identity(primary)?,
+            recovery: crate::vault::parse_identity(recovery)?,
+        })
+    }
+}
+
+impl Seal for ArchiveSeal {
+    fn seal(&self, plaintext: &[u8]) -> AppResult<Vec<u8>> {
+        crate::vault::encrypt_to(&[&self.primary, &self.recovery], plaintext)
+    }
+
+    fn open(&self, ciphertext: &[u8]) -> AppResult<Vec<u8>> {
+        match crate::vault::decrypt_with(&self.primary, ciphertext) {
+            Ok(plaintext) => Ok(plaintext),
+            Err(primary_error) => {
+                crate::vault::decrypt_with(&self.recovery, ciphertext).map_err(|_| primary_error)
+            }
+        }
+    }
+}
+
+/// What a backup or export file contains - read without applying anything, for the review
+/// step in Settings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveSummary {
+    pub source: String,
+    pub created_at: String,
+    pub commands: usize,
+    pub secrets: usize,
+    pub size_bytes: u64,
+}
+
+impl ArchiveSummary {
+    fn of(source: &str, archive: &Archive, size_bytes: u64) -> ArchiveSummary {
+        ArchiveSummary {
+            source: source.to_string(),
+            created_at: archive.created_at.clone(),
+            commands: archive.commands.len(),
+            secrets: archive.secrets.records.len(),
+            size_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInfo {
@@ -184,14 +293,27 @@ impl BackupManager {
         open_archive(&bytes, seal)
     }
 
+    /// Review-before-apply for generated backups. Same read-only guarantee as [`Self::read_backup`].
+    pub fn inspect_backup(&self, name: &str, seal: &dyn Seal) -> AppResult<ArchiveSummary> {
+        if !is_ours(name) {
+            return Err(AppError::Validation("not a Dev Console backup name".into()));
+        }
+        let path = self.dir.join(name);
+        let bytes = std::fs::read(&path)
+            .map_err(|_| AppError::Other("that backup file could not be read".into()))?;
+        let archive = open_archive(&bytes, seal)?;
+        Ok(ArchiveSummary::of(name, &archive, bytes.len() as u64))
+    }
+
     pub fn export_to(
         &self,
         destination: &Path,
         archive: &Archive,
         seal: &dyn Seal,
+        allow_overwrite: bool,
     ) -> AppResult<()> {
         let bytes = seal.seal(&archive.to_json()?)?;
-        write_private(destination, &bytes)
+        write_private_mode(destination, &bytes, allow_overwrite)
     }
 
     /// Decrypts and validates an exported file without touching live data. Wrong keys, corrupt
@@ -200,6 +322,19 @@ impl BackupManager {
         let bytes = std::fs::read(source)
             .map_err(|_| AppError::Other("the selected file could not be read".into()))?;
         open_archive(&bytes, seal)
+    }
+
+    /// Review-before-apply for exports: opens the archive read-only and reports its date and
+    /// counts. Nothing in this path can modify live data.
+    pub fn inspect_file(&self, source: &Path, seal: &dyn Seal) -> AppResult<ArchiveSummary> {
+        let bytes = std::fs::read(source)
+            .map_err(|_| AppError::Other("the selected file could not be read".into()))?;
+        let archive = open_archive(&bytes, seal)?;
+        Ok(ArchiveSummary::of(
+            &source.to_string_lossy(),
+            &archive,
+            bytes.len() as u64,
+        ))
     }
 
     /// Keeps the newest `keep` backups. Files this manager did not create are never removed.
@@ -231,8 +366,8 @@ fn is_ours(name: &str) -> bool {
 fn open_archive(bytes: &[u8], seal: &dyn Seal) -> AppResult<Archive> {
     let plaintext = seal.open(bytes).map_err(|_| {
         AppError::VaultUnavailable(
-            "the file could not be decrypted with this machine's key (wrong machine, wrong key, \
-             or the file is damaged)"
+            "the file could not be decrypted with this machine's key or its recovery \
+             credential (wrong archive, wrong credential, or the file is damaged)"
                 .into(),
         )
     })?;
@@ -288,27 +423,65 @@ fn validate(archive: &Archive) -> AppResult<()> {
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
+    write_private_mode(path, bytes, false)
+}
+
+/// Atomic 0600 write. The staging file is unique per call (O_EXCL in the destination
+/// directory, so concurrent writers can never clobber each other's partial file), is removed
+/// on any failure, and only ever reaches its destination through a same-directory rename.
+/// An existing destination is refused unless the caller says the user confirmed the replace -
+/// exports must never silently overwrite.
+fn write_private_mode(path: &Path, bytes: &[u8], allow_overwrite: bool) -> AppResult<()> {
+    if path.exists() && !allow_overwrite {
+        return Err(AppError::Other(
+            "that file already exists - nothing was overwritten. choose another name, or \
+             confirm that the existing file may be replaced"
+                .into(),
+        ));
     }
-    let tmp = path.with_extension("part");
+    let parent = path.parent().ok_or_else(|| {
+        AppError::Validation("the destination path has no directory to write into".into())
+    })?;
+    std::fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AppError::Validation("the destination has no file name".into()))?
+        .to_string_lossy()
+        .to_string();
+    let tmp = parent.join(format!(
+        ".{}.{}.{}.part",
+        file_name,
+        std::process::id(),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    ));
     {
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
+        let mut file = match std::fs::OpenOptions::new()
+            .create_new(true)
             .write(true)
             .mode(0o600)
             .open(&tmp)
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        file.write_all(bytes)
-            .map_err(|e| AppError::Other(e.to_string()))?;
-        file.sync_all()
-            .map_err(|e| AppError::Other(e.to_string()))?;
+        {
+            Ok(file) => file,
+            Err(e) => return Err(AppError::Other(e.to_string())),
+        };
+        match file.write_all(bytes).and_then(|()| file.sync_all()) {
+            Ok(()) => {}
+            Err(e) => {
+                drop(file);
+                std::fs::remove_file(&tmp).ok();
+                return Err(AppError::Other(e.to_string()));
+            }
+        }
     }
     crate::paths::set_file_private(&tmp)?;
-    std::fs::rename(&tmp, path).map_err(|e| AppError::Other(e.to_string()))?;
-    Ok(())
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            std::fs::remove_file(&tmp).ok();
+            Err(AppError::Other(e.to_string()))
+        }
+    }
 }
 
 fn chrono_like_stamp() -> String {
@@ -489,7 +662,7 @@ mod tests {
 
         let export = dir.0.join("portable.age");
         manager
-            .export_to(&export, &archive(), &key)
+            .export_to(&export, &archive(), &key, false)
             .expect("export");
         assert!(manager.import_from(&export, &other).is_err());
         assert!(manager.import_from(&export, &key).is_ok());
@@ -506,7 +679,7 @@ mod tests {
             .expect("a real backup exists first");
         let export = dir.0.join("portable.age");
         manager
-            .export_to(&export, &archive(), &key)
+            .export_to(&export, &archive(), &key, false)
             .expect("export");
         let sealed = std::fs::read(&export).expect("read export");
 
@@ -530,7 +703,7 @@ mod tests {
         };
         let newer_path = dir.0.join("newer.age");
         manager
-            .export_to(&newer_path, &newer, &key)
+            .export_to(&newer_path, &newer, &key, false)
             .expect("export newer");
         let error = manager
             .import_from(&newer_path, &key)
@@ -563,7 +736,9 @@ mod tests {
             ..archive()
         };
         let path = dir.0.join("duplicate.age");
-        manager.export_to(&path, &duplicate, &key).expect("export");
+        manager
+            .export_to(&path, &duplicate, &key, false)
+            .expect("export");
         assert!(manager.import_from(&path, &key).is_err());
 
         let nameless = Archive {
@@ -575,12 +750,165 @@ mod tests {
             ..archive()
         };
         let path = dir.0.join("nameless.age");
-        manager.export_to(&path, &nameless, &key).expect("export");
+        manager
+            .export_to(&path, &nameless, &key, false)
+            .expect("export");
         assert!(manager.import_from(&path, &key).is_err());
 
         // A backup name from outside the manager's own directory is refused outright.
         assert!(manager.read_backup("../escape.age", &key).is_err());
         assert!(manager.read_backup("/etc/passwd", &key).is_err());
+        dir.erase();
+    }
+
+    fn identity_pair() -> (String, String) {
+        let (identity, secret) = crate::vault::generate_identity();
+        drop(identity);
+        let (other, other_secret) = crate::vault::generate_identity();
+        drop(other);
+        (secret, other_secret)
+    }
+
+    #[test]
+    fn a_recovery_credential_restores_an_archive_into_a_fresh_profile() {
+        let dir = Dir::new();
+        let (original_key, _) = identity_pair();
+        let (recovery_secret, _) = identity_pair();
+
+        // Old profile: seal exactly the way the app does - vault identity + recovery identity.
+        let old_seal = ArchiveSeal::from_secrets(&original_key, &recovery_secret).expect("seal");
+        let export = dir.0.join("portable.age");
+        BackupManager::new(dir.0.join("backups"), 4)
+            .expect("manager")
+            .export_to(&export, &archive(), &old_seal, false)
+            .expect("export");
+
+        // Fresh profile: the original keyring is gone and this machine generated a brand-new
+        // vault identity. The recovery credential alone must open the archive.
+        let (fresh_key, _) = identity_pair();
+        let fresh_seal =
+            ArchiveSeal::from_secrets(&fresh_key, &recovery_secret).expect("fresh seal");
+        let manager = dir.manager(4);
+        let restored = manager
+            .import_from(&export, &fresh_seal)
+            .expect("recovery open");
+        assert_eq!(restored.commands.len(), 1);
+        assert_eq!(restored.secrets.records.len(), 1);
+        assert_eq!(restored.secrets.records[0].name, "Registry token");
+        assert_eq!(restored.secrets.records[0].value, "UNIQUE-SECRET-marker");
+        // ...and the original credential still works too (sealed to both recipients).
+        assert!(manager.import_from(&export, &old_seal).is_ok());
+        dir.erase();
+    }
+
+    #[test]
+    fn wrong_or_missing_recovery_credentials_are_rejected() {
+        let dir = Dir::new();
+        let (original_key, _) = identity_pair();
+        let (recovery_secret, other_recovery) = identity_pair();
+        let (fresh_key, _) = identity_pair();
+        let seal = ArchiveSeal::from_secrets(&original_key, &recovery_secret).expect("seal");
+        let export = dir.0.join("portable.age");
+        dir.manager(4)
+            .export_to(&export, &archive(), &seal, false)
+            .expect("export");
+
+        // Wrong recovery credential, brand-new vault identity: refused.
+        let wrong = ArchiveSeal::from_secrets(&fresh_key, &other_recovery).expect("seal");
+        let failure = dir
+            .manager(4)
+            .import_from(&export, &wrong)
+            .expect_err("wrong recovery key must fail");
+        assert!(failure.to_string().contains("recovery credential"));
+
+        // Fresh machine without the recovery credential at all: also refused (a new profile's
+        // own vault key must never open someone else's archive).
+        let none = KeySeal::from_secret(&fresh_key).expect("seal");
+        assert!(dir.manager(4).import_from(&export, &none).is_err());
+        // A wrong recovery credential must not even leak the plaintext into the summary path.
+        assert!(dir.manager(4).inspect_file(&export, &wrong).is_err());
+        dir.erase();
+    }
+
+    #[test]
+    fn a_recovery_key_is_created_once_kept_private_and_reusable() {
+        let dir = Dir::new();
+        let path = dir.0.join("recovery.agekey");
+        let first = RecoveryKey::load_or_create(path.clone()).expect("create");
+        let second = RecoveryKey::load_or_create(path.clone()).expect("load");
+        assert_eq!(first.secret(), second.secret(), "the credential is stable");
+        assert!(first.secret().starts_with("AGE-SECRET-KEY-1"));
+        let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the recovery file must be private");
+
+        // It really is the recipient the archives use.
+        let archive_seal =
+            ArchiveSeal::from_secrets(&crate::vault::generate_identity().1, first.secret())
+                .expect("seal");
+        let export = dir.0.join("portable.age");
+        dir.manager(4)
+            .export_to(&export, &archive(), &archive_seal, false)
+            .expect("export");
+        let opener =
+            ArchiveSeal::from_secrets(&crate::vault::generate_identity().1, second.secret())
+                .expect("reopen");
+        assert!(dir.manager(4).import_from(&export, &opener).is_ok());
+        dir.erase();
+    }
+
+    #[test]
+    fn an_export_never_silently_overwrites_and_leaves_no_staging_files() {
+        let dir = Dir::new();
+        let (key, _) = Dir::keys();
+        let manager = dir.manager(4);
+        let export = dir.0.join("portable.age");
+        manager
+            .export_to(&export, &archive(), &key, false)
+            .expect("first export");
+        let first_bytes = std::fs::read(&export).expect("read");
+
+        // Second export to the same destination: refused, original bytes untouched.
+        let failure = manager
+            .export_to(&export, &archive(), &key, false)
+            .expect_err("must not overwrite silently");
+        assert!(failure.to_string().contains("already exists"));
+        assert_eq!(std::fs::read(&export).expect("reread"), first_bytes);
+
+        // Only an explicit confirmation replaces the file.
+        manager
+            .export_to(&export, &archive(), &key, true)
+            .expect("confirmed export");
+        assert!(!std::fs::read(&export).expect("read again").is_empty());
+
+        // No `.part` staging leftovers anywhere in the directory.
+        for entry in std::fs::read_dir(&dir.0).expect("read dir") {
+            let name = entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .to_string();
+            assert!(
+                !name.starts_with('.') && !name.ends_with(".part"),
+                "staging file left behind: {name}"
+            );
+        }
+        dir.erase();
+    }
+
+    #[test]
+    fn inspect_reports_date_and_counts_without_touching_anything() {
+        let dir = Dir::new();
+        let (key, _) = Dir::keys();
+        let manager = dir.manager(4);
+        let name = manager.create(&archive(), &key).expect("create");
+        let summary = manager.inspect_backup(&name, &key).expect("inspect");
+        assert_eq!(summary.commands, 1);
+        assert_eq!(summary.secrets, 1);
+        assert!(summary.size_bytes > 0);
+        assert!(!summary.created_at.is_empty());
+        assert!(manager.inspect_backup("../escape.age", &key).is_err());
+        // Inspection is read-only: still exactly one backup afterwards.
+        assert_eq!(manager.list().expect("list").len(), 1);
         dir.erase();
     }
 }

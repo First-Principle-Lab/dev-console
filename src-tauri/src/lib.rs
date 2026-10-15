@@ -123,6 +123,9 @@ fn build(argv: Vec<String>) {
             ipc::create_backup,
             ipc::list_backups,
             ipc::restore_backup,
+            ipc::inspect_backup,
+            ipc::inspect_archive,
+            ipc::recovery_key,
             ipc::export_archive,
             ipc::import_archive
         ])

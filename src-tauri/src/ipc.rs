@@ -450,7 +450,8 @@ pub fn create_backup<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) ->
     require_library(&window)?;
     let state = state(&app);
     let archive = state.build_archive()?;
-    state.backups.create(&archive, &state.vault)
+    let seal = state.archive_seal()?;
+    state.backups.create(&archive, &seal)
 }
 
 #[tauri::command]
@@ -470,7 +471,8 @@ pub fn restore_backup<R: Runtime>(
 ) -> AppResult<BackupOutcome> {
     require_library(&window)?;
     let state = state(&app);
-    let archive = state.backups.read_backup(&name, &state.vault)?;
+    let seal = state.archive_seal()?;
+    let archive = state.backups.read_backup(&name, &seal)?;
     let (commands, secrets) = state.apply_archive(&archive)?;
     emit_reload_all(&app);
     Ok(BackupOutcome {
@@ -480,11 +482,65 @@ pub fn restore_backup<R: Runtime>(
     })
 }
 
+/// Review-before-apply for a generated backup: date and counts, no side effects.
+#[tauri::command]
+pub fn inspect_backup<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    name: String,
+) -> AppResult<crate::backup::ArchiveSummary> {
+    require_library(&window)?;
+    let state = state(&app);
+    let seal = state.archive_seal()?;
+    state.backups.inspect_backup(&name, &seal)
+}
+
+/// Review-before-apply for an exported archive file: date and counts, no side effects.
+#[tauri::command]
+pub fn inspect_archive<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+) -> AppResult<crate::backup::ArchiveSummary> {
+    require_library(&window)?;
+    if path.trim().is_empty() {
+        return Err(AppError::Validation("choose a file first".into()));
+    }
+    let state = state(&app);
+    let seal = state.archive_seal()?;
+    state
+        .backups
+        .inspect_file(std::path::Path::new(&path), &seal)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryKeyInfo {
+    pub secret: String,
+    pub path: String,
+}
+
+/// The recovery credential, so the owner can store it somewhere independent of this
+/// machine. Library window only; the UI keeps it behind an explicit reveal with warnings.
+#[tauri::command]
+pub fn recovery_key<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<RecoveryKeyInfo> {
+    require_library(&window)?;
+    let state = state(&app);
+    Ok(RecoveryKeyInfo {
+        secret: state.recovery.secret().to_string(),
+        path: state.recovery.path().to_string_lossy().to_string(),
+    })
+}
+
 #[tauri::command]
 pub fn export_archive<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     path: String,
+    overwrite: Option<bool>,
 ) -> AppResult<u64> {
     require_library(&window)?;
     if path.trim().is_empty() {
@@ -494,9 +550,13 @@ pub fn export_archive<R: Runtime>(
     }
     let state = state(&app);
     let archive = state.build_archive()?;
-    state
-        .backups
-        .export_to(std::path::Path::new(&path), &archive, &state.vault)?;
+    let seal = state.archive_seal()?;
+    state.backups.export_to(
+        std::path::Path::new(&path),
+        &archive,
+        &seal,
+        overwrite.unwrap_or(false),
+    )?;
     Ok(std::fs::metadata(&path)
         .map(|m| m.len())
         .unwrap_or_default())
@@ -510,9 +570,10 @@ pub fn import_archive<R: Runtime>(
 ) -> AppResult<BackupOutcome> {
     require_library(&window)?;
     let state = state(&app);
+    let seal = state.archive_seal()?;
     let archive = state
         .backups
-        .import_from(std::path::Path::new(&path), &state.vault)?;
+        .import_from(std::path::Path::new(&path), &seal)?;
     let (commands, secrets) = state.apply_archive(&archive)?;
     emit_reload_all(&app);
     Ok(BackupOutcome {

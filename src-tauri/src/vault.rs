@@ -545,6 +545,22 @@ impl VaultService {
         encrypt_to(&[&identity], plaintext)
     }
 
+    /// The vault's current age identity. Only meaningful once the vault is usable; callers
+    /// must already be authorised (backups and exports are unlocked-only paths).
+    pub fn identity(&self) -> AppResult<Identity> {
+        self.resolve_identity()
+    }
+
+    /// Encrypts to the vault identity **and** additional recipients (the recovery credential
+    /// is the only production extra). Archives sealed here open with either credential.
+    pub fn seal_to_recipients(&self, plaintext: &[u8], extra: &[&Identity]) -> AppResult<Vec<u8>> {
+        let identity = self.resolve_identity()?;
+        let mut recipients: Vec<&Identity> = Vec::with_capacity(extra.len() + 1);
+        recipients.push(&identity);
+        recipients.extend_from_slice(extra);
+        encrypt_to(&recipients, plaintext)
+    }
+
     /// Opens something this vault sealed earlier. A foreign key fails here, and a failure
     /// never modifies anything.
     pub fn open_sealed(&self, ciphertext: &[u8]) -> AppResult<Vec<u8>> {
