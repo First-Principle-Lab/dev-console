@@ -25,9 +25,9 @@ a Secret Service provider (`gnome-keyring` / KWallet over D-Bus) for vault stora
 (X11) or `wl-clipboard` (Wayland) for copies. Arch: `packaging/arch/PKGBUILD` (statically
 validated; `makepkg` has **not** been run anywhere yet).
 
-Pre-built artifact (draft release `v0.1.0-rc1`):
-`dev-console_0.1.0_amd64.deb` (2,549,908 bytes),
-SHA-256 `707415ec162521b9ab1b95d432864bd39a23fca013b4848dc4f13ccae51a1a84`. The upload →
+Pre-built artifact (draft release `v0.1.0-rc2`, supersedes rc1):
+`dev-console_0.1.0_amd64.deb` (2,557,002 bytes),
+SHA-256 `3c23ba673b1b9b45ea53f2a7becc14cbd7595ef015b7076310dc1615a629c535`. The upload →
 download round trip was verified: the downloaded file passes `sha256sum -c` against the
 published `.sha256`, matches the build that was uploaded (note: `dpkg-deb` embeds file mtimes,
 so a rebuild is not byte-identical - reproducible packing is still owed), and is the exact
@@ -62,5 +62,9 @@ step of `docs/packaging.md` runs.
 2. Desktop session on the target Arch/Hyprland machine: execute the per-row remaining tests
    for C03, C11, C12, C13, C15, C17, C20, C21, C22; then publish the draft release.
 3. Produce the Arch artifact with real `makepkg` + SHA-256 and attach it to the release (C02).
+   Re-verified this session: `makepkg` does not exist on this host (no Arch container available).
+4. Settings UX (review-before-replace, recovery reveal, non-overwriting export, quoted terminal
+   argv) is cloud-tested (6 new e2e cases + screenshots); a human pass on the real desktop is
+   still part of checklist item 1.
 4. Until 2 finishes, keep the PR draft: cloud implementation is finished and green, desktop
    verification is pending.
