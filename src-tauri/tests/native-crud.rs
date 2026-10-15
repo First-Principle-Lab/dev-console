@@ -105,6 +105,8 @@ fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
 
     // ---- secrets: create through the keyring-backed vault ----
     let mut secret = draft(Kind::Secret, "Registry token", "", "synthetic-native-value");
+    // Command rows are plaintext by design, so the sweep markers must be secret-only.
+    secret.notes = "native-crud-secret-notes".to_string();
     let saved_secret = state.vault.save(&mut secret).expect("create secret");
     assert!(
         state.vault.is_unlocked(),
@@ -196,21 +198,46 @@ fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
         "the sealed backup file is still on disk"
     );
 
-    // The vault file itself stays ciphertext: no plaintext anywhere in the profile.
-    let vault_bytes = std::fs::read(dev_console_lib::paths::vault_path().expect("vault path"))
-        .expect("read vault");
-    for marker in [
-        "synthetic-native-value",
-        "native-crud-notes",
-        "Registry token",
-    ] {
-        assert!(
-            !vault_bytes
-                .windows(marker.len())
-                .any(|w| w == marker.as_bytes()),
-            "plaintext leaked into the vault file"
-        );
+    // Whole-profile marker sweep: every file this run wrote - database, vault, sealed
+    // backup, flag files, autostart entry - is read back and scanned, not just the vault.
+    // The command text itself is plaintext by design; these markers are secret-only.
+    sweep_for_leaks(
+        &_profile.0,
+        &[
+            "synthetic-native-value",
+            "native-crud-secret-notes",
+            "Registry token",
+        ],
+    );
+}
+
+/// Read every regular file under `root` and fail if any marker appears in any of them.
+fn sweep_for_leaks(root: &std::path::Path, markers: &[&str]) {
+    let mut stack = vec![root.to_path_buf()];
+    let mut files = 0usize;
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read sweep dir") {
+            let path = entry.expect("sweep entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                files += 1;
+                let bytes = std::fs::read(&path).expect("read swept file");
+                for marker in markers {
+                    assert!(
+                        !bytes.windows(marker.len()).any(|w| w == marker.as_bytes()),
+                        "plaintext marker {marker:?} leaked into {}",
+                        path.display()
+                    );
+                }
+            }
+        }
     }
+    assert!(
+        files >= 3,
+        "the sweep must cover a populated profile, saw only {files} files under {}",
+        root.display()
+    );
 }
 
 #[test]
