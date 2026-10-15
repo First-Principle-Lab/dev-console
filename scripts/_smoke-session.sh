@@ -127,6 +127,16 @@ else
   fail "the running app did not create $DB"
 fi
 
+# The durable state for an interrupted library replacement is created at startup. It must be
+# private, and a run that interrupted nothing must leave it empty.
+PENDING="$WORK/data/dev-console/pending-replace"
+if [[ -d "$PENDING" ]]; then
+  [[ "$(mode_of "$PENDING")" == "700" ]] && pass "the interrupted-replacement directory is 0700" || fail "pending-replace dir mode $(mode_of "$PENDING")"
+  [[ -z "$(ls -A "$PENDING")" ]] && pass "no replacement journal is in flight after a clean start" || fail "a journal survived a clean run: $(ls -A "$PENDING")"
+else
+  fail "the app did not create the private pending-replace directory"
+fi
+
 echo "== 8. unlock without an authentication mechanism fails closed =="
 stop_app
 OUT="$("$BIN" vault unlock 2>&1)"; CODE=$?
@@ -141,6 +151,11 @@ if command -v scrot >/dev/null; then
   scrot "$WORK/screen.png" 2>/dev/null && {
     SIZE=$(stat -c '%s' "$WORK/screen.png")
     [[ "$SIZE" -gt 20000 ]] && pass "screenshot captured ($SIZE bytes)" || fail "screenshot suspiciously small ($SIZE bytes)"
+    if [[ -n "${SMOKE_SHOT_DIR:-}" ]]; then
+      mkdir -p "$SMOKE_SHOT_DIR"
+      cp "$WORK/screen.png" "$SMOKE_SHOT_DIR/native-library__xvfb.png"
+      echo "   native capture: $SMOKE_SHOT_DIR/native-library__xvfb.png"
+    fi
   } || fail "scrot failed"
   stop_app
 else

@@ -8,6 +8,8 @@
 (() => {
   const seed = window.__devConsoleSeed || {};
   const now = '2026-01-01T00:00:00Z';
+  const RECOVERY_SECRET = 'AGE-SECRET-KEY-1SYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTH1';
+  const RECOVERY_COPY_ID = 'recovery-credential';
 
   const state = {
     backups: [],
@@ -117,6 +119,12 @@
     if (!state.vaultUnlocked || state.manualLock) {
       throw new Error(state.manualLock ? 'the vault is locked' : 'vault storage is unavailable: mocked');
     }
+  }
+
+  /// Mirrors the backend's clipboard.clear_owned(): an app-owned secret copy is dropped when
+  /// the vault locks; anything the user copied afterwards is untouched.
+  function clearOwnedCopies() {
+    state.copied = state.copied.filter((c) => !c.owned);
   }
 
   function details(record, kind, includeValue) {
@@ -231,6 +239,7 @@
     }
     if (command === 'lock_vault') {
       state.manualLock = true;
+      clearOwnedCopies();
       state.generation += 1;
       emit('vault-state-changed', (await handle('app_state', {})).vault);
       return (await handle('app_state', {})).vault;
@@ -273,10 +282,22 @@
       return { source: payload.path, createdAt: now, commands: state.commands.length, secrets: state.secrets.length, sizeBytes: 20480 };
     }
     if (command === 'recovery_key') {
-      if (!state.vaultUnlocked || state.manualLock) throw new Error('the vault is locked');
+      // Same gate as the Rust handler: window check *and* an unlocked vault.
+      requireVault();
+      return { secret: RECOVERY_SECRET, path: '/home/mock/.config/dev-console/recovery.agekey' };
+    }
+    if (command === 'copy_recovery_key') {
+      // The protected native copy path: vault-gated, expiry-bound, and the value is never
+      // handed back to the renderer.
+      requireVault();
+      const seconds = state.settings.clipboardExpirySeconds || 30;
+      state.copied.push({ id: RECOVERY_COPY_ID, kind: 'secret', value: RECOVERY_SECRET, owned: true });
       return {
-        secret: 'AGE-SECRET-KEY-1SYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTHETICSYNTH1',
-        path: '/home/mock/.config/dev-console/recovery.agekey'
+        kind: 'secret',
+        id: RECOVERY_COPY_ID,
+        expiresAtMs: Date.now() + seconds * 1000,
+        excluded: false,
+        exclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' }
       };
     }
     if (command === 'export_archive') {
@@ -300,6 +321,7 @@
     emit,
     lockVault() {
       state.manualLock = true;
+      clearOwnedCopies();
       state.generation += 1;
       emit('vault-state-changed', {
         unlocked: false, manualLock: true, keyringAvailable: true, keyringUnlocked: false,

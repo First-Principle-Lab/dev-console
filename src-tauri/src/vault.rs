@@ -279,6 +279,14 @@ impl VaultService {
         Ok(result)
     }
 
+    /// Shuts the secret store without touching the persistent manual-lock flag. Used when an
+    /// interrupted library replacement could not be reconciled: neither window may receive
+    /// secrets that could belong to a version the command table does not match.
+    pub fn quarantine(&self, reason: &str) {
+        self.clear_decrypted();
+        self.set_status(Status::Unavailable(reason.to_string()));
+    }
+
     pub fn clear_decrypted(&self) {
         self.file
             .lock()

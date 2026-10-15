@@ -10,6 +10,7 @@ pub mod ipc;
 pub mod keyring;
 pub mod models;
 pub mod paths;
+pub mod recovery;
 pub mod repository;
 pub mod search;
 pub mod settings;
@@ -126,6 +127,7 @@ fn build(argv: Vec<String>) {
             ipc::inspect_backup,
             ipc::inspect_archive,
             ipc::recovery_key,
+            ipc::copy_recovery_key,
             ipc::export_archive,
             ipc::import_archive
         ])

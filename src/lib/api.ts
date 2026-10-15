@@ -53,6 +53,7 @@ export const api = {
   inspectBackup: (name: string): Promise<ArchiveSummary> => call('inspect_backup', { name }),
   inspectArchive: (path: string): Promise<ArchiveSummary> => call('inspect_archive', { path }),
   recoveryKey: (): Promise<RecoveryKeyInfo> => call('recovery_key'),
+  copyRecoveryKey: (): Promise<CopyResult> => call('copy_recovery_key'),
   exportArchive: (path: string, overwrite = false): Promise<number> =>
     call('export_archive', { path, overwrite }),
   importArchive: (path: string): Promise<BackupOutcome> => call('import_archive', { path }),

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
+  import { on } from '../lib/events';
   import type {
     ArchiveSummary,
     BackupInfo,
     ClipboardExclusion,
     RecoveryKeyInfo,
-    Settings
+    Settings,
+    VaultState
   } from '../lib/models';
   import { absoluteTime } from '../lib/time';
   import { formatArgv, parseArgv } from '../lib/argv';
@@ -18,7 +20,8 @@
   let exclusion = $state<ClipboardExclusion | null>(null);
   let backupDir = $state('');
   let currentCommands = $state(0);
-  let currentSecrets = $state(0);
+  // null means "not readable": a locked vault reports no secret count at all rather than 0.
+  let currentSecrets = $state<number | null>(null);
   let error = $state<string | null>(null);
   let saved = $state(false);
 
@@ -41,6 +44,11 @@
   let recovery = $state<RecoveryKeyInfo | null>(null);
   let recoveryError = $state<string | null>(null);
   let recoveryCopied = $state(false);
+  let recoveryCopyExpiresAt = $state<number | null>(null);
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  // Bumped by every lock while this panel is open, so a reveal that was already in flight
+  // when the vault shut cannot paint its answer afterwards.
+  let lockEpoch = 0;
 
   async function refreshBackups(): Promise<void> {
     try {
@@ -140,18 +148,48 @@
 
   async function revealRecovery(): Promise<void> {
     recoveryError = null;
+    const epoch = lockEpoch;
     try {
-      recovery = await api.recoveryKey();
+      const revealed = await api.recoveryKey();
+      if (epoch !== lockEpoch) return;
+      recovery = revealed;
     } catch (problem: unknown) {
+      recovery = null;
       recoveryError = String(problem);
     }
   }
 
+  /// Forgets the revealed credential outright. Called the moment the vault locks: what the
+  /// vault authorised cannot outlive the vault that authorised it.
+  function forgetRecovery(): void {
+    recovery = null;
+    recoveryCopied = false;
+    recoveryCopyExpiresAt = null;
+    if (copyTimer) {
+      clearTimeout(copyTimer);
+      copyTimer = undefined;
+    }
+  }
+
+  /// Copies through the backend, so the configured expiry and the lock-time clipboard wipe
+  /// apply exactly as they do for a saved secret. The value itself never reaches this
+  /// component, so it cannot be logged or shown in a message.
   async function copyRecovery(): Promise<void> {
     if (!recovery) return;
-    await navigator.clipboard.writeText(recovery.secret);
-    recoveryCopied = true;
-    setTimeout(() => (recoveryCopied = false), 4000);
+    recoveryError = null;
+    try {
+      const result = await api.copyRecoveryKey();
+      recoveryCopied = true;
+      recoveryCopyExpiresAt = result.expiresAtMs;
+      if (copyTimer) clearTimeout(copyTimer);
+      const delay = Math.min(Math.max(result.expiresAtMs - Date.now(), 0), 2_147_483_647);
+      copyTimer = setTimeout(() => {
+        recoveryCopied = false;
+        recoveryCopyExpiresAt = null;
+      }, delay);
+    } catch (problem: unknown) {
+      recoveryError = String(problem);
+    }
   }
 
   function setTerminal(value: string): void {
@@ -166,19 +204,54 @@
     }
   }
 
+  /// Counts are a separate, best-effort load: the secret list legitimately fails while the
+  /// vault is locked and must never take the General controls down with it.
+  async function refreshCounts(): Promise<void> {
+    try {
+      currentCommands = (await api.list({ kind: 'command' })).length;
+    } catch {
+      currentCommands = 0;
+    }
+    try {
+      currentSecrets = (await api.list({ kind: 'secret' })).length;
+    } catch {
+      currentSecrets = null;
+    }
+  }
+
+  async function loadGeneral(): Promise<void> {
+    error = null;
+    try {
+      const [loaded, appState] = await Promise.all([api.settings(), api.appState()]);
+      settings = loaded;
+      exclusion = appState.clipboardExclusion;
+      backupDir = appState.backupDir;
+      terminalText = formatArgv(loaded.terminal);
+      terminalTokens = loaded.terminal;
+      await refreshBackups();
+      await refreshCounts();
+    } catch (problem: unknown) {
+      error = String(problem);
+    }
+  }
+
   onMount(() => {
-    void Promise.all([api.settings(), api.appState(), api.list({ kind: 'command' }), api.list({ kind: 'secret' })])
-      .then(([loaded, state, commands, secrets]) => {
-        settings = loaded;
-        exclusion = state.clipboardExclusion;
-        backupDir = state.backupDir;
-        currentCommands = commands.length;
-        currentSecrets = secrets.length;
-        terminalText = formatArgv(loaded.terminal);
-        terminalTokens = loaded.terminal;
-        void refreshBackups();
-      })
-      .catch((problem: unknown) => (error = String(problem)));
+    // Settings stays in step with the vault while it is open: an unlock refreshes the counts,
+    // a lock drops both the count and anything this panel is currently showing the user.
+    const unsubscribe = on<VaultState>('vault-state-changed', (state: VaultState) => {
+      if (state.unlocked) {
+        void refreshCounts();
+        return;
+      }
+      lockEpoch += 1;
+      forgetRecovery();
+      currentSecrets = null;
+    });
+    void loadGeneral();
+    return () => {
+      unsubscribe();
+      if (copyTimer) clearTimeout(copyTimer);
+    };
   });
 
   async function save(): Promise<void> {
@@ -194,6 +267,9 @@
   }
 
   const reviewVerb = $derived(review?.kind === 'backup' ? 'Restore' : 'Import');
+  const copyExpiryLabel = $derived(
+    recoveryCopyExpiresAt === null ? '' : new Date(recoveryCopyExpiresAt).toLocaleTimeString()
+  );
 </script>
 
 <div class="backdrop" role="dialog" aria-modal="true" aria-label="Settings">
@@ -358,6 +434,15 @@
           <p class="muted detail">Saved at <code class="mono wrap">{recovery.path}</code></p>
           <div class="row">
             <button onclick={() => void copyRecovery()} data-testid="recovery-copy">{recoveryCopied ? 'Copied' : 'Copy to clipboard'}</button>
+            <span class="spacer"></span>
+            <span class="muted detail" data-testid="recovery-copy-note">
+              {#if recoveryCopied}
+                Copied through the app: it clears at {copyExpiryLabel} with the clipboard
+                expiry, and as soon as the vault locks.
+              {:else}
+                Copies through the app, with the same expiry as a saved secret.
+              {/if}
+            </span>
           </div>
           <p class="muted detail" data-testid="recovery-steps">
             On a fresh install: unlock the (empty) vault once, put this credential in
@@ -379,7 +464,15 @@
           <dl class="summary">
             <dt>Created</dt><dd>{absoluteTime(review.summary.createdAt)}</dd>
             <dt>Contains</dt><dd>{review.summary.commands} commands · {review.summary.secrets} secrets</dd>
-            <dt>Currently</dt><dd data-testid="review-current">{currentCommands} commands · {currentSecrets} secrets</dd>
+            <dt>Currently</dt>
+            <dd data-testid="review-current">
+              {currentCommands} commands ·
+              {#if currentSecrets === null}
+                secret count unavailable while the vault is locked
+              {:else}
+                {currentSecrets} secrets
+              {/if}
+            </dd>
             <dt>File</dt><dd class="mono wrap">{review.summary.source}</dd>
           </dl>
           <p class="warning" data-testid="review-warning">
@@ -455,20 +548,23 @@
   }
   .body {
     overflow-y: auto;
-    padding: 4px 16px 14px;
+    /* min-height: 0 keeps the body scrollable inside the flex column, so the footer and every
+       confirmation action stay reachable in a short window. */
+    min-height: 0;
+    padding: 4px 16px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--sp-4);
   }
   section {
     display: flex;
     flex-direction: column;
-    gap: 7px;
-    padding-top: 8px;
+    gap: var(--sp-3);
+    padding-top: var(--sp-2);
   }
   h4 {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--text-sm);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--fg-muted);
@@ -484,15 +580,17 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: var(--sp-1);
   }
   .label-text {
     color: var(--fg-muted);
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
   .detail {
-    font-size: 12px;
+    font-size: var(--text);
+    line-height: 1.5;
     margin: 0;
+    max-width: 74ch;
   }
   .row {
     display: flex;
@@ -524,11 +622,11 @@
     border-radius: var(--radius);
     padding: 0 5px;
     margin-right: 4px;
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
   .field-error {
     color: var(--danger);
-    font-size: 12px;
+    font-size: var(--text-sm);
     margin: 0;
   }
   .path-line code {
@@ -550,31 +648,32 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--text-sm);
   }
   .recovery {
     margin: 0;
-    padding: 8px;
+    padding: var(--sp-2);
     border: var(--border);
     border-radius: var(--radius);
     background: rgb(0 0 0 / 22%);
-    font-size: 12px;
+    font-size: var(--text);
+    line-height: 1.5;
     user-select: all;
   }
   .confirm {
     border: 1px solid var(--warning, #b8860b);
     border-radius: var(--radius);
-    padding: 10px;
+    padding: var(--sp-3);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--sp-2);
   }
   .summary {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 2px 12px;
+    gap: var(--sp-1) var(--sp-3);
     margin: 0;
-    font-size: 12px;
+    font-size: var(--text);
   }
   .summary dt {
     color: var(--fg-muted);
@@ -584,7 +683,8 @@
   }
   .warning {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--text);
+    line-height: 1.5;
     color: var(--warning, #d9a441);
   }
   @media (max-width: 720px) {

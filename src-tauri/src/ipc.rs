@@ -348,6 +348,23 @@ pub fn unlock_vault<R: Runtime>(
 ) -> AppResult<VaultState> {
     let state = state(&app);
     state.vault.unlock()?;
+    // A replacement that startup could not settle (no readable keyring then) gets another turn
+    // now that the credential is definitely available. Until it succeeds the secret store stays
+    // shut: the two stores might otherwise disagree about which library is live.
+    match state.reconcile_interrupted_replacement() {
+        Ok(Some(report)) => {
+            eprintln!("dev-console: {}", report.message());
+            emit_reload_all(&app);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let reason = error.to_string();
+            state.vault.quarantine(&reason);
+            emit_vault_state(&app);
+            let _ = tray::refresh_menu(&app);
+            return Err(AppError::VaultUnavailable(reason));
+        }
+    }
     emit_vault_state(&app);
     let vault = state.vault.state();
     let _ = tray::refresh_menu(&app);
@@ -522,7 +539,8 @@ pub struct RecoveryKeyInfo {
 }
 
 /// The recovery credential, so the owner can store it somewhere independent of this
-/// machine. Library window only; the UI keeps it behind an explicit reveal with warnings.
+/// machine. Library window **and** an unlocked vault: the credential decrypts every archive
+/// this profile has ever sealed, so a manual lock has to shut this path too.
 #[tauri::command]
 pub fn recovery_key<R: Runtime>(
     app: AppHandle<R>,
@@ -530,10 +548,23 @@ pub fn recovery_key<R: Runtime>(
 ) -> AppResult<RecoveryKeyInfo> {
     require_library(&window)?;
     let state = state(&app);
+    let (secret, path) = state.recovery_credential()?;
     Ok(RecoveryKeyInfo {
-        secret: state.recovery.secret().to_string(),
-        path: state.recovery.path().to_string_lossy().to_string(),
+        secret: secret.to_string(),
+        path: path.to_string_lossy().to_string(),
     })
+}
+
+/// Copies the recovery credential with the native clipboard path: configured expiry, cleared
+/// with every other app-owned copy when the vault locks, and the value never crosses back to
+/// the frontend, so it cannot end up in a log line or a UI notification.
+#[tauri::command]
+pub fn copy_recovery_key<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<CopyResult> {
+    require_library(&window)?;
+    state(&app).copy_recovery_credential()
 }
 
 #[tauri::command]

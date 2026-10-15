@@ -26,6 +26,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use dev_console_lib::clipboard::{read_clipboard, write_clipboard};
 use dev_console_lib::models::Kind;
 use dev_console_lib::paths;
 use dev_console_lib::state::AppState;
@@ -131,7 +132,19 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> Value {
 impl Harness {
     fn new(tag: &str) -> Self {
         let lock = profile_lock();
-        let profile = paths::set_disposable_profile(tag);
+        Self::over_profile(paths::set_disposable_profile(tag), lock)
+    }
+
+    /// A second resident process over the *same* profile files: new backend state and new
+    /// windows, reading the database, vault and lock flag the previous one left behind.
+    fn restart_from(profile: &std::path::Path) -> Self {
+        let lock = profile_lock();
+        std::env::set_var("DEV_CONSOLE_DATA_DIR", profile.join("data"));
+        std::env::set_var("DEV_CONSOLE_CONFIG_DIR", profile.join("config"));
+        Self::over_profile(profile.to_path_buf(), lock)
+    }
+
+    fn over_profile(profile: std::path::PathBuf, lock: MutexGuard<'static, ()>) -> Self {
         let state = AppState::bootstrap().expect("backend bootstrap");
 
         let managed = Arc::clone(&state);
@@ -149,6 +162,8 @@ impl Harness {
                 dev_console_lib::ipc::run_command,
                 dev_console_lib::ipc::lock_vault,
                 dev_console_lib::ipc::unlock_vault,
+                dev_console_lib::ipc::recovery_key,
+                dev_console_lib::ipc::copy_recovery_key,
                 dev_console_lib::ipc::open_library,
                 dev_console_lib::ipc::get_settings,
                 dev_console_lib::ipc::create_backup,
@@ -694,6 +709,164 @@ fn both_windows_track_the_vault_and_secret_values_stay_sealed() {
     )
     .expect("reveal after a completed unlock");
     assert_eq!(revealed_again["value"], json!(marker));
+
+    h.drop_profile();
+}
+
+/// The recovery credential is a secret like any other, and it is the one that decrypts every
+/// archive this profile has ever sealed. Driven entirely through real IPC dispatch: it must be
+/// refused by a locked vault - without leaking anything in the refusal - and it must only ever
+/// reach the clipboard through the protected native copy path.
+#[test]
+#[ignore = "needs a real Secret Service provider, started by scripts/test-native-ipc.sh"]
+fn the_recovery_credential_stays_behind_the_vault_and_copies_natively() {
+    let h = Harness::new("two-window-recovery");
+    if !h.state.vault.is_unlocked() {
+        h.drop_profile();
+        panic!("the harness did not open the vault through the real provider");
+    }
+    let display = std::env::var_os("DISPLAY").is_some();
+
+    let revealed = invoke(&h.library, "recovery_key", json!({}))
+        .expect("the owner may read the credential while the vault is open");
+    let secret = revealed["secret"]
+        .as_str()
+        .expect("a credential")
+        .to_string();
+    assert!(
+        secret.starts_with("AGE-SECRET-KEY-1"),
+        "the reveal returns the age identity"
+    );
+    assert!(revealed["path"]
+        .as_str()
+        .expect("path")
+        .ends_with("recovery.agekey"));
+
+    // The finder is not allowed to ask at all.
+    for command in ["recovery_key", "copy_recovery_key"] {
+        match invoke(&h.finder, command, json!({})) {
+            Err(message) => assert!(
+                message.contains("not allowed to call finder"),
+                "{command} from the finder must be a window rejection, got {message}"
+            ),
+            Ok(value) => panic!("{command} must not be callable from the finder: {value}"),
+        }
+    }
+
+    // ---- manual lock through the IPC surface: the reveal has to shut with it ----
+    let locked = invoke(&h.library, "lock_vault", json!({})).expect("lock through the library");
+    assert_eq!(locked["unlocked"], json!(false));
+    // The library is the window that is allowed to ask, so this is the real gate: locked means
+    // refused, and the refusal must not repeat the credential back to the renderer.
+    for command in ["recovery_key", "copy_recovery_key"] {
+        match invoke(&h.library, command, json!({})) {
+            Err(message) => {
+                assert!(
+                    message.contains("locked"),
+                    "{command} while locked must refuse as locked, got {message}"
+                );
+                assert!(
+                    !message.contains(&secret),
+                    "the refusal leaked the credential: {message}"
+                );
+            }
+            Ok(value) => panic!(
+                "{command} handed the recovery credential out while the vault is locked: {value}"
+            ),
+        }
+    }
+    // The finder had no access before the lock and still has none afterwards.
+    for command in ["recovery_key", "copy_recovery_key"] {
+        match invoke(&h.finder, command, json!({})) {
+            Err(message) => assert!(
+                message.contains("not allowed to call finder") && !message.contains(&secret),
+                "{command} from the finder must stay a window rejection: {message}"
+            ),
+            Ok(value) => panic!("{command} reached the finder while locked: {value}"),
+        }
+    }
+    // A restart in this state must refuse too: the manual lock is persistent, not per-window.
+    let profile = h.profile.clone();
+    drop(h);
+    let h = Harness::restart_from(&profile);
+    assert!(
+        h.state.vault.manual_lock(),
+        "the manual lock survived into the restarted process"
+    );
+    match invoke(&h.library, "recovery_key", json!({})) {
+        Err(message) => assert!(
+            !message.contains(&secret) && message.contains("locked"),
+            "a restarted locked vault must refuse without echoing anything: {message}"
+        ),
+        Ok(value) => panic!("a restarted locked vault returned the credential: {value}"),
+    }
+
+    // ---- an authenticated unlock reopens the path, and the copy is the guarded native one ----
+    h.state
+        .vault
+        .unlock_with(|| Ok(()))
+        .expect("unlock with authentication satisfied");
+    let again = invoke(&h.library, "recovery_key", json!({}))
+        .expect("reveal after an authenticated unlock");
+    assert_eq!(
+        again["secret"],
+        json!(secret),
+        "the same credential, reachable only through the vault"
+    );
+
+    let copied = match invoke(&h.library, "copy_recovery_key", json!({})) {
+        Ok(result) => result,
+        Err(message) => {
+            // With no clipboard provider the copy may fail, but only as a clipboard failure -
+            // the authorisation is not what is in question here.
+            h.drop_profile();
+            assert!(
+                message.contains("clipboard"),
+                "only the clipboard itself may refuse an authorised copy: {message}"
+            );
+            return;
+        }
+    };
+    assert_eq!(copied["id"], json!("recovery-credential"));
+    assert_eq!(copied["kind"], json!("secret"));
+    assert!(
+        copied["expiresAtMs"].as_i64().expect("an expiry") > dev_console_lib::repository::unix_ms(),
+        "the copy is expiry-bound like every other secret copy"
+    );
+    assert!(
+        !copied.to_string().contains(&secret),
+        "the copy result must never carry the value back to the renderer"
+    );
+
+    if display {
+        assert_eq!(
+            read_clipboard().expect("paste"),
+            secret,
+            "the credential reached the real selection"
+        );
+
+        // Something copied afterwards belongs to the user, not to the app: locking must leave
+        // it alone, while the app's own copy of the credential goes away.
+        let unrelated = "copied-by-another-application";
+        write_clipboard(unrelated).expect("unrelated copy");
+        invoke(&h.library, "lock_vault", json!({})).expect("lock again");
+        assert_eq!(
+            read_clipboard().expect("paste after lock"),
+            unrelated,
+            "an unrelated clipboard value survives the lock"
+        );
+
+        // And with the credential still the owned copy, the lock wipes it.
+        h.state.vault.unlock_with(|| Ok(())).expect("unlock again");
+        invoke(&h.library, "copy_recovery_key", json!({})).expect("copy again");
+        assert_eq!(read_clipboard().expect("paste"), secret);
+        invoke(&h.library, "lock_vault", json!({})).expect("lock");
+        assert_eq!(
+            read_clipboard().expect("paste").trim(),
+            "",
+            "the app-owned copy of the credential is cleared when the vault locks"
+        );
+    }
 
     h.drop_profile();
 }

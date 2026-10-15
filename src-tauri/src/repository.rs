@@ -11,7 +11,7 @@ use crate::models::{
     EntryDraft, EntryMeta, EntryRecord, ExtraField, FieldDisplay, Kind, SavedEntry,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub const MAX_NAME: usize = 200;
 pub const MAX_TYPE: usize = 80;
@@ -129,6 +129,15 @@ impl Repository {
                     command TEXT NOT NULL,
                     working_directory TEXT NOT NULL
                  );",
+            )
+            .map_err(AppError::storage)?;
+        }
+        if version < 2 {
+            // Durable marker for an in-flight whole-library command replacement. Written inside
+            // the same transaction as the rows, so a restart can tell from the database alone
+            // whether a given replacement commit happened.
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS apply_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             )
             .map_err(AppError::storage)?;
         }
@@ -349,6 +358,19 @@ impl Repository {
     /// Replaces the whole command table with `records`, in one transaction. Used by archive
     /// import, which validates everything before anything is applied.
     pub fn replace_all_commands(&self, records: &[EntryRecord]) -> AppResult<usize> {
+        self.replace_all_commands_marked(records, None)
+    }
+
+    /// Replaces the whole command table inside one transaction and, when an `operation_id` is
+    /// given, writes that id into `apply_state` in the **same** transaction. The marker and the
+    /// rows are therefore inseparable: after a crash, the database either carries the id (the
+    /// replacement committed) or it does not (it never did), which is what makes an interrupted
+    /// library replacement decidable rather than guessed.
+    pub fn replace_all_commands_marked(
+        &self,
+        records: &[EntryRecord],
+        operation_id: Option<&str>,
+    ) -> AppResult<usize> {
         let conn = self.conn.lock().expect("db lock poisoned");
         let tx = conn.unchecked_transaction().map_err(AppError::storage)?;
         tx.execute("DELETE FROM approvals", [])
@@ -382,8 +404,43 @@ impl Repository {
             .map_err(AppError::storage)?;
             applied += 1;
         }
+        match operation_id {
+            Some(id) => {
+                tx.execute(
+                    "INSERT INTO apply_state (key, value) VALUES ('pending_apply', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![id],
+                )
+                .map_err(AppError::storage)?;
+            }
+            None => {
+                tx.execute("DELETE FROM apply_state WHERE key = 'pending_apply'", [])
+                    .map_err(AppError::storage)?;
+            }
+        }
         tx.commit().map_err(AppError::storage)?;
         Ok(applied)
+    }
+
+    /// The operation id of a command replacement whose transaction committed, if any.
+    pub fn apply_operation_marker(&self) -> AppResult<Option<String>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.query_row(
+            "SELECT value FROM apply_state WHERE key = 'pending_apply'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(AppError::storage)
+    }
+
+    /// Clears the marker once the replacement it describes is fully settled. Called after the
+    /// journal is gone, so an id that outlives its journal is inert.
+    pub fn clear_apply_operation_marker(&self) -> AppResult<()> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute("DELETE FROM apply_state WHERE key = 'pending_apply'", [])
+            .map_err(AppError::storage)?;
+        Ok(())
     }
 
     pub fn record_usage(&self, id: &str) -> AppResult<()> {

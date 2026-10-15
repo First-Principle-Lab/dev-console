@@ -29,7 +29,7 @@ for phase in default ignored; do
   [[ "$phase" == "ignored" ]] && args+=(--ignored)
   echo "== native backend + two-window IPC tests ($phase) =="
   if ! cargo test --manifest-path src-tauri/Cargo.toml --locked \
-    --test native-crud --test native-two-window -- "${args[@]}"; then
+    --test native-crud --test native-two-window --test interrupted-apply -- "${args[@]}"; then
     failures=$((failures + 1))
   fi
 done

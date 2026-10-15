@@ -84,6 +84,13 @@ pub fn recovery_key_path() -> AppResult<PathBuf> {
     Ok(ensure_dir(&config_dir()?)?.join("recovery.agekey"))
 }
 
+/// Durable state for a library replacement that was interrupted mid-flight (0700). The one
+/// file inside is sealed with the archive credential, so a leftover journal never exposes
+/// commands or secrets to anyone else on the machine.
+pub fn interrupted_apply_dir() -> AppResult<PathBuf> {
+    Ok(ensure_dir(&data_dir()?)?.join("pending-replace"))
+}
+
 /// Points both state directories at fresh 0700 temporary directories and returns their common
 /// parent.
 ///

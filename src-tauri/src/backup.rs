@@ -426,18 +426,56 @@ fn write_private(path: &Path, bytes: &[u8]) -> AppResult<()> {
     write_private_mode(path, bytes, false)
 }
 
+fn refuses_overwrite() -> AppError {
+    AppError::Other(
+        "that file already exists - nothing was overwritten. choose another name, or confirm \
+         that the existing file may be replaced"
+            .into(),
+    )
+}
+
+/// Publishes a fully written, already-synced staging file at `path` **without any possibility
+/// of replacing** an existing file. `hard_link` either creates the new name or fails with
+/// `AlreadyExists`, so unlike `rename` it has no window in which a destination that appeared
+/// after the caller's own existence check gets clobbered. The staging name is in the same
+/// directory, so the link is local and the content is visible at `path` the instant the link
+/// exists.
+pub(crate) fn publish_no_replace(staged: &Path, path: &Path) -> AppResult<()> {
+    match std::fs::hard_link(staged, path) {
+        Ok(()) => {
+            std::fs::remove_file(staged).ok();
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::remove_file(staged).ok();
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                return Err(refuses_overwrite());
+            }
+            Err(AppError::Other(e.to_string()))
+        }
+    }
+}
+
+/// Publishes a staging file by replacing whatever is at `path`. Only for the explicit,
+/// user-confirmed overwrite route; the ordinary publish is [`publish_no_replace`].
+pub(crate) fn publish_replace(staged: &Path, path: &Path) -> AppResult<()> {
+    match std::fs::rename(staged, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            std::fs::remove_file(staged).ok();
+            Err(AppError::Other(e.to_string()))
+        }
+    }
+}
+
 /// Atomic 0600 write. The staging file is unique per call (O_EXCL in the destination
 /// directory, so concurrent writers can never clobber each other's partial file), is removed
-/// on any failure, and only ever reaches its destination through a same-directory rename.
-/// An existing destination is refused unless the caller says the user confirmed the replace -
-/// exports must never silently overwrite.
+/// on any failure, and only ever reaches its destination through a same-directory publish.
+/// Without `allow_overwrite` the publish itself is no-replace: an existing destination -
+/// including one created after this call started - is never overwritten.
 fn write_private_mode(path: &Path, bytes: &[u8], allow_overwrite: bool) -> AppResult<()> {
     if path.exists() && !allow_overwrite {
-        return Err(AppError::Other(
-            "that file already exists - nothing was overwritten. choose another name, or \
-             confirm that the existing file may be replaced"
-                .into(),
-        ));
+        return Err(refuses_overwrite());
     }
     let parent = path.parent().ok_or_else(|| {
         AppError::Validation("the destination path has no directory to write into".into())
@@ -475,13 +513,16 @@ fn write_private_mode(path: &Path, bytes: &[u8], allow_overwrite: bool) -> AppRe
         }
     }
     crate::paths::set_file_private(&tmp)?;
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            std::fs::remove_file(&tmp).ok();
-            Err(AppError::Other(e.to_string()))
-        }
+    if allow_overwrite {
+        publish_replace(&tmp, path)
+    } else {
+        publish_no_replace(&tmp, path)
     }
+}
+
+/// Sealed, private, never-replacing write used by the recovery journal.
+pub(crate) fn write_private_new(path: &Path, bytes: &[u8]) -> AppResult<()> {
+    write_private_mode(path, bytes, false)
 }
 
 fn chrono_like_stamp() -> String {
@@ -892,6 +933,60 @@ mod tests {
                 "staging file left behind: {name}"
             );
         }
+        dir.erase();
+    }
+
+    #[test]
+    fn a_destination_that_appears_mid_export_is_never_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Dir::new();
+        let (key, _) = Dir::keys();
+        let manager = dir.manager(4);
+        let destination = dir.0.join("portable.age");
+
+        // The exact state of an export that is about to publish, plus a competing file created
+        // after the caller's existence check - the window a `exists()` guard cannot cover.
+        let staged = dir.0.join(".staged.age");
+        std::fs::write(&staged, b"archive-we-would-have-written").expect("stage");
+        std::fs::write(&destination, b"someone-elses-file").expect("competing creation");
+
+        let error = publish_no_replace(&staged, &destination).expect_err("no-replace must refuse");
+        assert!(error.to_string().contains("already exists"), "{error}");
+        assert_eq!(
+            std::fs::read(&destination).expect("reread"),
+            b"someone-elses-file",
+            "the competing file stays byte for byte"
+        );
+        assert!(
+            !staged.exists(),
+            "the staging file is cleaned up, not published"
+        );
+
+        // The same publish, with the destination free, writes the file and keeps it private.
+        let free = dir.0.join("free.age");
+        let staged_again = dir.0.join(".staged2.age");
+        std::fs::write(&staged_again, b"payload").expect("stage again");
+        crate::paths::set_file_private(&staged_again).expect("private stage");
+        publish_no_replace(&staged_again, &free).expect("publish");
+        assert_eq!(std::fs::read(&free).expect("published"), b"payload");
+        assert_eq!(
+            std::fs::metadata(&free).expect("meta").permissions().mode() & 0o777,
+            0o600,
+            "a published file is user-only"
+        );
+
+        // And the ordinary export route still refuses up front, leaving the old bytes alone,
+        // while only an explicit confirmation replaces them.
+        let export = dir.0.join("clean.age");
+        manager
+            .export_to(&export, &archive(), &key, false)
+            .expect("first export");
+        let first = std::fs::read(&export).expect("first bytes");
+        assert!(manager.export_to(&export, &archive(), &key, false).is_err());
+        assert_eq!(std::fs::read(&export).expect("reread"), first);
+        manager
+            .export_to(&export, &archive(), &key, true)
+            .expect("confirmed export");
         dir.erase();
     }
 
