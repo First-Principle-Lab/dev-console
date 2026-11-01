@@ -85,21 +85,21 @@ Open a draft PR early if helpful and update it at checkpoints. At the end, creat
 
 ## Required verification and compilation
 
-Establish reproducible scripts and commit both npm and Cargo lockfiles. Provide a single documented check command or script that runs the relevant checks and fails on the first failure. The exact package scripts may be selected by you, but these capabilities are mandatory:
+Establish reproducible scripts and commit both bun.lock and Cargo.lock. Provide a single documented check command or script that runs the relevant checks and fails on the first failure. The exact package scripts may be selected by you, but these capabilities are mandatory:
 
 ```sh
-npm ci
-npm run check
-npm run lint
-npm run test
-npm run build
+bun install --frozen-lockfile
+bun run check
+bun run lint
+bun run test
+bun run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --locked
-npm run tauri build -- --no-bundle
+bunx tauri build --no-bundle
 ```
 
-Also run frontend E2E tests through a documented script and produce a Linux release bundle. Confirm actual CLI options with the installed Tauri version. For AppImage or another chosen bundle, run the applicable Tauri bundling command and verify that it actually produces a usable binary/artifact. Do not claim success based on a development server or `npm run build` alone. If packaging dependencies are missing, install them in the disposable build environment and retry. A successful Rust test suite does not substitute for a native release build.
+Also run frontend E2E tests through a documented script and produce a Linux release bundle. Confirm actual CLI options with the installed Tauri version (`bunx tauri build --help`). For AppImage or another chosen bundle, run the applicable Tauri bundling command and verify that it actually produces a usable binary/artifact. Do not claim success based on a development server or `bun run build` alone. If packaging dependencies are missing, install them in the disposable build environment and retry. A successful Rust test suite does not substitute for a native release build.
 
 Add GitHub Actions CI that installs documented system dependencies, runs checks, compiles the native app, and uploads the release output plus a concise build manifest with commit SHA, OS/architecture, compiler versions, and checksums. Include an Arch Linux build job or reproducible Arch container build in addition to the primary supported Linux build environment. Build as a normal user when tooling rejects root. Document the artifact's actual glibc/system-library requirements. Do not label an Ubuntu-built executable an Arch-tested binary without evidence. Do not waste the run setting up cross-platform matrices.
 

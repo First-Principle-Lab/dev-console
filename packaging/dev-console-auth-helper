@@ -1,0 +1,22 @@
+#!/bin/sh
+# Dev Console authentication gate.
+#
+# This helper is executed through pkexec, so reaching it at all means polkit already
+# authenticated the user for ai.codemate.devconsole.unlock. It deliberately does nothing:
+# it reads no secrets, opens no files, and grants no privileges. Its exit status is the
+# only thing Dev Console looks at.
+#
+# Install (privileged, opt-in):
+#   install -Dm 0755 packaging/dev-console-auth-helper /usr/libexec/dev-console-auth-helper
+#   install -Dm 0644 packaging/polkit/ai.codemate.devconsole.policy \
+#     /usr/share/polkit-1/actions/ai.codemate.devconsole.policy
+
+set -eu
+
+if [ "$(id -u)" = "0" ]; then
+    # pkexec ran us as root, which is what the policy asks for. Nothing to do here.
+    exit 0
+fi
+
+# Invoked without pkexec: refuse to act as an authentication gate.
+exit 1

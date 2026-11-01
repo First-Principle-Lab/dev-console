@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "finder",
+  "description": "Finder window: search, copy, open details and request unlock only. Edit, delete, reveal and execution commands are rejected by window label in Rust, and no window, path, shell or keyring API is exposed to this webview.",
+  "windows": [
+    "finder"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

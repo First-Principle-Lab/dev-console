@@ -1,0 +1,43 @@
+[package]
+name = "dev-console"
+version = "0.1.0"
+description = "Local command and secret console for Linux desktops"
+authors = ["parththirwani"]
+edition = "2021"
+rust-version = "1.77"
+default-run = "dev-console"
+
+[lib]
+name = "dev_console_lib"
+# Desktop-only (Linux/X11+Wayland): the mobile cdylib/staticlib shapes would triple the
+# link step for no benefit, and on a small machine they are the first thing to OOM.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rusqlite = { version = "0.40", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+age = { version = "0.12", default-features = false, features = ["armor"] }
+keyring = "4"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+# The `test` feature adds tauri::test (mock runtime + real invoke dispatch) so the integration
+# suites can drive the production command handlers. Dev-only: the release build does not see it.
+tauri = { version = "2", features = ["tray-icon", "test"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

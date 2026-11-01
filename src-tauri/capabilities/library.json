@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "library",
+  "description": "Library window. Only event subscription is granted to the webview; the library never calls window or IPC plugin APIs directly, and every privileged command is re-checked against the calling window label in Rust.",
+  "windows": [
+    "library"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

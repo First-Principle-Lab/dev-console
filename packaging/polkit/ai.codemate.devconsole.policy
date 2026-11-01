@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "https://specifications.freedesktop.org/polkit/latest/polkit-config.dtd">
+<policyconfig>
+
+  <!--
+    Action used by `pkexec /usr/libexec/dev-console-auth-helper` when the user clears a
+    manual vault lock. The helper performs no action of its own: it exists purely so polkit
+    can require real, interactive system authentication before Dev Console will clear the
+    persistent manual-lock flag. A dismissed dialog leaves the vault locked.
+
+    Installation is opt-in and privileged; see the install script's with-auth-helper option.
+  -->
+  <vendor>Dev Console</vendor>
+  <vendor_url>https://github.com/parththirwani/dev-console</vendor_url>
+
+  <action id="ai.codemate.devconsole.unlock">
+    <description>Unlock the Dev Console secret vault</description>
+    <message>Dev Console is locked. Authenticate to unlock the secret vault.</message>
+    <icon_name>system-lock-screen</icon_name>
+    <defaults>
+      <!-- Interactive authentication of the active user; remembered briefly so a second
+           unlock in the same session does not prompt twice. -->
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/dev-console-auth-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+</policyconfig>

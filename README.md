@@ -1,72 +1,170 @@
 # Dev Console
 
-A local desktop console for saved commands and secrets. It runs in the system tray, provides a GUI for managing entries, and opens a combined search finder with Super+F.
+A local-first desktop tray app for the two things you copy all day: **commands** and **secrets**.
+Built with Tauri 2 (Rust backend, Svelte 5 frontend) for Linux desktops — X11 and Wayland, tested
+against Hyprland.
 
-The first release targets Arch Linux with Hyprland. The planned stack is Tauri 2, Svelte, TypeScript, and a small Rust backend.
+Everything stays on your machine: commands live in a local SQLite database, secrets live in an
+age-encrypted vault whose key never leaves the OS Secret Service (gnome-keyring / KWallet), and
+there is no account, no sync, no telemetry and no cloud storage anywhere in the product.
 
-## Project status
+## What it does
 
-Planning stage. This repository currently contains the product plan and implementation specification. The application, installer, keybinding, and CLI commands have not been implemented yet.
+**Library window** — two tabs (Commands, Secrets) with counts, a filterable list pane (pinned
+first, type/tag chips, usage and "updated" info) and an inspector pane for the selected entry:
+copy, reveal, edit, pin, run and delete, with confirmations for destructive actions.
 
-## Planned interfaces
+**Finder** — a 680×420 command palette on a global shortcut (`Super+F` by default). One field
+searches commands and unlocked secrets together; first result is preselected, `Tab` completes the
+name inline, `↑`/`↓` move the selection, `Enter` copies the value, `Ctrl+O` opens the entry in the
+library, `Esc` dismisses. Everything is reachable from the keyboard, and the list keeps proper
+combobox/listbox semantics.
 
-### Library GUI
+**Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
+restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock
+never clears the lock unless the vault actually decrypted.
 
-Two tabs, Commands and Secrets, support browsing, viewing, adding, editing, deleting, copying, and pinning entries. Each entry has a name, type, tags, and optional description, notes, and custom fields such as project, URL, environment, or account.
+**Clipboard** — values are copied as ordinary text (so you can paste them anywhere), the app
+claims ownership of the selection and clears it after the expiry window you configure (default
+30s). It reports honestly when history exclusion is unavailable instead of claiming a protection
+it cannot deliver.
 
-Closing the library keeps the application running in the tray. The tray menu opens the library or finder, adds entries, locks or unlocks the vault, opens settings, and quits the app. Start at login is optional.
+**Execution** — commands run in your configured terminal only after an explicit approval, and the
+approval is invalidated when the command text changes.
 
-### Finder
+**Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
+in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
+truncated file, a corrupted file or a newer format is rejected before anything is applied.
 
-Super+F opens a compact search window from any workspace. Search commands and unlocked secrets together by name, type, tags, and description. Results show entry metadata; secret values stay masked.
+## Running it
 
-| Key | Planned behavior |
-| --- | --- |
-| Super+F | Open or hide the finder |
-| Up / Down | Select a result and scroll it into view |
-| Tab | Complete the selected entry's name |
-| Enter | Copy the selected command or secret |
-| Ctrl+O | Open the selected entry in the library |
-| Escape | Close the finder |
-
-The first matching result is selected automatically. Command execution is a separate Run action in the library; searching or completing a name never executes it.
-
-## Storage and vault behavior
-
-Commands use local SQLite storage. Secrets and their metadata use an encrypted local vault. The system keyring holds the vault credential for automatic unlocking during normal desktop use.
-
-Manual locking hides secret entries and blocks access until an explicit authenticated unlock. The manual lock state must survive app restarts. Commands remain searchable while the vault is locked.
-
-The planned CLI is:
-
-```sh
-dev-console vault lock
-dev-console vault unlock
-dev-console vault status
+```bash
+bun install --frozen-lockfile   # JS/TS toolchain and task runner is Bun
+bun run dev                     # frontend only, in a browser (no native IPC)
+bun run tauri dev               # the real app against the Vite dev server
+bunx tauri build --no-bundle    # release binary at src-tauri/target/release/dev-console
 ```
 
-These commands are not available yet. The encrypted storage library, system authentication after manual lock, clipboard-history exclusion, and session lock integration must be verified before storing real secrets.
+The first run creates a vault key in your keyring; if no Secret Service is running, secret
+features report themselves unavailable and commands keep working.
 
-No account, cloud sync, or external search service is required. Secret values must stay out of logs, notifications, search previews, and plaintext exports. Backups remain encrypted and include a separate recovery strategy for a lost keyring.
+## Verifying
 
-## Architecture
+```bash
+bash scripts/verify.sh
+```
 
-One resident Tauri app owns a system tray, a library window, and a finder window. Both windows call the same Rust backend for persistence, search, vault state, and clipboard actions. Metadata-only events keep their results synchronized after edits.
+That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests, production build,
+Playwright (library + Finder + redesign + visual review captures), `cargo fmt --check`, clippy with
+warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 
-Hyprland launches the finder through `dev-console --finder`. Repeated launches reuse the running application. Super+F currently controls fullscreen in the target setup, so installing the finder binding will replace that shortcut.
+| Script | What it proves | Without the environment |
+| --- | --- | --- |
+| `scripts/test-keyring.sh` | the real Secret Service round trip through the app's own keyring adapter | exit 77 = UNVERIFIED |
+| `scripts/test-native-ipc.sh` | real SQLite + real age vault + real provider + real X11 selection, across a restart | exit 77 = UNVERIFIED |
+| `scripts/test-clipboard.sh` | real X11 selection ownership, expiry retraction, exclusion reporting | exit 77 = UNVERIFIED |
+| `scripts/test-packaging.sh` | staged install, desktop file, polkit policy, exact uninstall | exit 77 = UNVERIFIED |
+| `scripts/test-arch-package.sh` | Arch package layout from `packaging/arch/PKGBUILD` | exit 77 = UNVERIFIED |
+| `scripts/smoke-native.sh <binary>` | the compiled app: control socket, single instance, lock survives restart, private files | exit 77 = UNVERIFIED |
 
-## Documentation
+Each harness exits **77** when its environment is missing; that is reported as UNVERIFIED and never
+silently converted into a pass. `TEST_REPORT.md` records which acceptance criteria are proven, where,
+and what is still open.
 
-- [Project plan](PLAN.md): product behavior, security requirements, delivery order, and acceptance checks.
-- [Implementation specification](IMPLEMENTATION.md): screen layouts, window lifecycle, data models, backend commands, source structure, and desktop integration.
-- [Cloud agent prompt](CLOUD_AGENT_PROMPT.md): unattended implementation instructions, checkpoint commits, testing, native compilation, CI artifacts, and handoff requirements.
-- [Completion checklist](COMPLETION_CHECKLIST.md): 24 required outcomes, confirming tests, evidence requirements, and explicit complete/partial stopping rules.
+## Continuous integration
 
-## Delivery order
+`packaging/ci/github-actions.yml` is the pipeline (Bun job, Rust job, the environment-dependent
+harness job, and a release-plus-native-smoke job). It lives outside `.github/workflows/` because the
+token this repository is pushed with has no `workflow` scope, so GitHub rejects any push that would
+create a workflow file. To enable it:
 
-1. Build the tray lifecycle, library GUI, command storage, and finder.
-2. Add keyring integration, encrypted secret storage, and authenticated locking.
-3. Add clipboard handling, separate command execution, backups, and settings.
-4. Package the app and verify Super+F, the Waybar tray, focus, startup time, and memory use on Arch Linux.
+```bash
+git mv packaging/ci/github-actions.yml .github/workflows/ci.yml && git push
+```
 
-Development and installation instructions will be added when a runnable application exists. Do not commit actual credentials, vault data, or local command databases to this repository.
+Nothing else is required: the jobs call the same scripts documented above, and a harness that
+cannot run in CI exits 77 and is reported rather than hidden.
+
+## Visual review
+
+`artifacts/ui-review/before/` and `artifacts/ui-review/after/` hold the review grid — eleven UI
+states captured at 1440, 768 and 390 px (`SHOT_SET=before|after bun run test:e2e -- screenshots`).
+These are **UI-shell** checks: the browser preview cannot reach native IPC, so they run against the
+documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
+
+## Keyboard
+
+| Where | Keys |
+| --- | --- |
+| Desktop | `Super+F` Finder (configured in your compositor, see below) |
+| Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
+| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Esc` close |
+
+## Desktop integration (Hyprland and other Wayland compositors)
+
+Tauri cannot register a *global* shortcut on wlroots compositors, so the binding lives in the
+compositor. For Hyprland:
+
+```ini
+# hyprland.conf
+bind = SUPER, F, exec, dev-console --finder
+```
+
+`dev-console --finder` talks to the already-running instance over
+`$XDG_RUNTIME_DIR/dev-console/control.sock` (mode 0600) and raises the Finder; if nothing is
+running it starts one in the background. The same socket serves the CLI (`dev-console vault lock`,
+`dev-console vault status`), which is how you wire a lock-on-screen-lock rule:
+
+```ini
+# hyprland.conf — lock the vault when the session locks
+bindl = , exec, dbus-send --session --dest=org.freedesktop.DBus \
+  /org/freedesktop/DBus org.freedesktop.DBus.AddMatch string \
+  "type='signal',interface='org.freedesktop.DBus.Properties'"
+exec-once = bash -c 'while true; do busctl --user wait org.freedesktop.ScreenSaver.Active true >/dev/null 2>&1 \
+  && dev-console vault lock; done'
+```
+
+or, with `hyprlock`/`swaylock`, add `dev-console vault lock` to the lock command's pre-hook.
+
+**Session-lock behaviour, stated exactly:** locking your *session* does not by itself lock the vault,
+and this app does not pretend otherwise — there is no portable way for a sandboxed client to be
+notified of session lock on every compositor. What is guaranteed is stronger and local: the vault
+key is released from memory by `dev-console vault lock` (or the tray's **Lock**) and the manual lock
+persists across restarts until polkit re-authenticates you. Add the hook above and the two lock
+states move together.
+
+## Arch Linux install
+
+`packaging/arch/PKGBUILD` builds the release binary plus the frontend and installs the launcher,
+polkit policy, helper and icons. Install it with:
+
+```bash
+makepkg -si                     # in packaging/arch (builds from the tagged source)
+```
+
+For AUR use the same PKGBUILD with `source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")`.
+On other distributions `sudo PREFIX=/usr/local bash packaging/install.sh` installs the same
+file set (and writes an uninstall manifest, so `sudo PREFIX=/usr/local bash packaging/install.sh uninstall` removes
+exactly what it placed). See `docs/packaging.md`.
+
+## Layout
+
+```
+src/                 Svelte 5 frontend (tokens.css is the only source of colour/spacing)
+  components/        Button, Badge, Dialog, EmptyState, EntryDetails, EntryEditor, EntryList,
+                     ExtraFields, Icon, Keycap, SettingsPanel, StatusLine, Tabs, VaultStatus
+  windows/           Library.svelte, Finder.svelte
+src-tauri/src/       Rust: repository (SQLite), vault (age), keyring, auth (polkit), backup,
+                     clipboard, control (Unix socket), execution, ipc, search, settings, tray
+src-tauri/tests/     native backend integration tests (no test doubles)
+scripts/             verification harnesses (each exits 77 when the environment is missing)
+packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD
+docs/                packaging and desktop-integration notes
+artifacts/ui-review/ before/after screenshot grid
+```
+
+## Status
+
+`TEST_REPORT.md` is the authoritative verdict per acceptance criterion: what is proven by an
+executed test, what is only UI-shell covered, and what remains unverified in a headless container.
+Items are never marked passed without a run behind them.
