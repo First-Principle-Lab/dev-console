@@ -34,7 +34,10 @@ build() {
   bun install --frozen-lockfile
   bun run build:frontend
 
-  cargo build --release --manifest-path src-tauri/Cargo.toml --locked
+  # `tauri/custom-protocol` is what makes the binary load the embedded assets. A plain
+  # `cargo build --release` compiles Tauri in dev mode, which points the webview at the
+  # Vite dev server URL and cannot run standalone.
+  cargo build --release --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol
 }
 
 check() {

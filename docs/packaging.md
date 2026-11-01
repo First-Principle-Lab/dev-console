@@ -6,7 +6,9 @@ polkit policy, the helper the policy authorises, and the icons.
 ## Arch Linux
 
 `packaging/arch/PKGBUILD` builds from a release tarball with `bun install --frozen-lockfile`,
-`bun run build:frontend` and `cargo build --release --locked`, then installs:
+`bun run build:frontend` and `cargo build --release --locked --features tauri/custom-protocol`
+(the feature flag is required: without it Tauri compiles in dev mode and the binary needs the
+Vite dev server), then installs:
 
 | Path | From |
 | --- | --- |
