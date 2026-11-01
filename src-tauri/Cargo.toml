@@ -35,9 +35,24 @@ tempfile = "3"
 # suites can drive the production command handlers. Dev-only: the release build does not see it.
 tauri = { version = "2", features = ["tray-icon", "test"] }
 
+[profile.dev]
+# Debug builds were measured at 4.1 GB of target/ with full debuginfo - on a nearly full
+# disk that is the build's biggest cost and it slows linking too. Line tables keep panic
+# locations and usable backtraces while dropping the heavy variable/type info.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Dependencies need no debuginfo at all for day-to-day work on this app.
+debug = false
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[profile.release.package."*"]
+# The app crate stays small ("s"); dependencies take the real speed: age/crypto, SQLite
+# and serde are where the hot loops are, and they cost almost nothing extra to build.
+opt-level = 3

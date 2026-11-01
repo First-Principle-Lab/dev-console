@@ -43,7 +43,7 @@ fn emit_vault_state<R: Runtime>(app: &AppHandle<R>) {
 }
 
 #[tauri::command]
-pub fn app_state<R: Runtime>(app: AppHandle<R>, _window: WebviewWindow<R>) -> AppStateInfo {
+pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
     AppStateInfo {
         vault: state(&app).vault.state(),
         version: app.package_info().version.to_string(),
@@ -54,11 +54,7 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>, _window: WebviewWindow<R>) -> Ap
 }
 
 #[tauri::command]
-pub fn search_entries<R: Runtime>(
-    app: AppHandle<R>,
-    _window: WebviewWindow<R>,
-    request: SearchRequest,
-) -> SearchResponse {
+pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
     let state = state(&app);
     let entries = state.searchable_metadata(None);
     let results = search::rank(
@@ -255,12 +251,9 @@ pub fn delete_entry<R: Runtime>(
 /// Copies the *saved* record, never a draft, and re-checks vault access while holding the
 /// vault lock so a queued copy cannot complete after a lock was acknowledged.
 #[tauri::command]
-pub fn copy_entry<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    request: CopyRequest,
-) -> AppResult<CopyResult> {
-    let _ = &window; // both windows may copy; privileged editing/execution is library-only
+pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppResult<CopyResult> {
+    // No window guard here on purpose: both windows may copy; privileged editing and
+    // execution are library-only via require_library in their own handlers.
     let state = state(&app);
     let expiry = state.settings.get().clipboard_expiry_seconds;
     match request.kind {
@@ -327,10 +320,7 @@ pub fn run_command<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn lock_vault<R: Runtime>(
-    app: AppHandle<R>,
-    _window: WebviewWindow<R>,
-) -> AppResult<VaultState> {
+pub fn lock_vault<R: Runtime>(app: AppHandle<R>) -> AppResult<VaultState> {
     let state = state(&app);
     // Order matters: secrets stop being readable first, then any app-owned clipboard copy.
     state.vault.lock()?;
@@ -342,10 +332,7 @@ pub fn lock_vault<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn unlock_vault<R: Runtime>(
-    app: AppHandle<R>,
-    _window: WebviewWindow<R>,
-) -> AppResult<VaultState> {
+pub fn unlock_vault<R: Runtime>(app: AppHandle<R>) -> AppResult<VaultState> {
     let state = state(&app);
     state.vault.unlock()?;
     // A replacement that startup could not settle (no readable keyring then) gets another turn

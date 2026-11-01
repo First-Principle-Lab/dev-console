@@ -36,13 +36,17 @@
       "deb": {
         "depends": [
           "libwebkit2gtk-4.1-0",
-          "libayatana-appindicator3-1"
+          "libayatana-appindicator3-1",
+          "wl-clipboard",
+          "xclip"
         ]
       },
       "rpm": {
         "depends": [
           "webkit2gtk4.1",
-          "libappindicator-gtk3"
+          "libappindicator-gtk3",
+          "wl-clipboard",
+          "xclip"
         ]
       }
     }
