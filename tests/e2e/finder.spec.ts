@@ -84,6 +84,34 @@ test('Escape clears the query and hides the finder', async ({ page }) => {
   await expect(page.getByTestId('finder-input')).toHaveValue('');
 });
 
+test('keys still work after a click moved focus onto a row', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  const rows = page.getByTestId('result-row');
+  await expect(rows).toHaveCount(5);
+  const ids = await rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.rowId ?? ''));
+
+  await rows.nth(2).click();
+  // Enter acts on the clicked row exactly once (no double activation).
+  await page.keyboard.press('Enter');
+  let state = await mockState(page);
+  expect(state.copied).toHaveLength(1);
+  expect(state.copied[0]?.id).toBe(ids[2]);
+  expect(state.hidden).toContain('self');
+
+  await boot(page, SEED, 'finder');
+  const rows2 = page.getByTestId('result-row');
+  await expect(rows2).toHaveCount(5);
+  const ids2 = await rows2.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.rowId ?? ''));
+  await rows2.nth(2).click();
+  // Arrow keys keep moving the selection from the row focus.
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('finder-input')).toHaveAttribute('aria-activedescendant', `row-${ids2[3]}`);
+  // And Escape hides the finder even when the input does not hold focus.
+  await page.keyboard.press('Escape');
+  state = await mockState(page);
+  expect(state.hidden).toContain('self');
+});
+
 test('with no matches Tab and Enter do nothing', async ({ page }) => {
   await boot(page, SEED, 'finder');
   await page.getByTestId('finder-input').fill('zzzznomatch');

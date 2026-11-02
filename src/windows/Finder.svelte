@@ -166,6 +166,7 @@
         await acceptCompletion();
         break;
       case 'Enter':
+      case ' ':
         event.preventDefault();
         await activate();
         break;
@@ -224,7 +225,6 @@
           bind:this={input}
           bind:value={query}
           oninput={() => void runSearch(query).catch(() => undefined)}
-          onkeydown={(event) => void onKeydown(event)}
           role="combobox"
           aria-expanded="true"
           aria-controls="finder-results"
@@ -248,6 +248,9 @@
 
     <ul id="finder-results" class="results" role="listbox" aria-label="Results" bind:this={list}>
       {#each rows as row (row.id)}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- keyboard activation is handled at window level (listbox pattern: the input owns
+             the key focus, rows follow aria-activedescendant), see the <svelte:window> handler -->
         <li
           id={`row-${row.id}`}
           data-row-id={row.id}
@@ -258,13 +261,6 @@
           class:system={row.id === UNLOCK_ID}
           onclick={() => (selectedId = row.id)}
           ondblclick={() => void activate()}
-          onkeydown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              selectedId = row.id;
-              void activate();
-            }
-          }}
           tabindex={row.id === selectedId ? 0 : -1}
           data-testid="result-row"
         >
@@ -333,6 +329,8 @@
     </footer>
   </div>
 </div>
+
+<svelte:window on:keydown={onKeydown} />
 
 <style>
   /* The palette frame. In Tauri the window is 680x420 and borderless; in the browser
