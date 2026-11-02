@@ -349,3 +349,75 @@ Suite on this state: `bun run check` 0/0, eslint clean, vitest 22/22 (includes t
 Playwright 68/68 (the 57 baseline tests plus 3 from C4, 3 from C6, 4 new here and the new capture),
 colour literals outside `tokens.css` still 0 hex / 0 `rgb*(`, `backdrop-filter` still 0, and
 `before/`, `after/`, `native/`, `raycast-baseline/` byte-untouched; `src-tauri/` still untouched.
+
+## Project fit - how every change follows the repo's established patterns (checkpoint C7, same date)
+
+This section re-maps the conventions list to the concrete changes, the existing file or pattern each
+one follows, and the command that proves it. Every count below was re-measured on this tree, not
+carried over from earlier sections.
+
+### (a) Every new visual value is a tokens.css token
+
+- Count proof: hardcoded hex outside `tokens.css` is **0** (baseline 2), `rgb(`/`rgba(` (slash syntax
+  included, per the C3 note) outside `tokens.css` is **0** (baseline 3), `backdrop-filter` is **0**
+  (baseline 0). Repro: `grep -rEo '#[0-9a-fA-F]{3,8}\b' src | grep -v styles/tokens.css` and
+  `grep -rnE '\brgba?\(' src | grep -v styles/tokens.css` (each prints nothing),
+  `grep -rn backdrop-filter src | wc -l` prints 0.
+- Per-rule token names: the three "as landed" sections above enumerate every changed selector with
+  the exact token it now consumes (`--shell-bg`/`--surface-shell`, `--search-h`/`--search-focus-bg`,
+  `--selected`/`--selected-edge`/`--selected-marker`/`--hover-fill`, `--border-hair`/`--border-shell`/
+  `--border-warn`, `--tile-*`/`--row-h`/`--text-row*`/`--leading-tight`, `--label-tracking`,
+  `--field-icon-indent`, `--inset-fill`, `--gap-*`).
+- Enforcement proof (beyond grep): `tests/unit/design-tokens.test.ts` fails the unit run if any
+  `.svelte`/`.ts` under `src/` reintroduces a colour literal and if the dark and light palette blocks
+  drift apart by property name, and `scripts/contrast-check.mjs` fails if a colour token is added
+  that appears in neither its audited pairing table nor its reasoned exemption list. "Values come
+  from tokens.css" is now a gate, not a convention - exactly the header comment's own rule
+  ("add a token instead of a literal") made executable.
+
+### (b) Svelte 5 runes style matches Finder.svelte / Library.svelte
+
+- Mechanical proof across the whole branch: **zero** diff hunks fall inside the `<script>` block of
+  any of the 13 changed `.svelte` files (`git diff -U0 291a6a6..HEAD -- <file>` hunk start line vs
+  the file's `</script>` line, per file - all 0). The runes code the baseline already had
+  (`$state`/`$derived`/`$effect`: Finder 5, Library 14, SettingsPanel 11, EntryEditor 5, ...) is
+  byte-identical, so the redesign cannot have introduced legacy store syntax; independently, no added
+  line anywhere in `src/` contains `writable(`/`readable(`/`derived(`/`$:` (grep of the added lines
+  reports 0). Every change is markup and `<style>` only, reading tokens through `var(--...)`.
+
+### (c) New e2e follows the suite's helpers-and-marking conventions
+
+- All new tests boot through the existing `boot(page, SEED, view)` / `mockState(page)` from
+  `tests/e2e/helpers.ts` (redesign.spec.ts:4, screenshots.spec.ts:5); `helpers.ts` itself is
+  untouched (`git diff --stat 291a6a6..HEAD -- tests/e2e/helpers.ts` empty), and no test hand-rolls
+  its own state injection.
+- Plaintext-marker absence is kept and extended: the baseline assertion
+  `expect(body).not.toContain('synthetic-value-1')` in "secret rows stay masked ..." survives at
+  redesign.spec.ts:47, C4 adds the locked-vault metadata absence and the masked-detail check at
+  redesign.spec.ts:409, and `screenshots.spec.ts` `capture()` now asserts every seeded marker
+  (`synthetic-masked-value`, `synthetic-db-password`, `synthetic-long-secret`) is absent from the
+  serialized DOM of *every* capture (screenshots.spec.ts:171-175) before writing the PNG.
+- Nothing was weakened to get there: assertion-call counts per spec base -> now are finder 40 -> 40,
+  library 39 -> 39, settings 57 -> 57, redesign 51 -> 118, screenshots 0 -> 1. Total removed lines
+  across all of `tests/` is 5, every one inside `screenshots.spec.ts` header comments and its
+  `SHOT_SET` default (the change that stops a plain gate run from rewriting the frozen `after/`
+  set); zero assertions were deleted from any baseline spec.
+
+### (d) Existing data-testid / aria hooks preserved
+
+- Machine check: for each of `data-testid`, `role`, `aria-selected`, `aria-activedescendant`,
+  `aria-label`, `aria-hidden`, `aria-live`, `aria-expanded`, `aria-describedby`, `aria-controls`,
+  every quoted attribute value present in `src/` at 291a6a6 is still present at HEAD
+  (`comm -23` of the two sorted `git grep -ho` sets is empty for all ten attributes); the single
+  dynamic binding (`data-testid={...}` in Tabs.svelte) is untouched. New hooks are additive only
+  (e.g. `data-testid="shortcut-hint"` on the empty-state chip).
+- Behavioural proof: all 57 baseline e2e tests pass unmodified against the redesigned DOM
+  (full run on this state: `Total: 68 tests in 5 files`, 68 passed / 0 failed / 0 flaky /
+  0 skipped - 57 baseline + 11 additions from C4/C6/C5).
+
+### (e) src-tauri untouched
+
+- `git diff --stat 291a6a6..HEAD -- src-tauri` is empty: the Rust backend, including `windows.rs`,
+  is byte-identical to the commit at which `cargo fmt --check` and `cargo clippy -D warnings` were
+  clean at baseline, so no native-side re-verification is required. Every material decision (opaque
+  shell, `--material-blur: 0px`, no `backdrop-filter`) was made in CSS alone.
