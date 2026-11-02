@@ -20,17 +20,39 @@ use std::process::{Command, Stdio};
 use crate::error::{AppError, AppResult};
 
 pub const ACTION_ID: &str = "ai.codemate.devconsole.unlock";
-pub const HELPER_PATH: &str = "/usr/libexec/dev-console-auth-helper";
-pub const POLICY_PATH: &str = "/usr/share/polkit-1/actions/ai.codemate.devconsole.policy";
+/// Where the helper and policy can live. The documented privileged install and the
+/// manifest installer use different prefixes (`/usr` vs `/usr/local`), and polkitd searches
+/// both policy directories, so the app must accept either location instead of hardcoding
+/// one - otherwise a correctly installed system reports "not installed" and every unlock
+/// fails closed.
+pub const HELPER_CANDIDATES: &[&str] = &[
+    "/usr/libexec/dev-console-auth-helper",
+    "/usr/local/libexec/dev-console-auth-helper",
+];
+pub const POLICY_CANDIDATES: &[&str] = &[
+    "/usr/share/polkit-1/actions/ai.codemate.devconsole.policy",
+    "/usr/local/share/polkit-1/actions/ai.codemate.devconsole.policy",
+];
 pub const PKEXEC_PATH: &str = "/usr/bin/pkexec";
+
+pub fn helper_path() -> Option<&'static Path> {
+    HELPER_CANDIDATES
+        .iter()
+        .map(Path::new)
+        .find(|path| path.is_file())
+}
+
+pub fn policy_installed() -> bool {
+    POLICY_CANDIDATES
+        .iter()
+        .any(|path| Path::new(path).is_file())
+}
 
 /// True only when the real mechanism is installed. Until the documented privileged install
 /// step is run this returns false and the app reports that authenticated unlock is
 /// unavailable, instead of presenting an immediately reversible hide as a secure lock.
 pub fn mechanism_available() -> bool {
-    Path::new(PKEXEC_PATH).is_file()
-        && Path::new(HELPER_PATH).is_file()
-        && Path::new(POLICY_PATH).is_file()
+    Path::new(PKEXEC_PATH).is_file() && helper_path().is_some() && policy_installed()
 }
 
 pub fn unavailable_reason() -> &'static str {
@@ -46,25 +68,38 @@ pub fn authenticate(_reason: &str) -> AppResult<()> {
     if !mechanism_available() {
         return Err(AppError::VaultUnavailable(unavailable_reason().into()));
     }
-    let output = Command::new(PKEXEC_PATH)
-        .arg(HELPER_PATH)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|child| child.wait_with_output())
-        .map_err(|error| {
-            AppError::Execution(format!(
-                "could not start the authentication helper: {}",
-                error.kind()
-            ))
-        })?;
+    let output = match helper_path() {
+        None => {
+            return Err(AppError::VaultUnavailable(unavailable_reason().into()));
+        }
+        Some(helper) => Command::new(PKEXEC_PATH)
+            .arg(helper)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(|child| child.wait_with_output()),
+    }
+    .map_err(|error| {
+        AppError::Execution(format!(
+            "could not start the authentication helper: {}",
+            error.kind()
+        ))
+    })?;
     let code = output.status.code();
     match code {
         Some(0) => Ok(()),
-        // 126: authentication was dismissed. 127: not authorized.
+        // 126: authentication was dismissed by the user.
         Some(126) => Err(AppError::Locked),
-        Some(127) => Err(AppError::Locked),
+        // 127: the request was refused without ever being answered - most often because no
+        // authentication agent is running to show the prompt. That is not the user saying
+        // no, so report the real cause instead of masquerading as a dismissed lock.
+        Some(127) => Err(AppError::Other(
+            "the system could not ask for authentication (no polkit authentication agent is \
+             answering, or this session is not allowed to authenticate); the vault stays \
+             locked"
+                .into(),
+        )),
         Some(other) => {
             let detail = String::from_utf8_lossy(&output.stderr)
                 .trim()

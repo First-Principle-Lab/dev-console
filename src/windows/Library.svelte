@@ -67,6 +67,9 @@
   const meta = $derived(entries.find((e) => e.id === selectedId) ?? null);
 
   function message(error: unknown, fallback: string): string {
+    // Tauri rejects with the backend's message as a plain string (AppError serializes via
+    // Display); without this branch every real failure would show the fallback instead.
+    if (typeof error === 'string' && error.length > 0) return error;
     return error instanceof Error && error.message.length > 0 ? error.message : fallback;
   }
 

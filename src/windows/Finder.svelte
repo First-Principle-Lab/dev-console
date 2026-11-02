@@ -45,6 +45,9 @@
   const tail = $derived(completion && completion.length > query.length ? completion.slice(query.length) : '');
 
   function message(problem: unknown, fallback: string): string {
+    // Tauri rejects with the backend's message as a plain string (AppError serializes via
+    // Display); without this branch every real failure would show the fallback instead.
+    if (typeof problem === 'string' && problem.length > 0) return problem;
     return problem instanceof Error && problem.message.length > 0 ? problem.message : fallback;
   }
 
