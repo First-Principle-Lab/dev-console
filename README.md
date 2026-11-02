@@ -109,6 +109,13 @@ translucent layer over the surface it is painted on and checks 76 real pairings 
 `tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
 contrast fails the gate.
 
+`artifacts/ui-review/native-redesign/` holds the redesign as actually painted by the compiled
+release binary under Xvfb (`scripts/native-capture.sh`): library and palette over a dark and a
+busy X11 background, in both themes, with pixel probes proving the opaque shell never bleeds the
+background through, keeps square window corners, maps without a flash frame and does not repaint
+at rest. Wayland/Hyprland compositor blur cannot be exercised here and stays a manual checklist
+in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
+
 ## Keyboard
 
 | Where | Keys |

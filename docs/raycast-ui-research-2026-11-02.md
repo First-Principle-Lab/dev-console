@@ -421,3 +421,99 @@ carried over from earlier sections.
   is byte-identical to the commit at which `cargo fmt --check` and `cargo clippy -D warnings` were
   clean at baseline, so no native-side re-verification is required. Every material decision (opaque
   shell, `--material-blur: 0px`, no `backdrop-filter`) was made in CSS alone.
+
+## Native material pass as landed (checkpoint C9)
+
+Capture tooling added: `scripts/native-capture.sh` (+ `scripts/_native-capture-session.sh`,
+`scripts/native/xsession-probe.c`, `scripts/native/seed-commands.mjs`). It launches the compiled
+release binary inside a private dbus session + Xvfb (1280x800x24), paints the root window with
+the `xsession-probe bg dark|busy` helper (xsetroot/xdotool/xwininfo are not installed here),
+seeds four synthetic COMMANDS into the app's own freshly migrated database (command metadata
+only - no secret is ever created, and the vault is never unlocked in this session), drives the
+keyboard with XTEST through the same probe (`focus` + `type`), and measures the real screen with
+`scrot` plus pixel-level `sample` / `picheck` / `diff` grabs.
+
+### The material level actually achieved on this host: OPAQUE SHELL ON X11
+
+- The shipped default is a carefully shaded OPAQUE shell and that is what the real binary paints:
+  over a saturated red/green/cyan/magenta/orange mosaic (`busy`) the client areas of BOTH windows
+  contain ZERO background-coloured pixels (`picheck` sums 0 for library and palette, in BOTH
+  themes), all four window corners are app paint (square - there is no compositor here to round
+  or blur anything), and the palette centre sampled 0.4s after mapping is already app paint
+  (`#ffffff` light / `#15161a` dark), i.e. no blank or white flash frame on map.
+- No glass is claimed anywhere. `backdrop-filter` occurrences in `src/` remain 0 and
+  `--material-blur` ships at `0px`; `src-tauri/src/windows.rs` was NOT touched (it stays
+  byte-identical to base - there is no transparency prototype in it to mark as unverified).
+- True Wayland/Hyprland compositor translucency and blur are UNVERIFIED here: no Wayland
+  session, no Hyprland, no compositor exists in this sandbox. That is an environment limit, not
+  a result, and it is why the manual checklist below stays a written handoff step.
+
+### Captures (real release binary, 1280x800 Xvfb; library window 1040x700 at 0,0; palette 680x420 at 300,190)
+
+- `artifacts/ui-review/native-redesign/native-redesign-library__dark-xvfb.png` - light palette, dark X background
+- `.../native-redesign-finder__dark-xvfb.png` - locked palette over the dark background (footer shows Up/Down select, Tab complete, Enter copy, Ctrl+O details, Esc dismiss)
+- `.../native-redesign-finder-query__dark-xvfb.png` - palette after XTEST-typed `docker` (caret visible, results filtered, "Unlock vault to search secrets" row: no secret metadata while the vault is sealed)
+- `.../native-redesign-library__busy-xvfb.png` + `.../native-redesign-finder__busy-xvfb.png` - opaque windows over the busy mosaic
+- `.../native-redesign-library__darktheme-xvfb.png` + `.../native-redesign-finder__darktheme-xvfb.png` - `GTK_THEME=Adwaita:dark` over the dark background (WebKitGTK maps the GTK theme to prefers-color-scheme, so the same tokens render the dark palette unmodified)
+- `.../native-redesign-finder__darktheme-busy-xvfb.png` - dark palette over the busy mosaic
+
+No capture contains a plaintext secret: the native database holds only the four synthetic
+command rows above, the vault was never unlocked, and the locked UI states are exactly what the
+captures show (same masking rule the e2e DOM dumps assert).
+
+### Two native findings worth recording
+
+1. **"Native finder paints no results" (iteration 8 blocker) is a BUILD-RECIPE artifact, not a
+   redesign regression and not a keyring issue.** A plain `cargo build --release` binary of a
+   Tauri 2 app without the `custom-protocol` feature compiles in `cfg(dev)` mode and loads the
+   `devUrl` instead of the embedded assets: every window shows WebKitGTK's "Could not connect to
+   127.0.0.1: Connection refused" page, which is what earlier native probes were capturing. The
+   only correct capture binary here is the one `scripts/verify.sh` itself builds -
+   `bunx tauri build --no-bundle` with the four memory-tuning env vars (incremental: ~46s with a
+   warm dependency cache). The committed pre-redesign `artifacts/ui-review/native/native-library__xvfb.png`
+   proves the CLI-built binary renders the app. With the CLI build, search, typing, selection,
+   lock state and dismissal all work in the real window.
+2. **A phantom horizontal scrollbar in the library inspector, found by the native pass.**
+   WebKitGTK counts the sticky action bar's negative inline margins (the C5 flush-edge recipe)
+   as scrollable overflow that Blink ignores, and kept repainting a 3px overlay scrollbar
+   (pixel-diff between two grabs 400ms apart: 2070 changed pixels at y=694..696 - a "changing at
+   rest" frame). Fixed in `EntryDetails.svelte` styles only: the pane declares
+   `overflow-x: hidden; overflow-y: auto`. After the fix the same probe reports `changed=0` at
+   rest for both windows on both backgrounds, 68/68 Playwright tests still pass (the 760x520
+   reachability test included) and Chromium-rendered captures are unaffected because Blink never
+   showed the bar. This is why the browser e2e suite could not catch it: the bug only exists in
+   the engine the product actually ships on.
+
+### Manual desktop checklist (Hyprland + Wayland - the part this host cannot execute)
+
+Run the installed `dev-console` (or `bunx tauri build --no-bundle` output) under a real Hyprland
+session and record each item; any failure is a redesign bug, not an environment limit:
+
+1. Both themes (`GTK_THEME` unset and `Adwaita:dark`): shell, rows, footer and dialogs read as
+   designed; no half-light/half-dark flashes at startup.
+2. Backgrounds: dark wallpaper, light wallpaper, a busy/animated wallpaper; the opaque shell
+   never shows wallpaper through its body, its text stays legible, and no halo/shadow seam
+   appears at window edges when the wallpaper changes under it.
+3. 20 open/dismiss cycles (global shortcut or `dev-console --finder`), switching focus to
+   another application between opens: the palette appears focused with an empty query every
+   time, disappears on Escape/select/copy, and never steals focus back after it hides.
+4. Hyprland `decoration:rounding` > 0: window corners round cleanly with no square corner peek
+   and no gap between shell edge and rounded mask (the CSS radius is `--radius-shell` 14px; the
+   compositor clips the actual window - they must look coherent, not fight).
+5. Flash frames: no white/black first frame on any of the 20 opens (the X11 probe checks the
+   centre pixel 0.4s after map; on Wayland observe with the naked eye and a screen recording).
+6. Stale frames: after dismissing and reopening, the palette shows fresh results, never the
+   previous query's rows; the library updates its vault pill without a manual refresh.
+7. Focus loss: start a long-running operation in another app, open the palette, type, Enter to
+   copy; the clipboard receives exactly one copy and the other app does not lose keyboard focus
+   permanently.
+8. Lag: typing a 40-character query feels immediate; scroll the library list while the palette
+   is open - no dropped frames or scroll-wheel focus confusion.
+9. Tray: with a StatusNotifierWatcher host running, the tray icon appears, the menu actions
+   (open library / lock / quit) work, and the app keeps running when all windows are closed.
+10. Lock/unlock with a real Secret Service provider: the vault pill transitions locked ->
+    unlocked without repaint artifacts and secret metadata appears only after unlock.
+11. If a future pass flips the opt-in `data-transparency='on'` prototype on: blur only behind
+    the shell (never per row), and on any compositor without blur support the forced-opaque
+    fallback must paint exactly the captures above. Until items 1-10 pass on a real desktop,
+    "native glass" must not be claimed anywhere.

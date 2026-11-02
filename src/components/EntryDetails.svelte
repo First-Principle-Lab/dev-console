@@ -142,7 +142,11 @@
        with the bottom edge of the pane instead of floating above a gap */
     padding: var(--sp-4) var(--sp-4) 0;
     height: 100%;
-    overflow: auto;
+    /* the only scroll axis this pane needs is vertical; WebKitGTK otherwise counts the
+       sticky action bar's negative inline margins as scrollable overflow and paints a
+       phantom horizontal scrollbar that keeps repainting (native capture evidence) */
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   .head {
     display: flex;
