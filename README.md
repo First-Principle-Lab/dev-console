@@ -94,9 +94,11 @@ These are **UI-shell** checks: the browser preview cannot reach native IPC, so t
 documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
 
 `raycast-baseline/` and `raycast-after/` are the before/after pair for the Raycast-inspired pass
-(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); both sets are 41 PNGs
-with the same filenames, so `diff` between the two directory listings names every capture that
-moved. The default `SHOT_SET` is `raycast-after`, which keeps a plain `bunx playwright test` from
+(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); the baseline set is 41
+PNGs and the redesign set 42 - the extra one, `17-library-minimum-window`, is the state the visual
+pass needed and the old grid did not have (the smallest real library window, one pane, action area
+on screen). Every other filename is shared, so `diff` between the two directory listings names the
+captures that moved. The default `SHOT_SET` is `raycast-after`, which keeps a plain `bunx playwright test` from
 rewriting the frozen `after/` set; `SHOT_HTML=1` writes each captured DOM alongside, and any
 synthetic secret value reaching a capture fails the run.
 

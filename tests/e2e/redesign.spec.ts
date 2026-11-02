@@ -381,3 +381,146 @@ test('keyboard focus draws the ring from --focus-ring', async ({ page }) => {
   expect(Number.parseFloat(focused!.width), 'focus ring must be at least 2px').toBeGreaterThanOrEqual(2);
   expect(focused!.color).not.toBe('rgba(0, 0, 0, 0)');
 });
+
+/* ------------------------------------------------------------------ library pass */
+
+test('the inspector keeps every metadata value but only one chip', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('entry-row').first().click();
+  const details = page.getByTestId('entry-details');
+  // Nothing was lost on the way to "fewer chips": every value that used to carry its own
+  // bordered pill is still on screen, now as one quiet context line in the palette idiom.
+  await expect(details).toContainText('Shell');
+  await expect(details).toContainText('#work');
+  await expect(details).toContainText('Pinned');
+  await expect(details).toContainText('r2');
+  await expect(details).toContainText('updated');
+  await expect(details.locator('.ctx-part')).toHaveCount(5);
+  // and only the kind is allowed to be a chip, so the name stays the loudest thing here.
+  await expect(details.locator('.chip')).toHaveCount(1);
+  await expect(details.locator('.chip')).toHaveText('Command');
+
+  // the same promise on the secret screen, where the mask must not have moved either
+  await page.getByTestId('tab-secrets').click();
+  await page.getByTestId('entry-row').first().click();
+  await expect(page.getByTestId('entry-details').locator('.chip')).toHaveText('Secret');
+  await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
+  await expect(page.getByTestId('reveal')).toBeVisible();
+  expect(await page.content(), 'a masked secret must not reach the DOM').not.toContain('synthetic-value-1');
+});
+
+test('the action area stays put at the minimum window and keyboard focus lands on it', async ({ page }) => {
+  // Content long enough that the inspector really scrolls, so "stable" can fail.
+  const long = {
+    commands: [
+      {
+        id: 'c9', revision: 1, name: 'Long record', type: 'Shell', tags: ['work'],
+        description: 'Ships the thing. '.repeat(14), notes: 'Note line.\n'.repeat(26),
+        fields: [], pinned: false, command: 'echo long', workingDirectory: '', usageCount: 1
+      }
+    ],
+    secrets: []
+  };
+  await page.setViewportSize({ width: 760, height: 520 });
+  await boot(page, long);
+  await page.getByTestId('entry-row').first().focus();
+  await page.keyboard.press('Enter');
+  const details = page.getByTestId('entry-details');
+  await expect(details).toBeVisible();
+  // one-pane navigation is retained at this width: the list gave way to the record
+  await expect(page.getByTestId('entry-row')).toHaveCount(0);
+  expect(
+    await details.evaluate((el) => el.scrollHeight > el.clientHeight + 40),
+    'the record has to actually scroll for this test to mean anything'
+  ).toBe(true);
+
+  let reached = false;
+  for (let i = 0; i < 12 && !reached; i += 1) {
+    await page.keyboard.press('Tab');
+    reached = await page.evaluate(
+      () => (document.activeElement as HTMLElement | null)?.getAttribute('data-testid') === 'copy'
+    );
+  }
+  expect(reached, 'Tab must reach the primary action at the minimum window size').toBe(true);
+  const box = await page.getByTestId('copy').boundingBox();
+  expect(box, 'the focused action has to be on screen').not.toBeNull();
+  expect(box!.y + box!.height, 'the action area must sit inside the 760x520 window').toBeLessThanOrEqual(521);
+
+  // stable: scrolling the record to its top must not move the action area out of view
+  await details.evaluate((el) => el.scrollTo(0, 0));
+  await expect(page.getByTestId('copy')).toBeInViewport();
+  await expect(page.getByTestId('delete')).toBeInViewport();
+});
+
+test('settings, the delete dialog and the palette draw one shared shell frame', async ({ page }) => {
+  const frameOf = (selector: string): Promise<{ radius: string; shadow: string; border: string }> =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) throw new Error(`missing ${sel}`);
+      const cs = getComputedStyle(el);
+      return {
+        radius: cs.borderTopLeftRadius,
+        shadow: cs.boxShadow,
+        border: `${cs.borderTopWidth} ${cs.borderTopStyle}`
+      };
+    }, selector);
+
+  await boot(page, SEED);
+  const shell = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--radius-shell').trim()
+  );
+  expect(shell, 'the shell arc comes from a token').not.toBe('');
+
+  await page.getByTestId('settings').click();
+  await page.getByTestId('settings-panel').waitFor();
+  const settings = await frameOf('[data-testid="settings-panel"]');
+  expect(settings.radius, 'settings uses the shared shell arc').toBe(shell);
+  expect(settings.shadow, 'settings uses the shared shell elevation').not.toBe('none');
+  await page.getByTestId('close-settings').click();
+
+  await page.getByTestId('entry-row').first().click();
+  await page.getByTestId('delete').click();
+  const dialog = await frameOf('[role="dialog"].surface-shell');
+  expect(dialog.radius, 'a confirmation is the same object as settings').toBe(settings.radius);
+  expect(dialog.border, 'one hairline edge, not a stack of frames').toBe('1px solid');
+  expect(dialog.shadow).not.toBe('none');
+  await page.getByTestId('cancel-delete').click();
+
+  await boot(page, SEED, 'finder');
+  const palette = await frameOf('.palette');
+  expect(palette.radius, 'the palette shares that frame too').toBe(settings.radius);
+});
+
+test('the empty library is built from the same tiles and chips as a populated one', async ({ page }) => {
+  await boot(page, { commands: [], secrets: [] });
+  const empty = await page
+    .getByTestId('empty-state')
+    .first()
+    .locator('.glyph')
+    .evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { fill: cs.backgroundColor, colour: cs.color };
+    });
+  const hint = await page.getByTestId('shortcut-hint').evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      radius: cs.borderTopLeftRadius,
+      fill: cs.backgroundColor,
+      keycap: getComputedStyle(el.querySelector('kbd') as Element).backgroundColor
+    };
+  });
+  expect(hint.radius, 'chips are the one shared pill').toBe('999px');
+  expect(hint.keycap, 'a keycap must not disappear into the chip that carries it').not.toBe(hint.fill);
+
+  await boot(page, SEED);
+  const tile = await page
+    .getByTestId('entry-row')
+    .first()
+    .locator('.kind')
+    .evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { fill: cs.backgroundColor, colour: cs.color };
+    });
+  expect(empty.fill, 'the empty state uses the same kind-tile fill as a row').toBe(tile.fill);
+  expect(empty.colour, 'and the same kind accent').toBe(tile.colour);
+});

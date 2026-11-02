@@ -44,19 +44,26 @@
     </span>
     <div class="titles">
       <h2 class="name">{meta.name}</h2>
-      <div class="chips">
+      <!-- One prominent thing (the kind) and one quiet context line, using the same
+           separator idiom as a finder row and the entry list, instead of six equally
+           prominent chips. Every value that used to be a chip is still on screen. -->
+      <div class="headline">
         <Badge tone={isSecret ? 'secret' : 'command'} icon={isSecret ? 'secret' : 'command'}>
           {isSecret ? 'Secret' : 'Command'}
         </Badge>
-        <Badge>{meta.type}</Badge>
-        {#each meta.tags as tag (tag)}
-          <Badge>#{tag}</Badge>
-        {/each}
-        {#if meta.pinned}
-          <Badge tone="status" icon="pin">Pinned</Badge>
-        {/if}
-        <Badge tone="status">r{meta.revision}</Badge>
-        <span class="muted when" title={absoluteTime(meta.updatedAt)}>updated {relativeTime(meta.updatedAt)}</span>
+        <span class="ctx">
+          <span class="ctx-part">{meta.type}</span>
+          {#each meta.tags as tag (tag)}
+            <span class="ctx-part">#{tag}</span>
+          {/each}
+          {#if meta.pinned}
+            <span class="ctx-part"><span class="pin"><Icon name="pin" size={11} /></span>Pinned</span>
+          {/if}
+          <span class="ctx-part ctx-dim">r{meta.revision}</span>
+          <span class="ctx-part ctx-dim" title={absoluteTime(meta.updatedAt)}>
+            updated {relativeTime(meta.updatedAt)}
+          </span>
+        </span>
       </div>
     </div>
   </header>
@@ -131,7 +138,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
-    padding: var(--sp-4);
+    /* no bottom padding: the sticky action bar supplies it, so the bar can sit flush
+       with the bottom edge of the pane instead of floating above a gap */
+    padding: var(--sp-4) var(--sp-4) 0;
     height: 100%;
     overflow: auto;
   }
@@ -140,6 +149,7 @@
     gap: var(--sp-3);
     align-items: flex-start;
   }
+  /* the kind tile at the list/palette size scale, no extra frame of its own */
   .glyph {
     display: grid;
     place-items: center;
@@ -149,7 +159,6 @@
     border-radius: var(--radius-row);
     color: var(--kind-command);
     background: var(--accent-soft);
-    border: var(--border-hair);
   }
   .glyph.secret {
     color: var(--kind-secret);
@@ -165,14 +174,36 @@
     font-size: var(--text-xl);
     word-break: break-word;
   }
-  .chips {
+  .headline {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
     flex-wrap: wrap;
+    min-width: 0;
   }
-  .when {
-    font-size: var(--text-xs);
+  /* the secondary context line: same type, colour and separator as a palette row,
+     so one visual language covers the list, the palette and the inspector */
+  .ctx {
+    display: block;
+    color: var(--fg-muted);
+    font-size: var(--text-row-meta);
+    line-height: var(--leading-tight);
+    min-width: 0;
+  }
+  .ctx-part + .ctx-part::before {
+    content: '·';
+    margin: 0 var(--gap-tags);
+    color: var(--fg-dim);
+  }
+  .ctx-dim {
+    color: var(--fg-dim);
+  }
+  /* the pinned marker is the same accent glyph the list row uses */
+  .pin {
+    color: var(--accent);
+    display: inline-flex;
+    vertical-align: -1px;
+    margin-right: var(--gap-keys);
   }
   .description {
     margin: 0;
@@ -185,12 +216,15 @@
     flex-direction: column;
     gap: var(--sp-2);
   }
+  /* one box recipe for every mono surface in the app: --bg-sunken + the hairline
+     the shared .block utility uses, so a command block and a run confirmation are
+     the same object */
   .code {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
     background: var(--bg-sunken);
-    border: var(--border);
+    border: var(--border-hair);
     border-radius: var(--radius);
     padding: var(--sp-3);
   }
@@ -222,14 +256,21 @@
     font-size: var(--text-xs);
     max-width: 70ch;
   }
+  /* The action area belongs to the pane, not to the end of the record: it sticks to
+     the bottom edge of the scrolling inspector so Copy / Run / Edit / Delete are on
+     screen at the 760x520 minimum window and a keyboard user never tabs into a
+     control that is off screen. The hairline is the one separator it needs. */
   .actions {
-    margin-top: auto;
+    position: sticky;
+    bottom: 0;
+    margin: auto calc(-1 * var(--sp-4)) 0;
+    padding: var(--sp-3) var(--sp-4);
     display: flex;
     gap: var(--sp-3);
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    padding-top: var(--sp-3);
+    background: var(--bg);
     border-top: var(--border-hair);
   }
   .group {

@@ -282,3 +282,70 @@ prior tests unchanged plus the three new ones), colour literals outside `tokens.
 `backdrop-filter` occurrences still 0, and `before/`, `after/`, `native/` and `raycast-baseline/`
 byte-untouched; `raycast-after/` regenerated (41 PNGs) with the marker-absence assertion passing
 on every captured DOM.
+
+## Library, editor, settings and dialogs pass as landed (same date, brief step 4, checkpoint C5)
+
+Five components and one window changed, markup and styles only: `Library.svelte`,
+`EntryDetails.svelte`, `EntryEditor.svelte`, `SettingsPanel.svelte`, `VaultStatus.svelte`.
+`git diff` has **zero hunks inside any `<script>` block** of those files, so no form field,
+save/cancel/dirty rule, backup warning, reveal, lock or clipboard path moved; every one of the 63
+earlier Playwright tests still passes unaltered.
+
+New structural tokens (in `:root`, not palettes, next to `--border`/`--border-hair`):
+`--border-warn` (the one deliberate frame, `1px solid var(--warn)`, used by every card that asks
+before it destroys), `--label-tracking` (0.06em, the group/field label tracking) and
+`--field-icon-indent` (26px, the leading-icon inset a filter field needs). Spacing literals in
+`SettingsPanel` (`10px`, `12px 16px`, `4px 16px 16px`, `8px`, `5px`, `4px`, `1px`, `3px` and the
+`10px`/`1.15` pair in `VaultStatus`) are now `--gap`, `--sp-*`, `--gap-sm`, `--gap-xs`,
+`--gap-tags`, `--text-xs` and `--leading-tight`.
+
+- Quiet header, one rule per boundary. The header dropped its own `--border` and its
+  `--bg-panel` fill (it is `--bg` now) so the top of the window reads as one chrome area: the only
+  lines under the chrome are the tab strip's own track and the toolbar's single `--border-hair`.
+  The brand glyph is the shared `--tile-sm`/`--radius-sm` tile on `--accent-soft` with
+  `--kind-command`, no frame; the wordmark is `--fg-muted`. `VaultStatus` is a hairline pill whose
+  edge only strengthens to `--line-strong` in the unhealthy states. The list/detail split moved
+  from `--border` to `--border-shell`: region separators use the shell line, internal rows use the
+  hairline, controls use `--line`.
+- Detail header: six-to-nine equally prominent chips became **one** chip (the kind, because the
+  brief asks for commands and secrets to stay distinguishable) plus one quiet context line
+  `type · #tag · ⬆ Pinned · rN · updated …` built from the *same* `.ctx-part` separator idiom,
+  `--text-row-meta`, `--fg-muted`/`--fg-dim` and `.pin` accent glyph as a palette row and the entry
+  list. Nothing was dropped: `redesign.spec.ts` asserts type, tag, `Pinned`, `rN` and `updated` are
+  all still rendered while the number of chips in the inspector is exactly one.
+- Stable action area: the inspector's footer is `position: sticky; bottom: 0` on `--bg` behind one
+  `--border-hair` (and `.details` gave up its bottom padding so the bar sits flush). Copy / Run /
+  Edit / Delete are therefore inside the 760x520 window whether the record is short or scrolling,
+  and keyboard focus can never land on an action that is off screen - proved by the new test that
+  selects a row by `Enter` at 760x520, tabs to `copy` and asserts its box bottom is within 520px.
+- One box recipe: `.code` (command and masked value) moved from `--border` to the `--border-hair`
+  + `--bg-sunken` recipe the shared `.block` utility uses, so a command block and the run
+  confirmation are the same object; the kind tiles in the inspector and the editor are now the
+  shared `--tile-lg`/`--radius-row` tile with `--kind-*`, matching the palette and list rows.
+- Editor groups are grouped the way the settings panel groups: a label and a gap, not a box inside
+  a box - three frames and their `--bg-panel` fills are gone. A group header is `--text-sm` +
+  `--label-tracking` while a field label stays `--text-xs`, so `IDENTITY` and `NAME` can never read
+  as two labels of the same rank; `SettingsPanel h4` uses the identical header recipe.
+- Settings is now the same floating object as the delete dialog and the palette: its local `.panel`
+  frame was replaced by the shared `.surface-shell` utility (the local rule keeps only size and
+  flex layout, so it cannot out-spec the shared frame), with `--border-hair` dividers in the header
+  and footer. Its argv chips render through the global `.chip` pill (local override deleted) with
+  `--gap-tags` rhythm; every confirm card (`export overwrite`, `import review`) draws
+  `--border-warn`; the recovery block keeps the `--inset-fill` + hairline inset recipe.
+  `redesign.spec.ts` proves the shared frame from computed styles: settings, the delete dialog and
+  the palette all report `--radius-shell` and a non-`none` shell shadow.
+- The empty library shares the same tokens too (kind tile fill/accent equal to a populated row's,
+  the `Super + F` hint chip on `--inset-fill` so a `--bg-raised` keycap does not vanish into it).
+
+Captures inspected at 100% after regeneration (all 42 DOM dumps re-proved free of every synthetic
+secret marker by `capture()`): `artifacts/ui-review/raycast-after/01`-`07` at 1440/768/390,
+`14-library-long-content__1440.png`, `15-settings__1040.png`, `15-settings-minimum__760.png`,
+`16-settings-import-review__1040.png`, and the new
+`17-library-minimum-window__760.png` - the smallest real window, one-pane navigation with the
+action area on screen. Before-state comparison: the same filenames in
+`artifacts/ui-review/raycast-baseline/`.
+
+Suite on this state: `bun run check` 0/0, eslint clean, vitest 22/22 (includes the contrast gate),
+Playwright 68/68 (the 57 baseline tests plus 3 from C4, 3 from C6, 4 new here and the new capture),
+colour literals outside `tokens.css` still 0 hex / 0 `rgb*(`, `backdrop-filter` still 0, and
+`before/`, `after/`, `native/`, `raycast-baseline/` byte-untouched; `src-tauri/` still untouched.

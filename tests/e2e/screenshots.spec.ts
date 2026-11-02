@@ -109,6 +109,17 @@ test('settings import review card at the real library size', async ({ page }) =>
   await capture(page, '16-settings-import-review', 1040, 700);
 });
 
+test('library record at the real minimum window size', async ({ page }) => {
+  // 760 x 520 is the smallest window the shell is created with, and under 900px the library
+  // switches to one pane: this is the state where an action area that scrolled off the bottom
+  // would be unreachable.
+  await page.setViewportSize({ width: 760, height: 520 });
+  await boot(page, LONG);
+  await page.getByTestId('entry-row').first().click();
+  await page.getByTestId('entry-details').waitFor();
+  await capture(page, '17-library-minimum-window', 760, 520);
+});
+
 const EMPTY = { commands: [], secrets: [] };
 
 /** Deliberately awkward content: long names, tags, values and paths must not break the layout. */

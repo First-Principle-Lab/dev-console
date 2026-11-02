@@ -40,6 +40,9 @@
   --text-row: 13.5px;
   --text-row-meta: 11.5px;
 
+  /* the uppercase group label, identical wherever a group needs a name */
+  --label-tracking: 0.06em;
+
   /* spacing + layout rhythm */
   --sp-1: 4px;
   --sp-2: 8px;
@@ -67,6 +70,10 @@
   --border-strong: 1px solid var(--line-strong);
   --border-hair: 1px solid var(--line-hair);
   --border-shell: 1px solid var(--line-shell);
+  /* the one deliberate frame: a card that asks before it destroys (run / delete /
+     import review / recovery). Every confirm surface in the app uses this, so a
+     warn outline always means the same thing. */
+  --border-warn: 1px solid var(--warn);
 
   /* control sizes */
   --control-h: 30px;
@@ -81,6 +88,8 @@
   --tile-xl: 40px;
   --badge-min: 20px;
   --edge-w: 2px;
+  /* indent for a leading icon inside a field (icon tile + its gap) */
+  --field-icon-indent: 26px;
 
   /* motion */
   --transition: 120ms ease;
@@ -576,7 +585,7 @@ select {
   color: var(--fg-muted);
   font-size: var(--text-xs);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--label-tracking);
 }
 
 .error-banner {

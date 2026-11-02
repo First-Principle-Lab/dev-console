@@ -273,7 +273,7 @@
 </script>
 
 <div class="backdrop" role="dialog" aria-modal="true" aria-label="Settings">
-  <div class="panel" data-testid="settings-panel">
+  <div class="sheet surface-shell" data-testid="settings-panel">
     <header class="head">
       <h3>Settings</h3>
       <button onclick={onClose} data-testid="close-settings">Close</button>
@@ -319,7 +319,7 @@
             {#if terminalError}
               <p class="field-error" role="alert" data-testid="terminal-error">{terminalError}</p>
             {:else if terminalTokens.length}
-              <p class="muted detail" id="terminal-preview" data-testid="terminal-tokens">
+              <p class="muted detail tokens" id="terminal-preview" data-testid="terminal-tokens">
                 Runs: {#each terminalTokens as token, i (i)}<code class="chip mono">{token}</code>{/each}
               </p>
             {/if}
@@ -518,12 +518,13 @@
     place-items: center;
     padding: var(--sp-4);
   }
-  .panel {
+  /* Settings is a floating surface, so it takes the one shell definition the delete
+     dialog and the palette use (fill, edge, radius, elevation) from tokens.css.
+     Nothing is painted by `sheet` itself: the shared frame does that, and repeating
+     the fill here would win on specificity and freeze a second frame. */
+  .sheet {
     width: min(780px, 100%);
     max-height: min(100%, 92vh);
-    background: var(--bg-panel);
-    border: var(--border);
-    border-radius: var(--radius);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -532,15 +533,17 @@
   .foot {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
+    gap: var(--gap);
+    padding: var(--sp-3) var(--sp-4);
     flex: none;
   }
+  /* hairlines, not frames: the shell edge already draws the outline, so a second
+     1px line under the header and over the footer would just thicken it */
   .head {
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
   }
   .foot {
-    border-top: var(--border);
+    border-top: var(--border-hair);
   }
   .head h3 {
     margin: 0;
@@ -551,7 +554,7 @@
     /* min-height: 0 keeps the body scrollable inside the flex column, so the footer and every
        confirmation action stay reachable in a short window. */
     min-height: 0;
-    padding: 4px 16px 16px;
+    padding: var(--sp-1) var(--sp-4) var(--sp-4);
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
@@ -562,10 +565,11 @@
     gap: var(--sp-3);
     padding-top: var(--sp-2);
   }
+  /* the shared group-header recipe, identical to the editor's fieldset legends */
   h4 {
     margin: 0;
     font-size: var(--text-sm);
-    letter-spacing: 0.04em;
+    letter-spacing: var(--label-tracking);
     text-transform: uppercase;
     color: var(--fg-muted);
   }
@@ -575,7 +579,7 @@
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: var(--gap);
   }
   .field {
     display: flex;
@@ -595,7 +599,7 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--gap-sm);
   }
   .spacer {
     flex: 1;
@@ -617,12 +621,11 @@
   .wrap {
     overflow-wrap: anywhere;
   }
-  .chip {
-    border: var(--border);
-    border-radius: var(--radius);
-    padding: 0 5px;
-    margin-right: 4px;
-    font-size: var(--text-xs);
+  /* no local .chip rule: the argv tokens render through the shared chip pill in
+     tokens.css, the same one the empty library uses for its shortcut hint. Inline
+     pills need the same inter-item rhythm the entry-list metadata line uses. */
+  .tokens code + code {
+    margin-left: var(--gap-tags);
   }
   .field-error {
     color: var(--danger);
@@ -631,7 +634,7 @@
   }
   .path-line code {
     background: var(--bg-sunken);
-    padding: 1px var(--gap-tags);
+    padding: var(--gap-xs) var(--gap-tags);
     border-radius: var(--radius);
   }
   .backup-list {
@@ -640,16 +643,18 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--sp-1);
     max-height: 150px;
     overflow: auto;
   }
   .backup-list li {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--gap-sm);
     font-size: var(--text-sm);
   }
+  /* the recovery block and every confirm card are inset surfaces: same fill and
+     hairline as the palette's locked note, one warn frame token */
   .recovery {
     margin: 0;
     padding: var(--sp-2);
@@ -661,7 +666,7 @@
     user-select: all;
   }
   .confirm {
-    border: 1px solid var(--warn);
+    border: var(--border-warn);
     border-radius: var(--radius);
     padding: var(--sp-3);
     display: flex;

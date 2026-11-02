@@ -522,7 +522,7 @@
         >
           {#snippet actions()}
             <Button variant="primary" icon="plus" onclick={startNew}>New {tab === 'secret' ? 'secret' : 'command'}</Button>
-            <span class="chip"><Keycap keys={['Super', 'F']} /> Finder</span>
+            <span class="chip shortcut" data-testid="shortcut-hint"><Keycap keys={['Super', 'F']} /> Finder</span>
           {/snippet}
         </EmptyState>
       {:else}
@@ -602,14 +602,17 @@
     flex-direction: column;
     height: 100%;
   }
+  /* The header is the quietest band in the window: it carries identity and the
+     vault/state controls and nothing else. No border of its own - the toolbar
+     under it is the band that separates from the content, so the top of the
+     window reads as one chrome area instead of three stacked rules. */
   header {
     display: flex;
     align-items: center;
     gap: var(--gap);
     min-width: 0;
     padding: var(--sp-2) var(--sp-3);
-    border-bottom: var(--border);
-    background: var(--bg-panel);
+    background: var(--bg);
   }
   .brand {
     display: flex;
@@ -617,16 +620,22 @@
     gap: var(--sp-2);
     font-size: var(--text-sm);
     letter-spacing: 0.01em;
+    color: var(--fg-muted);
   }
+  .brand strong {
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  /* the same kind tile as the finder row and the entry list: one size scale,
+     no border, no second accent fill in the header */
   .brand-glyph {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: var(--tile-sm);
+    height: var(--tile-sm);
     border-radius: var(--radius-sm);
-    color: var(--accent);
+    color: var(--kind-command);
     background: var(--accent-soft);
-    border: var(--border);
   }
   .waiting {
     font-size: var(--text-sm);
@@ -639,12 +648,14 @@
       gap: var(--sp-2);
     }
   }
+  /* one hairline under the whole chrome area; the tab strip keeps its own track
+     line, which is what the active-tab underline sits on */
   .toolbar {
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
     background: var(--bg-panel);
   }
   .tools {
@@ -666,7 +677,7 @@
     pointer-events: none;
   }
   .search input {
-    padding-left: 26px;
+    padding-left: var(--field-icon-indent);
   }
   .panes {
     flex: 1;
@@ -683,8 +694,11 @@
     min-width: 0;
     overflow: hidden;
   }
+  /* the list/detail split is a shell-level separation, not a control border: it is
+     the same line colour the floating shell uses, and it is the only divider
+     between the two panes */
   .list-pane {
-    border-right: var(--border);
+    border-right: var(--border-shell);
     background: var(--bg-panel);
   }
   .detail-pane {
@@ -695,8 +709,13 @@
   }
   .backrow {
     padding: var(--sp-2) var(--sp-3);
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
     background: var(--bg-panel);
+  }
+  /* the shortcut hint is a well for keycaps, not another raised pill: keycaps are
+     --bg-raised, so the fill behind them has to be the inset token or they disappear */
+  .shortcut {
+    background: var(--inset-fill);
   }
   @media (max-width: 900px) {
     .panes {

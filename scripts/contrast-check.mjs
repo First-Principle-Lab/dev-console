@@ -436,6 +436,12 @@ const STRUCTURE = [
     'no rule under src/ requests a compositor blur',
     !sourceFiles(join(ROOT, 'src')).some((file) => readFileSync(file, 'utf8').includes('backdrop-filter')),
   ],
+  [
+    'every confirm frame comes from --border-warn, none hand-writes a warn border',
+    !sourceFiles(join(ROOT, 'src'))
+      .filter((file) => file.endsWith('.svelte'))
+      .some((file) => /border[^;]*:\s*[^;]*solid var\(--warn\)/.test(readFileSync(file, 'utf8'))),
+  ],
 ];
 lines.push('', 'structural checks', '');
 for (const [label, pass] of STRUCTURE) {
