@@ -517,3 +517,108 @@ session and record each item; any failure is a redesign bug, not an environment 
     the shell (never per row), and on any compositor without blur support the forced-opaque
     fallback must paint exactly the captures above. Until items 1-10 pass on a real desktop,
     "native glass" must not be claimed anywhere.
+
+## Final integration gate as landed (checkpoint C8, same date)
+
+The repo's single documented gate run end to end on this tree, plus the regression comparison
+against the untouched-clone baseline log. The only hand-run check after the gate is the extra
+marker grep and the disposable capture pass named below, so every count comes from the gate
+process itself.
+
+Command (nothing else in the environment was special):
+
+```
+export SKIP_BUN_INSTALL=1 CARGO_BUILD_JOBS=1 CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+       CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_DEBUG=0
+bash scripts/verify.sh; echo "VERIFY_EXIT=$?"
+```
+
+- The gate was run more than once on this tree (once to read the output, then again with this
+  section already written, and once more as the last action before handing off). Every run ended
+  the same way; the last line of the recorded log is
+  `DEB ARTIFACT OK: dist/dev-console_0.1.0_amd64.deb` / `all checks passed` / `VERIFY_EXIT=0`.
+  Numbers below are from that run and are identical across runs.
+- Section structure is **identical** to `/tmp/cora/baseline-verify.log`:
+  `diff <(grep '^== ' /tmp/cora/baseline-verify.log) <(grep '^== ' <this run>)` prints nothing
+  (44 sections in both).
+- The only `UNVERIFIED` rows are the two pre-existing Arch-toolchain lines
+  (`makepkg is not available on this host` and the wrapper's `... the static half still ran`),
+  exactly as at baseline. No new UNVERIFIED row, no FAIL row.
+
+Per-section comparison (baseline -> this run):
+
+| Section | Baseline | This run |
+| --- | --- | --- |
+| svelte-check | 0 errors / 0 warnings | 0 errors / 0 warnings |
+| eslint | clean | clean |
+| frontend unit tests | 18 passed (3 files) | 22 passed (5 files) |
+| frontend production build | ok | ok |
+| browser E2E | 57 passed / 0 skipped | 68 passed / 0 skipped / 0 flaky / 0 unexpected |
+| cargo fmt --check, clippy -D warnings | clean | clean |
+| cargo test | 55 passed / 0 failed | 55 passed / 0 failed |
+| keyring (real provider) | `RESULT: exit 0` | `RESULT: exit 0` (incl. `real_keyring_round_trip ... ok`) |
+| clipboard (real X11) | `RESULT: PASS (real X11 selection through xclip)` | same, 4/4 |
+| packaging | ok | ok |
+| arch packaging | static ok + `RESULT: exit 77` | static ok + `RESULT: exit 77` (makepkg) |
+| native two-window IPC | `RESULT: exit 0` | `RESULT: exit 0` (default + ignored phases) |
+| release compile | ok | ok (`bunx tauri build --no-bundle`, ~45s incremental relink) |
+| native smoke | `ALL NATIVE SMOKE CHECKS PASSED`, `ok: screenshot captured` | same |
+| .deb artifact | `DEB ARTIFACT OK` | `DEB ARTIFACT OK` |
+
+### Regression exit gate (same state, no new failure)
+
+- No test disappeared, proven from the two logs rather than asserted:
+  - e2e: the multiset of reporter `title` fields differs by exactly 11 additions and 0 removals
+    (the 11 tests added by C4/C5/C6); `diff` of the sorted title counts shows only `>` lines.
+  - unit: all 18 `it(...)` titles present at `291a6a6` are still present at HEAD
+    (`comm -23` of the extracted titles is empty); the run now executes 22 because 4 were added.
+  - cargo: the sorted set of `test <name> ... ok|ignored` lines is byte-identical between the two
+    logs (`diff` empty, 66 lines both).
+- Security-sensitive behaviour the redesign could have broken, all re-verified green in this run:
+  - locked-vault metadata hiding: `a locked vault removes all secret metadata from the results`,
+    `a locked finder keeps secret names, types and tags out of the DOM`,
+    `a locked vault clears the secret list and blocks secret reads`, plus the native smoke checks
+    `4. secret operations stay refused while locked` and `8. unlock without an authentication
+    mechanism fails closed`.
+  - masked secret rows: `secret rows stay masked and are visibly a different kind`,
+    `secrets are masked in details and only appear through an explicit reveal`,
+    `the inspector keeps every metadata value but only one chip`.
+  - reveal deliberateness: `the recovery credential stays hidden until revealed and shows the
+    restore steps`, `a revealed recovery credential disappears the moment the vault locks`,
+    `a revealed recovery credential is not kept across a close and reopen`.
+  - copy paths: `Enter copies exactly the selected record and hides only after success`,
+    `Tab completes the selected name without copying anything`,
+    `copying from the finder reports a copied state without the value`,
+    `a copy failure keeps the finder open with a safe message`,
+    `the recovery credential copies through the backend clipboard path, never the browser one`,
+    and the real-X11 suite (`a copied secret is pasteable and is cleared when the vault locks`,
+    `the app never clears content it does not own`, `the_expiry_ticker_retracts_the_copy_and_only_then`).
+  - recovery key handling: `a_recovery_key_is_created_once_kept_private_and_reusable`,
+    `backup_files_never_contain_plaintext`, `an_export_never_silently_overwrites_and_leaves_no_staging_files`,
+    `a_recovery_credential_restores_an_archive_into_a_fresh_profile` (cargo, this run).
+  - plaintext fixtures: after the gate run, a disposable capture pass
+    (`SHOT_SET=c8-gate SHOT_HTML=1 bunx playwright test screenshots`, 42 DOM dumps) contains
+    **zero** occurrences of any fixture marker (`synthetic-value`, `synthetic-value-1`,
+    `synthetic-masked-value`, `synthetic-db-password`, `synthetic-secret-value`,
+    `synthetic-long-secret` and its padded variant); the same absence is asserted inside
+    `capture()` for every PNG while it is written.
+- Styling counters on the final tree: hex outside `tokens.css` 0 (baseline 2), `rgb(`/`rgba()`
+  outside `tokens.css` 0 (baseline 3), `backdrop-filter` 0 (baseline 0);
+  `artifacts/ui-review/raycast-baseline.sha256` verifies 41/41, and in the committed final tree every
+  tracked capture set (`before`, `after`, `native`, `raycast-baseline`, `raycast-after`,
+  `native-redesign`) is byte-identical to the state that earned C2-C5 and C9 - the gate regenerates
+  the default set as a side effect and it was restored (see the next bullet).
+- Honesty about the repeated runs: no `src/`, `src-tauri/` or `tests/` file changed between the
+  gate runs in this pass - the runs differ only by this documentation section - and every run
+  produced the same 44 sections, the same counts and the same single makepkg UNVERIFIED pair.
+- Known non-regression detail: the gate's Playwright step rewrites the default `raycast-after`
+  set, and between the two runs above a subset of the time-sensitive captures differs by under
+  10 bytes (`09-finder-inline-completion__1440`, `10-finder-no-matches__1440/768`,
+  `11-finder-copied__1440/768`, `12-finder-locked-row__1440/768`,
+  `13-finder-palette-680x420__680` - the result-count fade and the copied-state timer), with a
+  different subset each run. The regenerated 680x420 palette was inspected at 100% and is
+  unchanged in design (dominant unboxed search line, one row pattern, selected band with inset
+  marker + Enter keycap, full footer hints, result count 5); the committed set was restored so the
+  tracked record stays stable. Those files must never be hash-gated.
+- `git diff --stat src-tauri` remains empty, so C7(e) still resolves to "the Rust side is untouched"
+  and the fmt/clippy/cargo rows above are the baseline behaviour re-confirmed, not a new surface.
