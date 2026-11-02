@@ -111,7 +111,7 @@
     display: block;
   }
   .tab.active .count {
-    color: var(--accent);
+    color: var(--fg);
     border-color: var(--selected-edge);
     background: var(--accent-soft);
   }

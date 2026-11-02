@@ -54,7 +54,8 @@ features report themselves unavailable and commands keep working.
 bash scripts/verify.sh
 ```
 
-That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests, production build,
+That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests (which include the token
+contrast audit below), production build,
 Playwright (library + Finder + redesign + visual review captures), `cargo fmt --check`, clippy with
 warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 
@@ -98,6 +99,13 @@ with the same filenames, so `diff` between the two directory listings names ever
 moved. The default `SHOT_SET` is `raycast-after`, which keeps a plain `bunx playwright test` from
 rewriting the frozen `after/` set; `SHOT_HTML=1` writes each captured DOM alongside, and any
 synthetic secret value reaching a capture fails the run.
+
+Contrast is measured rather than asserted: `bun run check:contrast`
+(`scripts/contrast-check.mjs`) reads the palettes out of `src/styles/tokens.css`, composites every
+translucent layer over the surface it is painted on and checks 76 real pairings per theme at
+4.5:1 for text and 3:1 for state indicators, printing each ratio and each deliberate exemption.
+`tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
+contrast fails the gate.
 
 ## Keyboard
 

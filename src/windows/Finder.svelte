@@ -281,7 +281,7 @@
           </span>
           <span class="trail">
             {#if row.id === selectedId}
-              <span class="hintkeys" data-testid="row-action" aria-hidden="true"><Keycap keys={['Enter']} /></span>
+              <span data-testid="row-action" aria-hidden="true"><Keycap keys={['Enter']} /></span>
             {/if}
           </span>
         </li>
@@ -568,9 +568,6 @@
     align-items: center;
     gap: var(--gap-tags);
     white-space: nowrap;
-  }
-  .hintkeys {
-    opacity: 0.8;
   }
   .count {
     font-variant-numeric: tabular-nums;

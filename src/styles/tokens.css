@@ -101,7 +101,10 @@
   --line-strong: #404652;
   --fg: #e9eaef;
   --fg-muted: #a6acb9;
-  --fg-dim: #8b91a0;
+  /* dim is the quietest text in the app and it still has to clear 4.5:1 on the
+     selected band, which is the darkest place it appears - scripts/contrast-check.mjs
+     measures that pair and fails the build if this drifts back down. */
+  --fg-dim: #959bac;
 
   /* the floating shell: shaded opaque graphite with a fine light top edge.
      Opaque is deliberate - compositor blur cannot be proven on this host, so
@@ -183,7 +186,9 @@
     --inset-fill: rgba(20, 22, 28, 0.06);
 
     --search-fg: var(--fg);
-    --search-placeholder: #6b7280;
+    /* placeholder has to survive the focus wash under it, so it cannot be lighter
+       than this in the light theme (scripts/contrast-check.mjs) */
+    --search-placeholder: #626976;
     --search-focus-bg: rgba(27, 29, 35, 0.04);
     --caret: var(--accent);
 
@@ -245,7 +250,9 @@
   --inset-fill: rgba(20, 22, 28, 0.06);
 
   --search-fg: var(--fg);
-  --search-placeholder: #6b7280;
+  /* placeholder has to survive the focus wash under it, so it cannot be lighter
+     than this in the light theme (scripts/contrast-check.mjs) */
+  --search-placeholder: #626976;
   --search-focus-bg: rgba(27, 29, 35, 0.04);
   --caret: var(--accent);
 

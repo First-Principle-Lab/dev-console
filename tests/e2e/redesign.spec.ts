@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 import { boot, mockState } from './helpers';
 
@@ -251,3 +252,132 @@ test('a long name truncates without losing the right-aligned action', async ({ p
   expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
 });
 
+
+/** Relative luminance + contrast ratio, computed from what the browser really painted. */
+function parseRgb(value: string): [number, number, number] {
+  const match = value.match(/rgba?\(([^)]+)\)/);
+  if (!match) throw new Error(`not an rgb colour: ${value}`);
+  const [r, g, b] = match[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+  return [r, g, b];
+}
+
+function luminance(rgb: [number, number, number]): number {
+  const channel = (raw: number) => {
+    const value = raw / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
+}
+
+function contrast(a: string, b: string): number {
+  const first = luminance(parseRgb(a));
+  const second = luminance(parseRgb(b));
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+function paletteColours(page: Page): Promise<{ shell: string; footer: string; selected: string; radius: string }> {
+  return page.evaluate(() => {
+    const style = (selector: string, property: keyof CSSStyleDeclaration) => {
+      const el = document.querySelector(selector);
+      return el ? String(getComputedStyle(el)[property]) : '';
+    };
+    return {
+      shell: style('.palette', 'backgroundColor'),
+      footer: style('footer', 'color'),
+      selected: style('.row.active', 'backgroundColor'),
+      radius: style('.palette', 'borderRadius')
+    };
+  });
+}
+
+test('both themes apply through the same tokens and stay above 4.5:1 in the live DOM', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  const dark = await paletteColours(page);
+  expect(dark.shell, 'the mock starts in the dark theme').not.toBe('');
+  expect(contrast(dark.footer, dark.shell), 'dark footer text').toBeGreaterThanOrEqual(4.5);
+
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+  const explicit = await paletteColours(page);
+  expect(explicit.radius, 'shape tokens are shared by both themes').toBe(dark.radius);
+  expect(luminance(parseRgb(explicit.shell)), 'light must actually apply to the shell').toBeGreaterThan(
+    luminance(parseRgb(dark.shell))
+  );
+  expect(contrast(explicit.footer, explicit.shell), 'light footer text').toBeGreaterThanOrEqual(4.5);
+
+  // "Follow the system" has to land on the same values as the explicit setting.
+  await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  await page.emulateMedia({ colorScheme: 'light' });
+  const system = await paletteColours(page);
+  expect(system.shell).toBe(explicit.shell);
+  expect(system.footer).toBe(explicit.footer);
+  expect(system.selected).toBe(explicit.selected);
+});
+
+test('reduced motion collapses the transitions and the shipped shell stays opaque', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  const before = await page.getByTestId('result-row').first().evaluate((el) => getComputedStyle(el).transitionDuration);
+  expect(Number.parseFloat(before)).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await page
+    .getByTestId('result-row')
+    .first()
+    .evaluate((el) => getComputedStyle(el).transitionDuration);
+  expect(Number.parseFloat(reduced), 'reduced motion must collapse the transition').toBeLessThan(0.001);
+
+  // Material ships off: the blur token is 0px, the tint is transparent, and nothing paints a
+  // backdrop blur. This is the honest claim on this host - compositor blur is UNVERIFIED, so
+  // the app must not depend on it (docs/raycast-ui-redesign.md, "Native material outcome").
+  const shipped = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const palette = getComputedStyle(document.querySelector('.palette') as Element);
+    return {
+      blur: root.getPropertyValue('--material-blur').trim(),
+      tint: root.getPropertyValue('--material-tint').trim(),
+      shellBlur: palette.backdropFilter,
+      shellFill: palette.backgroundColor,
+      rowBlur: getComputedStyle(document.querySelector('.row') as Element).backdropFilter
+    };
+  });
+  expect(shipped.blur, 'the shipped default paints no blur').toBe('0px');
+  expect(shipped.tint).toBe('transparent');
+  expect(shipped.shellBlur).toBe('none');
+  expect(shipped.rowBlur, 'rows are never blurred').toBe('none');
+  expect(shipped.shellFill, 'the shell is a solid fill, not a translucent tint').not.toBe('rgba(0, 0, 0, 0)');
+
+  // Flipping the unverified native prototype switch must not change a single painted pixel of
+  // the CSS shell: no rule reads --material-blur, so the opaque fallback cannot be lost.
+  await page.evaluate(() => document.documentElement.setAttribute('data-transparency', 'on'));
+  const flipped = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const palette = getComputedStyle(document.querySelector('.palette') as Element);
+    return {
+      blur: root.getPropertyValue('--material-blur').trim(),
+      shellBlur: palette.backdropFilter,
+      shellFill: palette.backgroundColor
+    };
+  });
+  expect(flipped.blur, 'the switch does exist for the native prototype').toBe('24px');
+  expect(flipped.shellBlur, 'but the CSS layer still requests no blur').toBe('none');
+  expect(flipped.shellFill, 'and the shell keeps its opaque fill').toBe(shipped.shellFill);
+  await page.evaluate(() => document.documentElement.removeAttribute('data-transparency'));
+});
+
+test('keyboard focus draws the ring from --focus-ring', async ({ page }) => {
+  await boot(page, SEED);
+  const ring = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--focus-ring').trim()
+  );
+  expect(ring).not.toBe('');
+  await page.locator('.tabbar').focus();
+  await page.keyboard.press('Tab');
+  const focused = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return { tag: el.tagName, width: cs.outlineWidth, style: cs.outlineStyle, color: cs.outlineColor };
+  });
+  expect(focused, 'Tab must land on a control').not.toBeNull();
+  expect(focused!.style, 'focus indicator must be an outline, not a hue change').toBe('solid');
+  expect(Number.parseFloat(focused!.width), 'focus ring must be at least 2px').toBeGreaterThanOrEqual(2);
+  expect(focused!.color).not.toBe('rgba(0, 0, 0, 0)');
+});

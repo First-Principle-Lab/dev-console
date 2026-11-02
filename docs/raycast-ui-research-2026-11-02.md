@@ -199,3 +199,86 @@ under `src/` contains a colour literal. Colour literals outside `tokens.css` wen
 baseline (2 hex, 3 `rgb*(`) to 0 and 0: the last two hex were `var(--warning, #...)` fallbacks for
 a token that never existed - the real token is `--warn` - and the `rgb()` triple was three ad-hoc
 scrim/inset fills that now read `--backdrop`, `--bg-sunken` and `--inset-fill`.
+
+## Contrast pass as landed (same date, brief "Contrast and motion", checkpoint C6)
+
+The contrast promise is now measured, not asserted. `scripts/contrast-check.mjs` reads the three
+palette blocks straight out of `src/styles/tokens.css` (it carries no colour values of its own),
+resolves `var()` chains including the fallbacks, composites every translucent layer over the
+surface it is really painted on, and computes WCAG 2.1 relative-luminance ratios for 76 pairings
+per theme. Each pairing names the rule that produces it, e.g. `--footer-fg` on
+`--search-focus-bg + --shell-bg` is the Finder footer over the shell. Thresholds: 4.5:1 for text,
+3.0:1 for non-text state indicators. Nothing in this UI qualifies as WCAG "large text" (the
+largest token is `--text-xl` at 18px/400, and the 3:1 relaxation starts at 24px or 18.66px bold),
+so every text pair is held to 4.5:1.
+
+Minimum measured ratios on the landed tokens:
+
+| group | pairs | dark min | light min | threshold |
+| --- | --- | --- | --- | --- |
+| text on every surface family it is painted on | 46 | 4.71:1 | 4.57:1 | 4.5:1 |
+| `:focus-visible` ring on each surface it can land on | 8 | 6.83:1 | 8.00:1 | 3.0:1 |
+| selection marker vs its own band and vs an unselected row | 5 | 4.33:1 | 4.80:1 | 3.0:1 |
+| caret and field affordance | 4 | 5.02:1 | 4.99:1 | 3.0:1 |
+| kind / status tints that carry meaning | 13 | 3.45:1 | 4.01:1 | 3.0:1 |
+
+Three real failures surfaced and were fixed rather than exempted:
+
+- `--fg-dim` (dark) was 4.14:1 on the selected band, where the `EntryList` `.tag`/`.dot` and the
+  Finder `.ctx-part` separator actually render. Retuned `#8b91a0` to `#959bac`; the quietest text
+  in the app now clears 4.5:1 on the darkest place it appears (`--bg-raised` 5.45:1, selected band 4.76:1)
+  while staying visibly below `--fg-muted` (#a6acb9).
+- `--search-placeholder` (light) was 4.47:1 over the `--search-focus-bg` wash that the redesign
+  puts under it. Retuned `#6b7280` to `#626976` in *both* light palettes.
+- Finder's `.hintkeys { opacity: 0.8 }` multiplied the footer keycap's contrast down to roughly
+  4.0:1 behind a token the audit cannot see. The rule is deleted (and the now-unused class with
+  it); keycaps read at `kbd`'s own `--fg-muted`, and the row action lost only its 20% fade.
+  Any future "quieten it with opacity" is now visible to the checker, because opacity is not a
+  token and the pair it produces is measured flat.
+
+One pairing was corrected rather than weakened: `.tab.active .count` was `--accent` text on an
+`--accent-soft` pill (4.33:1 dark). The tab already declares itself with the `--selected` band,
+`--selected-edge` and the 2px `--accent` underline, so the badge is now `--fg` text (8.56:1 dark, 11.69:1 light) and
+keeps the tinted pill. The same reasoning is written down for the two remaining sub-3:1 pairs:
+`.pin` and the kind glyph tiles are *icons with a text label alongside* (title="Pinned", the name
+and type on the same row), so they are audited in the 3:1 non-text class, where they measure
+4.33:1 and 3.45:1 in dark.
+
+Exemptions are listed in the script with a reason and are still printed with their measured ratio,
+so the run cannot hide one: region separators (`--line`, `--line-shell`, `--line-hair`,
+`--shell-edge`), the soft `--selected-edge` (state is carried by the checked inset marker), the
+`--accent-line` focus border (it sits on top of the 3:1 `--focus-ring` outline), status *fills*
+(`--*-soft`, audited as surfaces with their text on them), `--backdrop`, and `--material-tint`
+(transparent by default; the opt-in value is the unverified native prototype). WCAG 1.4.11 does
+not require a separator, an inactive component or a boundary that is not the only way to identify
+a control to reach 3:1, and every text field this outlines carries a visible `.label` plus the
+`--focus-ring` outline. The sweep also *fails* if a colour token is added to a palette and appears
+in neither the pairing table nor the exempt list, and if the two light palettes drift apart.
+
+Wiring and live-DOM proof:
+
+- `tests/unit/contrast.test.ts` runs the script inside `bun run test` - i.e. inside
+  `scripts/verify.sh` - and prints its grouped output, so a future retune that breaks contrast
+  fails the single documented gate. `bun run check:contrast` prints the full 152-row table.
+  Verified as a gate: darkening `--fg-dim` to `#7d8390` makes the script exit 1 with five named
+  failures.
+- Three new Playwright tests measure the same promises from the rendered page instead of the
+  stylesheet: (1) both themes apply through the same tokens and the light palette really resolves
+  - `.palette` background, footer colour and radius are compared across `data-theme`, the explicit
+  light and `prefers-color-scheme` light values are asserted identical, and the footer-to-shell
+  ratio is recomputed at >= 4.5:1 from what the browser painted; (2) `reducedMotion: reduce`
+  collapses the row transition to < 1ms, `--material-blur` resolves to `0px` with
+  `--material-tint: transparent`, `backdrop-filter` is `none` on the shell and on the rows, and
+  flipping the unverified `data-transparency='on'` prototype switch to `24px` changes *no painted
+  CSS* (the shell keeps the identical opaque fill) because no rule reads the blur token; (3) Tab
+  focus draws a solid >= 2px outline, i.e. the focus indicator is a shape, not a hue.
+  Playwright's `emulateMedia` has no `prefers-reduced-transparency` knob, so that fallback is
+  proved statically: the script's structural section matches the media block and the
+  `data-transparency='off'` block and requires both to set `--material-blur: 0px` *and*
+  `--material-tint: transparent`.
+
+Suite on this state: `bun run check` 0/0, eslint clean, vitest 22/22, Playwright 63/63 (the 60
+prior tests unchanged plus the three new ones), colour literals outside `tokens.css` still 0/0,
+`backdrop-filter` occurrences still 0, and `before/`, `after/`, `native/` and `raycast-baseline/`
+byte-untouched; `raycast-after/` regenerated (41 PNGs) with the marker-absence assertion passing
+on every captured DOM.
