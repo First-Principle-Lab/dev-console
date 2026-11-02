@@ -1,0 +1,117 @@
+# Raycast research note - 2026-11-02
+
+Dated companion to `docs/raycast-ui-redesign.md` (step 1 of that brief's implementation order).
+It records what was actually looked at, what was taken from it, and the exact Dev Console token
+that each decision turns into. Reference images are linked, not committed: the Raycast artwork is
+copyrighted and this product must not ship a copy of it.
+
+## What was reviewed
+
+| Reference | What it is | Used for |
+| --- | --- | --- |
+| <https://www.raycast.com/uploads/blog-new-raycast/app.png> | The May 2026 launcher screenshot. Primary reference, as named in the brief. | Overall shell, search line prominence, selected band, row pattern, footer weight. |
+| <https://www.raycast.com/blog/the-new-raycast> | Launch article for the current launcher. | Confirmation that the launcher is one floating panel with a dominant search line and a compact action row. |
+| <https://manual.raycast.com/new-in-v2> | v2 manual. | Which surfaces carry material and which stay flat/stable. |
+| <https://www.raycast.com/blog/a-technical-deep-dive-into-the-new-raycast> | Technical deep dive on the material. | Why CSS `backdrop-filter` alone cannot reproduce desktop blur, and therefore why the shipped Linux default stays an opaque shell. |
+| <https://www.raycast.com/press> | Press kit (dark and light images, some of the older UI). | Checked, then set aside: some frames depict the pre-v2 UI, so they were not used for any value below. |
+
+Nothing below is an official Raycast token. There is no published Raycast colour, radius, blur,
+font or spacing sheet, so **no value in this note may be described as a measured Raycast value**.
+Each value is a Dev Console starting point chosen from our own screenshots at 100% scale, inside
+the ranges the brief proposes.
+
+## Our own before state, read at 100%
+
+Files: `artifacts/ui-review/raycast-baseline/13-finder-palette-680x420__680.png` and
+`.../01-library-commands__1440.png` (regenerated from the unmodified source at `291a6a6`; see
+Capture protocol below for how they relate to the `after/` set the brief cites).
+
+Finder at the real 680 x 420 window size:
+
+1. The search line is one text-height tall with a thin bright indigo rule under it, so the rule -
+   not the input - is the brightest thing in the window.
+2. The selected row is a 1px bright outline plus a solid left bar, i.e. the loudest element after
+   the rule, and it reads as "focused" rather than "selected"; there is no soft fill to carry the
+   selection once focus styling is ignored.
+3. Every row is two lines (name + description) and carries a kind pill on the right; the selected
+   row additionally carries an "Enter" chip. Bordered and chipped surfaces compete inside one list.
+4. Rows are tall, so five results already leave a large dead band above the footer at 420 px.
+5. The footer is a full-width bar with its own rule, reading as a second window rather than part
+   of the palette.
+
+Library at 1440 x 900:
+
+6. The detail header shows six chips of equal prominence (`Command`, `Shell`, `#work`, `#ci`,
+   `Pinned`, `r4`), so the one chip that separates kinds is not more readable than a tag.
+7. Borders stack: pane divider, boxed search field, boxed command block, two boxed custom fields,
+   outlined selected row - five nested rectangles before any content.
+8. The active tab underline and the header rule are both bright, so the header owns more attention
+   than the entry title.
+
+## Observations mapped to Dev Console decisions
+
+| # | Observation in the reference | Decision for Dev Console | Token(s) | Value (dark / light) |
+| --- | --- | --- | --- | --- |
+| 1 | One floating rounded panel with a fine light edge and a broad soft shadow; text stays legible over a busy desktop. | Give the shell its own radius, edge and elevation instead of reusing control tokens; keep the shell fill an opaque shaded graphite because native compositor blur is unproven on this host. | `--radius-shell`, `--shell-edge`, `--shell-bg`, `--shadow-shell`, `--shadow-raised` | shell radius 14px; edge `rgba(255,255,255,0.07)` / `rgba(255,255,255,0.75)`; shell bg `#1b1d22` / `#ffffff`; shell shadow `0 24px 60px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35)` / `0 20px 48px rgba(20,22,28,0.20), 0 2px 6px rgba(20,22,28,0.10)` |
+| 2 | A prominent search line with a large placeholder and generous space, and no heavy boxed input inside the window. | Make the search line the tallest thing in the palette, drop its box and the bright rule, and express focus with a caret colour plus a soft field wash. | `--search-h`, `--text-search`, `--search-fg`, `--search-placeholder`, `--search-focus-bg`, `--caret` | search height 46px; search text 17px; placeholder `#8d93a1` / `#6b7280`; focus wash `rgba(255,255,255,0.04)` / `rgba(27,29,35,0.04)`; caret = `var(--accent)` |
+| 3 | Muted group labels; the selected row is a soft rounded band, not a bright outline. | Selection becomes a filled rounded band at low accent opacity with a quiet inner edge, and a 2px accent marker so it is still perceivable without colour. Hover becomes a neutral fill, visibly weaker than selection. | `--selected`, `--selected-fg`, `--selected-edge`, `--selected-marker`, `--hover-fill`, `--radius-row` | selected `rgba(124,140,248,0.16)`, edge `rgba(124,140,248,0.28)`, marker 2px solid `var(--accent)`; hover `rgba(255,255,255,0.05)` / `rgba(27,29,35,0.05)`; row radius 8px |
+| 4 | Result rows read as: icon, name, quieter secondary text, one right-aligned action. | One row pattern only: kind is carried by the icon tint plus the right-aligned action, so the per-row kind pill goes away; secondary context is one line, dimmer and smaller than the name. | `--text-row`, `--text-row-meta`, `--row-h`, `--kind-command`, `--kind-secret` | row text 13.5px, meta 11.5px, row height 40px; kind colours reuse `--command-accent` / `--secret-accent` |
+| 5 | A compact bottom action area that feels attached to the palette, not a separate toolbar. | Footer loses its own rule and full-bleed bar treatment; it becomes quiet text on the shell with the existing keycap styling, and its labels must match real bindings (Up/Down select, Tab completes, Enter copies, Ctrl+O details, Escape dismisses). | `--footer-h`, `--footer-fg`, `--line-footer` (removed usage) | footer height 34px; footer text `var(--fg-dim)` |
+| 6 | Restrained glass: only the shell and floating surfaces carry material. | Material is opt-in and off by default. Panels that hold editable or long text keep a stable opaque surface. `backdrop-filter` is never applied to rows. | `--material-blur`, `--material-tint`, `[data-transparency='off']` fallback | `--material-blur: 0px` shipped default; prototype value 24px is documented as UNVERIFIED, not shipped |
+| 7 | Fine light edge and low-contrast dividers rather than full-strength borders. | Split the single border token into a hairline for internal separators and keep the strong border for real control edges. | `--line-hair`, `--line-shell`, `--border-hair` | hairline `rgba(255,255,255,0.06)` / `rgba(27,29,35,0.10)`; shell line `#2a2e36` / `#dfe2e9` |
+| 8 | Legible text over a busy background: body text is near-white, secondary is clearly secondary but not greyed out. | Re-tune the neutral ramp so `--fg-muted` clears 4.5:1 on both shell and panel fills, and reserve `--fg-dim` for non-essential metadata only (it clears 3:1, which is the correct bar for large/decorative text, never body copy). | `--fg`, `--fg-muted`, `--fg-dim`, `--bg-shell` | muted `#a6acb9` / `#575d6b`; dim `#8b91a0` / `#6b7280` |
+
+## Deliberately not copied
+
+- Raycast's logo, icon set, branded red, artwork and macOS window controls.
+- Any claim of pixel or token identity with Raycast, and any claim that Dev Console has native
+  "glass" on Linux: compositor blur needs a Wayland/X11 compositor plus transparent window and
+  WebView support, which this environment cannot prove. See the material level recorded in
+  `docs/raycast-ui-redesign.md` and the handoff checklist.
+
+## Capture protocol used for this redesign
+
+Two new `SHOT_SET` values in `tests/e2e/screenshots.spec.ts`; the existing `before`, `after` and
+`native` sets and their PNGs are left in place and are never rewritten again:
+
+- `raycast-baseline` - the untouched pre-redesign UI, generated at commit `291a6a6` with
+  `SHOT_SET=raycast-baseline SHOT_HTML=1 bunx playwright test screenshots`.
+- `raycast-after` - the redesigned UI, captured the same way after the token and component work.
+  This is now also the spec's default `SHOT_SET` (it used to be `after`), so that a plain
+  `bunx playwright test` - which is what `scripts/verify.sh` runs - writes the new set instead of
+  overwriting the frozen `after/` record with this machine's font rendering. `raycast-after/` is
+  intentionally not generated yet: until the visual work lands it would show the old UI.
+
+What "untouched baseline" is proved by, and what it is not:
+
+- Proved: `git diff --stat artifacts/ui-review/after` is empty and `git status` lists nothing new
+  under `artifacts/ui-review/` except this baseline set and its checksum snapshot, so the 41
+  tracked `after/` PNGs are still byte-for-byte the committed ones; and the captures were taken
+  with `src/`, `src-tauri/` and `tests/` at their `291a6a6` content (the only test change is the
+  capture helper in `tests/e2e/screenshots.spec.ts`, which cannot alter what is drawn).
+- Not claimed: byte parity between `raycast-baseline/` and `after/`. They are the same UI, but the
+  committed set was captured on another machine, so font hinting differs (all 41 files differ by
+  md5; total size within 0.3%, worst single file 5.9%). Byte parity is also not available inside
+   one host: re-running the set twice on this machine reproduced 39 of 41 PNGs exactly, with
+   `04-vault-locked__1440.png` and `11-finder-copied__768.png` differing run to run; both are the
+   time-sensitive states (a relative timestamp, and the copy confirmation). Treat pixel parity as
+   a visual review, or compare a pair captured on the same host in the same session.
+
+`capture()` also asserts that no synthetic secret value from the seed appears in the serialized DOM
+of any capture, so masking is proved for every screen rather than asserted in prose. With
+`SHOT_HTML=1` it writes that page source per capture under `test-results/screenshots/<set>/`
+(gitignored, and wiped by Playwright at the start of the next run, so grep it in the same
+invocation):
+
+```sh
+SHOT_SET=raycast-baseline SHOT_HTML=1 bunx playwright test screenshots \
+  && grep -ho 'synthetic-[a-z0-9-]*' test-results/screenshots/raycast-baseline/*.html | sort -u
+```
+
+The grep is empty for all 41 baseline captures, including `06-editor-secret-masked` and
+`04-vault-locked`.
+
+`artifacts/ui-review/raycast-baseline.sha256` snapshots the baseline set so a later run can tell
+which captures actually moved: `cd artifacts/ui-review/raycast-baseline && sha256sum -c
+../raycast-baseline.sha256`. It is a snapshot, not a lock - the two time-sensitive captures listed
+above may differ on their own.

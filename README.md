@@ -92,6 +92,13 @@ states captured at 1440, 768 and 390 px (`SHOT_SET=before|after bun run test:e2e
 These are **UI-shell** checks: the browser preview cannot reach native IPC, so they run against the
 documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
 
+`raycast-baseline/` and `raycast-after/` are the before/after pair for the Raycast-inspired pass
+(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); both sets are 41 PNGs
+with the same filenames, so `diff` between the two directory listings names every capture that
+moved. The default `SHOT_SET` is `raycast-after`, which keeps a plain `bunx playwright test` from
+rewriting the frozen `after/` set; `SHOT_HTML=1` writes each captured DOM alongside, and any
+synthetic secret value reaching a capture fails the run.
+
 ## Keyboard
 
 | Where | Keys |
