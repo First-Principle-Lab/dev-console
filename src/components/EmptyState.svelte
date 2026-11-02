@@ -34,12 +34,12 @@
   .glyph {
     display: grid;
     place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
+    width: var(--tile-xl);
+    height: var(--tile-xl);
+    border-radius: var(--radius-circle);
     color: var(--accent);
     background: var(--accent-soft);
-    border: var(--border);
+    border: var(--border-hair);
   }
   .title {
     margin: 0;

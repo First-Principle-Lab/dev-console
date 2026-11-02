@@ -234,7 +234,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--gap-xs);
   }
   .titles h3 {
     font-size: var(--text-lg);
@@ -301,7 +301,7 @@
   .hint.warn {
     color: var(--warn);
     background: var(--warn-soft);
-    border: var(--border);
+    border: var(--border-hair);
     border-radius: var(--radius);
     padding: var(--sp-2);
   }

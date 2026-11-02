@@ -110,7 +110,7 @@
     gap: var(--gap-sm);
   }
   .field {
-    border: var(--border);
+    border: var(--border-hair);
     border-radius: var(--radius);
     padding: var(--sp-2);
     background: var(--bg-sunken);
@@ -130,12 +130,12 @@
   }
   .value.multiline {
     white-space: pre-wrap;
-    margin: 4px 0 0;
+    margin: var(--sp-1) 0 0;
   }
   .viewed {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--gap-xs);
   }
   .viewed .label {
     flex: none;

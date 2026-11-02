@@ -115,3 +115,41 @@ The grep is empty for all 41 baseline captures, including `06-editor-secret-mask
 which captures actually moved: `cd artifacts/ui-review/raycast-baseline && sha256sum -c
 ../raycast-baseline.sha256`. It is a snapshot, not a lock - the two time-sensitive captures listed
 above may differ on their own.
+
+## Token pass as landed (same date, step 3)
+
+The token names in the table above are now in `src/styles/tokens.css` and are consumed by the
+shared components (`Dialog`, `Tabs`, `EntryList`, `EntryDetails`, `EmptyState`, `StatusLine`,
+`VaultStatus`, `Keycap`, `ExtraFields`, `EntryEditor`, `SettingsPanel`) plus the base control rules
+in the same file. Where the landed value differs from the table, the reason is measured contrast,
+not taste:
+
+| Token | Table | Landed | Why |
+| --- | --- | --- | --- |
+| `--fg-muted` (light) | `#575d6b` | `#4b5160` | The ramp needs room under `--fg-dim`; 7.94:1 on white, 5.84:1 on the darkest light surface. |
+| `--fg-dim` (light) | `#6b7280` | `#5f6673` | `#6b7280` is 4.16:1 on `--bg-raised` and 3.98:1 on `--bg-sunken`, i.e. below the 4.5:1 the brief requires for normal text wherever metadata sits on a filled surface. `#5f6673` is >= 4.62:1 on every light surface it is actually used on. |
+| `--bg-shell` | listed as a name | `--shell-bg` | One name for the shell fill; `--shell-edge`, `--line-shell` and `--shadow-shell` keep the `--shell-` prefix. |
+| `--selected-marker` | "2px solid" | `inset var(--edge-w) 0 0 var(--accent)` | Stored as the ready-to-use box-shadow so a row cannot accidentally render it as a border. |
+
+Sizing tokens the table implied but did not name: `--edge-w` (2px), `--gap-xs`, `--gap-keys`,
+`--gap-tags`, `--badge-min` and the `--tile-sm/md/lg/xl` glyph steps, so that control heights and
+gaps stop being per-component literals (the file's own header rule). `--row-h` moved 46px -> 40px,
+which is the row height observation 4 asked for. `--search-h`, `--text-search`, `--search-fg`,
+`--search-placeholder`, `--search-focus-bg`, `--footer-h` and `--footer-fg` land here as part of the
+shared system but are consumed by the window passes (checkpoints C4/C5), not by this step.
+
+Two things this pass deliberately did **not** do:
+
+- It paints no `backdrop-filter` anywhere. `--material-blur` is `0px` in both themes, and
+  `data-transparency="on"` / `"off"` / `prefers-reduced-transparency` only move the tint and the
+  radius candidate; no component reads the blur until a native capture proves compositor blur
+  (step 3 of the brief and checkpoint C9).
+- It leaves the per-row kind pill and the bright search rule in `Finder.svelte` in place; those are
+  the Finder outcome (checkpoint C4), not the token system.
+
+`tests/unit/design-tokens.test.ts` now enforces the two mechanical halves of this file's header
+promise: dark and *both* light palettes declare the same token names, and no `.svelte`/`.ts` file
+under `src/` contains a colour literal. Colour literals outside `tokens.css` went from the recorded
+baseline (2 hex, 3 `rgb*(`) to 0 and 0: the last two hex were `var(--warning, #...)` fallbacks for
+a token that never existed - the real token is `--warn` - and the `rgb()` triple was three ad-hoc
+scrim/inset fills that now read `--backdrop`, `--bg-sunken` and `--inset-fill`.

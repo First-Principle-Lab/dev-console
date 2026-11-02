@@ -143,16 +143,16 @@
   .glyph {
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: var(--tile-lg);
+    height: var(--tile-lg);
     flex: none;
-    border-radius: var(--radius);
-    color: var(--command-accent);
+    border-radius: var(--radius-row);
+    color: var(--kind-command);
     background: var(--accent-soft);
-    border: var(--border);
+    border: var(--border-hair);
   }
   .glyph.secret {
-    color: var(--secret-accent);
+    color: var(--kind-secret);
     background: var(--secret-soft);
   }
   .titles {
@@ -202,7 +202,8 @@
     color: var(--fg);
   }
   .code.revealed {
-    border-color: var(--secret-accent);
+    border-color: var(--kind-secret);
+    box-shadow: var(--selected-marker);
   }
   pre.code.block {
     display: block;
@@ -229,7 +230,7 @@
     justify-content: space-between;
     flex-wrap: wrap;
     padding-top: var(--sp-3);
-    border-top: var(--border);
+    border-top: var(--border-hair);
   }
   .group {
     display: flex;

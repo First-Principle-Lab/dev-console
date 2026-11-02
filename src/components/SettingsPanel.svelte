@@ -513,10 +513,10 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 45%);
+    background: var(--backdrop);
     display: grid;
     place-items: center;
-    padding: 16px;
+    padding: var(--sp-4);
   }
   .panel {
     width: min(780px, 100%);
@@ -630,8 +630,8 @@
     margin: 0;
   }
   .path-line code {
-    background: var(--bg-sunken, rgb(0 0 0 / 18%));
-    padding: 1px 6px;
+    background: var(--bg-sunken);
+    padding: 1px var(--gap-tags);
     border-radius: var(--radius);
   }
   .backup-list {
@@ -653,15 +653,15 @@
   .recovery {
     margin: 0;
     padding: var(--sp-2);
-    border: var(--border);
+    border: var(--border-hair);
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 22%);
+    background: var(--inset-fill);
     font-size: var(--text);
     line-height: 1.5;
     user-select: all;
   }
   .confirm {
-    border: 1px solid var(--warning, #b8860b);
+    border: 1px solid var(--warn);
     border-radius: var(--radius);
     padding: var(--sp-3);
     display: flex;
@@ -685,7 +685,7 @@
     margin: 0;
     font-size: var(--text);
     line-height: 1.5;
-    color: var(--warning, #d9a441);
+    color: var(--warn);
   }
   @media (max-width: 720px) {
     .grid {

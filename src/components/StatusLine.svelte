@@ -42,8 +42,9 @@
     margin: 0;
     padding: var(--sp-1) var(--sp-3);
     font-size: var(--text-sm);
+    min-height: var(--control-h);
     color: var(--fg-muted);
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
     background: var(--bg-panel);
   }
   .status[data-tone='ok'] {

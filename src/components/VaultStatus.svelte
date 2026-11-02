@@ -60,18 +60,18 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: 3px var(--sp-2) 3px 3px;
+    padding: var(--gap-keys) var(--sp-2) var(--gap-keys) var(--gap-keys);
     border: var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--bg-raised);
     white-space: nowrap;
   }
   .glyph {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
+    width: var(--tile-sm);
+    height: var(--tile-sm);
+    border-radius: var(--radius-circle);
     background: var(--bg-sunken);
   }
   .vault[data-tone='ok'] .glyph {

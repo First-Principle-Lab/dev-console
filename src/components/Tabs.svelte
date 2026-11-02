@@ -62,55 +62,57 @@
   .tabbar {
     display: flex;
     gap: var(--sp-1);
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
     padding: 0 var(--sp-1);
   }
   .tab {
     position: relative;
-    min-height: 34px;
+    min-height: var(--tab-h);
     border: 0;
-    border-radius: var(--radius) var(--radius) 0 0;
+    border-radius: var(--radius-row) var(--radius-row) 0 0;
     background: transparent;
     color: var(--fg-muted);
     padding: 0 var(--sp-3);
     gap: var(--sp-2);
   }
   .tab:hover {
-    background: var(--bg-hover);
+    background: var(--hover-fill);
     color: var(--fg);
     border: 0;
   }
   .tab.active {
     color: var(--fg);
-    background: transparent;
+    background: var(--selected);
   }
-  /* the active indicator: an accent underline, not a colour-only cue */
+  /* the active indicator: an accent underline plus a filled band, so the
+     selected tab is not carried by hue alone */
   .tab.active::after {
     content: '';
     position: absolute;
     left: var(--sp-2);
     right: var(--sp-2);
     bottom: -1px;
-    height: 2px;
-    border-radius: 2px;
+    height: var(--edge-w);
+    border-radius: var(--edge-w);
     background: var(--accent);
   }
   .count {
     font-size: var(--text-xs);
     color: var(--fg-muted);
     background: var(--bg-raised);
-    border: var(--border);
-    border-radius: 999px;
-    padding: 1px 6px;
-    min-width: 20px;
+    border: var(--border-hair);
+    border-radius: var(--radius-pill);
+    padding: 1px var(--sp-2);
+    min-width: var(--badge-min);
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
   .count :global(svg) {
     display: block;
   }
   .tab.active .count {
     color: var(--accent);
-    border-color: var(--accent-line);
+    border-color: var(--selected-edge);
     background: var(--accent-soft);
   }
 </style>

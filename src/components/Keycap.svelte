@@ -13,7 +13,7 @@
   .keys {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--gap-keys);
   }
   .sep {
     color: var(--fg-dim);
