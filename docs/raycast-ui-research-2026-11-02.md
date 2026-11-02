@@ -147,6 +147,52 @@ Two things this pass deliberately did **not** do:
 - It leaves the per-row kind pill and the bright search rule in `Finder.svelte` in place; those are
   the Finder outcome (checkpoint C4), not the token system.
 
+## Finder pass as landed (same date, brief step 3, checkpoint C4)
+
+`src/windows/Finder.svelte` now renders through the tokens above; no search, selection, copy,
+completion, unlock or hide code path changed (only markup and styles). Landed decisions:
+
+- Shell: the palette frame is the shared `.surface-shell` utility (fill, edge, 14px radius,
+  elevation from `--shell-bg` / `--shell-edge` / `--radius-shell` / `--shadow-shell`); the
+  component's own `background`/`border`/`border-radius` declarations were deleted so the
+  global utility is not out-speced by the scoped styles.
+- Search line: `--search-h`/`--text-search`/`--search-fg`/`--search-placeholder` are consumed
+  here; the boxed `--bg-raised` band, the `inset 0 -2px 0 var(--accent)` focus rule and the
+  accent icon are gone. Focus now reads as `--search-focus-bg` across the line plus the
+  `--caret`-coloured caret. The completion mirror re-leads on `--search-h` and stays aligned.
+- One row pattern: kind glyph tile (`--tile-md`, tinted via `--kind-command`/`--kind-secret`),
+  name on `--text-row`, then one context line `type · description · #tags` on
+  `--text-row-meta`/`--fg-muted`, then the right-aligned action. The per-row `Command`/`Secret`
+  pill and the separate `Unlock` chip are deleted; the action is the `Enter` keycap, shown on
+  the selected row only. Both lines lead at `--leading-tight` so the pair fits `--row-h` (40px
+  at 680x420 shows seven rows instead of five, closing observation 4's dead band).
+- Selection/hover: `.row.active` reuses the `EntryList` recipe verbatim (soft `--selected`
+  band + `--selected-edge` + inset `--selected-marker`); hover is the weaker neutral
+  `--hover-fill` and never shows the marker. `redesign.spec.ts` now proves both mechanically:
+  the computed `box-shadow` of the selected row contains the inset marker and no unselected
+  row's does, and a hovered unselected row's computed background differs from the selected
+  band. A third new test proves the locked finder keeps the secret's name, type, tag and
+  value marker (`Registry token`, `API key`, `infra`, `synthetic-value-1`) out of the
+  serialized DOM; a fourth truncates a 116-character name at the real 680px palette width and
+  asserts the action stays inside the row box.
+- Footer/copied/error: full-width `--bg-raised` bars and their strong rules replaced by quiet
+  hairlines (`--border-hair`, `--footer-h`, `--footer-fg`); the copied and copy-failure lines
+  use the same attached-line hierarchy. The last hint is labelled `dismiss`, matching what
+  Escape does (it was `close`; no test or binding depended on the word).
+- Fixed while landing this: the narrow-screen fallback fired at `max-width: 720px`, i.e. at
+  every width the *real* 680px window ever has, so the shipped palette was rendering without
+  its `Ctrl+O details` / `Esc dismiss` hints. The breakpoint is now 520px and capture 13 shows
+  all five hints on one line.
+
+Captures reviewed at 100% (regenerated with `SHOT_HTML=1 bunx playwright test screenshots`;
+`capture()` re-proved the synthetic-marker absence on all 41 DOMs):
+`artifacts/ui-review/raycast-after/13-finder-palette-680x420__680.png` (the real window size),
+`08-finder-results__{1440,768,390}.png`, `09-finder-inline-completion__…`,
+`10-finder-no-matches__…`, `11-finder-copied__…`, `12-finder-locked-row__…`.
+Pre-change comparison: the same filenames under `artifacts/ui-review/raycast-baseline/`.
+Suite on this state: `bun run check` 0/0, eslint clean, vitest 21/21, Playwright 60/60
+(57 baseline tests, none altered or removed, plus the three new C4 tests).
+
 `tests/unit/design-tokens.test.ts` now enforces the two mechanical halves of this file's header
 promise: dark and *both* light palettes declare the same token names, and no `.svelte`/`.ts` file
 under `src/` contains a colour literal. Colour literals outside `tokens.css` went from the recorded

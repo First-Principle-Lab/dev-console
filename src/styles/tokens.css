@@ -32,6 +32,8 @@
   --text-lg: 15px;
   --text-xl: 18px;
   --leading: 1.45;
+  /* two-line rows (name + one context line) have to fit --row-h, so they lead tighter */
+  --leading-tight: 1.2;
 
   /* roles: one line each in the palette and the lists */
   --text-search: 17px;

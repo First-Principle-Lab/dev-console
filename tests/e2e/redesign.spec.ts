@@ -175,3 +175,79 @@ test('a copied confirmation does not describe the next search', async ({ page })
   await page.getByTestId('finder-input').fill('Reg');
   await expect(page.getByTestId('finder-status')).toHaveCount(0);
 });
+
+test('the selected finder row is perceivable without colour alone, and hover is not selection', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  const rows = page.getByTestId('result-row');
+  await expect(rows).toHaveCount(3);
+  // Colour is the weakest cue: the selected row additionally carries the solid inset
+  // marker box-shadow (--selected-marker) that no unselected row has, so the selection
+  // survives greyscale and any colour-vision difference.
+  const marks = await rows.evaluateAll((els) =>
+    els.map((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        selected: el.getAttribute('aria-selected') === 'true',
+        marker: cs.boxShadow.includes('inset'),
+        background: cs.backgroundColor
+      };
+    })
+  );
+  const active = marks.filter((m) => m.selected);
+  expect(active).toHaveLength(1);
+  expect(active[0]?.marker, 'selected row must carry the inset marker').toBe(true);
+  for (const m of marks.filter((x) => !x.selected)) {
+    expect(m.marker, 'unselected row must not carry the inset marker').toBe(false);
+  }
+  // Hover must read differently from selection: hovering an unselected row paints the
+  // neutral hover fill, never the selected band.
+  await rows.nth(1).hover();
+  const hovered = await rows.nth(1).evaluate((el) => getComputedStyle(el).backgroundColor);
+  const selectedBg = await rows.nth(0).evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(hovered, 'hover fill must differ from the selected band').not.toBe(selectedBg);
+});
+
+test('a locked finder keeps secret names, types and tags out of the DOM', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  await page.evaluate(() => (window as unknown as { __mock: { lockVault: () => void } }).__mock.lockVault());
+  await page.getByTestId('finder-input').fill('Reg');
+  await expect(page.getByTestId('result-row')).toHaveCount(1);
+  // Not just the seeded value: the name, the type and the tags of the locked secret
+  // must all be absent while the vault is locked.
+  const body = await page.content();
+  for (const metadata of ['synthetic-value-1', 'Registry token', 'API key', 'infra']) {
+    expect(body, `locked vault DOM leaked secret metadata "${metadata}"`).not.toContain(metadata);
+  }
+});
+
+test('a long name truncates without losing the right-aligned action', async ({ page }) => {
+  const longName =
+    'Rebuild and republish the staging image for the payments service with verbose logging, then run the full smoke suite';
+  await boot(
+    page,
+    {
+      commands: [
+        {
+          id: 'L1', revision: 1, name: longName, type: 'Docker / compose', tags: ['payments'],
+          description: 'Recreates the compose project and smoke-tests the health endpoint.',
+          notes: '', fields: [], pinned: true, command: 'docker compose up -d', workingDirectory: '', usageCount: 1
+        }
+      ],
+      secrets: []
+    },
+    'finder'
+  );
+  const row = page.getByTestId('result-row').first();
+  await expect(row).toContainText(longName);
+  // The palette caps at 680px wide, so the name must ellipsis rather than push the
+  // action off the row: clipped name, fully visible action inside the row.
+  const clipped = await row.locator('.name').evaluate((el) => el.scrollWidth > (el as HTMLElement).clientWidth);
+  expect(clipped, 'long name should ellipsize').toBe(true);
+  const action = row.getByTestId('row-action');
+  await expect(action).toBeVisible();
+  const [rowBox, actionBox] = await Promise.all([row.boundingBox(), action.boundingBox()]);
+  expect(rowBox).not.toBeNull();
+  expect(actionBox).not.toBeNull();
+  expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
+});
+

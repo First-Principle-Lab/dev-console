@@ -214,7 +214,7 @@
 </script>
 
 <div class="finder" data-testid="finder">
-  <div class="palette">
+  <div class="palette surface-shell">
     <div class="search">
       <span class="search-icon" aria-hidden="true"><Icon name="search" size={16} /></span>
       <div class="field">
@@ -268,30 +268,20 @@
             <Icon name={row.id === UNLOCK_ID ? 'lock' : row.kind === 'secret' ? 'secret' : 'command'} size={14} />
           </span>
           <span class="body">
-            <span class="line">
-              <span class="name truncate">{row.name}</span>
-              {#if row.tags.length > 0}
-                <span class="tags truncate">{#each row.tags.slice(0, 3) as tag (tag)}<span class="tag">#{tag}</span>{/each}</span>
-              {/if}
-            </span>
+            <span class="name truncate">{row.name}</span>
             {#if row.id === UNLOCK_ID}
-              <span class="sub">Secret metadata stays encrypted until you unlock the vault.</span>
-            {:else if row.description}
-              <span class="sub truncate">{row.description}</span>
+              <span class="ctx truncate">Secret metadata stays encrypted until you unlock the vault.</span>
+            {:else if row.type || row.description || row.tags.length > 0}
+              <span class="ctx truncate">
+                {#if row.type}<span class="ctx-part">{row.type}</span>{/if}
+                {#if row.description}<span class="ctx-part">{row.description}</span>{/if}
+                {#each row.tags.slice(0, 2) as tag (tag)}<span class="ctx-part">#{tag}</span>{/each}
+              </span>
             {/if}
           </span>
           <span class="trail">
-            {#if row.id === UNLOCK_ID}
-              <span class="chip" data-tone="status">Unlock</span>
-            {:else}
-              <span class="chip" data-tone={row.kind === 'secret' ? 'secret' : 'command'}>
-                <Icon name={row.kind === 'secret' ? 'secret' : 'command'} size={10} />
-                {row.kind === 'secret' ? 'Secret' : 'Command'}
-              </span>
-            {/if}
-            {#if row.type}<span class="type">{row.type}</span>{/if}
             {#if row.id === selectedId}
-              <span class="hintkeys" aria-hidden="true"><Keycap keys={['Enter']} /></span>
+              <span class="hintkeys" data-testid="row-action" aria-hidden="true"><Keycap keys={['Enter']} /></span>
             {/if}
           </span>
         </li>
@@ -323,7 +313,7 @@
       <span class="hint"><Keycap keys={['Tab']} /> complete</span>
       <span class="hint"><Keycap keys={['Enter']} /> copy</span>
       <span class="hint"><Keycap keys={['Ctrl', 'O']} /> details</span>
-      <span class="hint"><Keycap keys={['Esc']} /> close</span>
+      <span class="hint"><Keycap keys={['Esc']} /> dismiss</span>
       <span class="spacer"></span>
       <span class="count muted">{rows.length}</span>
     </footer>
@@ -334,7 +324,9 @@
 
 <style>
   /* The palette frame. In Tauri the window is 680x420 and borderless; in the browser
-     preview the same frame is centred, and on narrow screens it fills the viewport. */
+     preview the same frame is centred, and on narrow screens it fills the viewport.
+     The fill, edge, radius and elevation come from the shared .surface-shell utility;
+     nothing is painted here so the shell is defined in exactly one place. */
   .finder {
     height: 100%;
     background: var(--bg);
@@ -347,21 +339,24 @@
     height: min(420px, 100%);
     display: flex;
     flex-direction: column;
-    background: var(--bg-panel);
-    border: var(--border-strong);
-    border-radius: var(--radius-lg);
     overflow: hidden;
   }
+  /* The search line: the tallest thing in the palette, no box of its own, no bright
+     rule. Focus reads as a soft wash across the line plus the accent caret. */
   .search {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: var(--sp-3);
-    border-bottom: var(--border);
-    background: var(--bg-raised);
+    min-height: var(--search-h);
+    padding: 0 var(--sp-3);
+    border-bottom: var(--border-hair);
+    transition: background var(--transition);
+  }
+  .search:focus-within {
+    background: var(--search-focus-bg);
   }
   .search-icon {
-    color: var(--accent);
+    color: var(--fg-dim);
     display: grid;
     place-items: center;
   }
@@ -375,26 +370,30 @@
     border: none;
     border-radius: 0;
     padding: 0;
-    min-height: 28px;
-    font-size: var(--text-lg);
+    min-height: var(--search-h);
+    font-size: var(--text-search);
+    font-weight: 550;
+    color: var(--search-fg);
   }
   .field input:focus {
     background: transparent;
     border: none;
     outline: none;
   }
-  .search:focus-within {
-    box-shadow: inset 0 -2px 0 var(--accent);
+  .field input::placeholder {
+    color: var(--search-placeholder);
+    font-weight: 450;
   }
   .mirror {
     position: absolute;
     inset: 0;
-    font-size: var(--text-lg);
-    line-height: 28px;
+    font-size: var(--text-search);
+    font-weight: 550;
+    line-height: var(--search-h);
     white-space: pre;
     pointer-events: none;
     overflow: hidden;
-    color: var(--fg);
+    color: var(--search-fg);
   }
   .measure {
     color: transparent;
@@ -406,21 +405,18 @@
     display: inline-flex;
     align-items: center;
     gap: var(--sp-1);
-    font-size: var(--text-xs);
-    padding: 2px var(--sp-2);
-    border: var(--border);
-    border-radius: 999px;
+    font-size: var(--text-row-meta);
+    padding: var(--gap-xs) var(--sp-2);
+    border: var(--border-hair);
+    border-radius: var(--radius-pill);
     color: var(--fg-muted);
-    background: var(--bg-panel);
     white-space: nowrap;
   }
   .vaultchip[data-tone='ok'] {
     color: var(--ok);
-    border-color: var(--line);
   }
   .vaultchip[data-tone='warn'] {
     color: var(--warn);
-    border-color: var(--line-strong);
   }
   .results {
     list-style: none;
@@ -428,33 +424,45 @@
     padding: var(--sp-2);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--gap-xs);
     overflow: auto;
     flex: 1;
   }
+  /* One result pattern for every row: kind glyph, name first, one quieter context
+     line, right-aligned action. Kind lives in the glyph tint, not in a pill per row. */
   .row {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: var(--sp-2);
-    border-radius: var(--radius);
+    min-height: var(--row-h);
+    padding: var(--sp-1) var(--sp-2);
+    border-radius: var(--radius-row);
     border: 1px solid transparent;
     cursor: pointer;
-    min-height: 40px;
+    transition:
+      background var(--transition),
+      border-color var(--transition),
+      box-shadow var(--transition);
   }
   .row:hover {
-    background: var(--bg-hover);
+    background: var(--hover-fill);
   }
+  /* Selection is a soft band, a quiet edge and the solid inset marker: the marker is
+     a shape change, so selection survives greyscale and colour-blind viewing. */
   .row.active {
     background: var(--selected);
-    border-color: var(--accent-line);
-    box-shadow: inset 2px 0 0 var(--accent);
+    color: var(--selected-fg);
+    border-color: var(--selected-edge);
+    box-shadow: var(--selected-marker);
+  }
+  .row.active:hover {
+    background: var(--selected);
   }
   .glyph {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: var(--tile-md);
+    height: var(--tile-md);
     flex: none;
     border-radius: var(--radius-sm);
     color: var(--command-accent);
@@ -471,30 +479,31 @@
   .body {
     display: flex;
     flex-direction: column;
+    justify-content: center;
     min-width: 0;
     flex: 1;
-    gap: 1px;
-  }
-  .line {
-    display: flex;
-    align-items: baseline;
-    gap: var(--sp-2);
-    min-width: 0;
+    gap: var(--gap-xs);
   }
   .name {
+    display: block;
     color: var(--fg);
-    font-size: var(--text);
+    font-size: var(--text-row);
     font-weight: 550;
+    line-height: var(--leading-tight);
   }
-  .tags {
-    display: inline-flex;
-    gap: 5px;
-    color: var(--fg-dim);
-    font-size: var(--text-xs);
-  }
-  .sub {
+  .ctx {
+    display: block;
     color: var(--fg-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-row-meta);
+    line-height: var(--leading-tight);
+  }
+  .ctx-part + .ctx-part::before {
+    content: '·';
+    margin: 0 var(--gap-tags);
+    color: var(--fg-dim);
+  }
+  .row.system .name {
+    color: var(--warn);
   }
   .trail {
     display: inline-flex;
@@ -502,18 +511,11 @@
     gap: var(--sp-2);
     flex: none;
   }
-  .type {
-    color: var(--fg-muted);
-    font-size: var(--text-xs);
-  }
-  .row.system .name {
-    color: var(--warn);
-  }
   .state {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: var(--sp-4) var(--sp-3);
+    padding: var(--sp-3) var(--sp-2);
     color: var(--fg-muted);
     font-size: var(--text-sm);
   }
@@ -521,6 +523,11 @@
     color: var(--fg);
     font-weight: 600;
   }
+  .sub {
+    color: var(--fg-dim);
+  }
+  /* Copied / copy-failed read as one line attached to the shell, same hierarchy as
+     the rows above them: hairline on top, quiet fill, no second box. */
   .copied {
     display: flex;
     align-items: center;
@@ -529,7 +536,7 @@
     padding: var(--sp-2) var(--sp-3);
     color: var(--ok);
     background: var(--ok-soft);
-    border-top: var(--border);
+    border-top: var(--border-hair);
     font-size: var(--text-sm);
   }
   .error-banner {
@@ -537,25 +544,29 @@
     align-items: center;
     gap: var(--sp-2);
     margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--text-sm);
+    color: var(--danger);
+    background: var(--danger-soft);
+    border: 0;
+    border-top: var(--border-hair);
     border-radius: 0;
-    border-left: 0;
-    border-right: 0;
   }
   footer {
     display: flex;
     align-items: center;
     gap: var(--sp-3);
-    padding: var(--sp-2) var(--sp-3);
-    border-top: var(--border);
-    background: var(--bg-raised);
-    color: var(--fg-muted);
-    font-size: var(--text-xs);
+    min-height: var(--footer-h);
+    padding: 0 var(--sp-3);
+    border-top: var(--border-hair);
+    color: var(--footer-fg);
+    font-size: var(--text-row-meta);
     flex-wrap: wrap;
   }
   .hint {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--gap-tags);
     white-space: nowrap;
   }
   .hintkeys {
@@ -564,17 +575,20 @@
   .count {
     font-variant-numeric: tabular-nums;
   }
-  @media (max-width: 720px) {
+  /* The one real palette window is 680px wide, so the narrow-screen fallback has to
+     trigger below that, not at 720 - otherwise the shipped window loses its
+     details/dismiss hints. */
+  @media (max-width: 520px) {
     .finder {
       padding: 0;
     }
     .palette {
       width: 100%;
       height: 100%;
-      border-radius: 0;
       border: none;
+      border-radius: 0;
+      box-shadow: none;
     }
-    .trail .type,
     .hint:nth-child(n + 4) {
       display: none;
     }
