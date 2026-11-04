@@ -332,7 +332,7 @@
     background: var(--bg);
     display: grid;
     place-items: center;
-    padding: var(--sp-3);
+    padding: 0;
   }
   .palette {
     width: min(680px, 100%);
