@@ -27,17 +27,16 @@ git switch -c feat/<name> origin/dev
 
    Small fixes wait in `dev` for the next batch. The exception is an urgent fix the owner asks to ship now.
 4. **Promote with a PR from `dev` into `main`.** Start it with a merge commit that brings `main` into `dev`, so the two branches never drift. List the features in the batch in the PR description. Merge only once `verify` is green on the PR.
-5. **Confirm the release.** Merging into `main` triggers `verify` on `main`, and its success triggers `release`. A promotion counts as done only after you check:
-   - `gh run list -w verify -L 3` shows `success` for the merge commit on `main`.
-   - `gh run list -w release -L 3` shows `success` for that same commit.
+5. **Confirm the release.** Merging into `main` runs `verify` on `main`. Its `build` job compiles and signs the AppImage alongside the other checks, and its `publish` job releases it once every job has passed. A promotion counts as done only after you check:
+   - `gh run list -w verify -L 3` shows `success` for the merge commit on `main`, including its `publish` job (`gh run view <id>`).
    - `gh release list -L 1` shows a new `vX.Y.Z` tagged **Latest**. It must carry `Dev-Console.AppImage`, `Dev-Console.AppImage.sig` and `latest.json`. Check them with `gh release view vX.Y.Z`.
 
-   If either workflow fails, report it with the failing job's log (`gh run view <id> --log-failed`) and fix it through `dev`. Never claim a release went out without seeing these three checks.
+   If any job fails, report it with the failing job's log (`gh run view <id> --log-failed`) and fix it through `dev`. Never claim a release went out without seeing both checks.
 6. **Merge `main` back into `dev`** after the release, so `dev` contains everything that shipped.
 
 ## Versioning
 
-You don't edit version numbers by hand. The release workflow picks the next `v0.0.N` tag and stamps it into `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `Cargo.lock` at build time (`scripts/set-release-version.py`). The repo files stay at their committed value.
+You don't edit version numbers by hand. The `build` job picks the next `v0.0.N` tag and stamps it into `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `Cargo.lock` at build time (`scripts/set-release-version.py`). The repo files stay at their committed value.
 
 ## Local checks
 
