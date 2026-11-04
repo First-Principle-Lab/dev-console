@@ -1,10 +1,10 @@
 [package]
 name = "dev-console"
-version = "0.1.0"
+version = "0.0.1"
 description = "Local command and secret console for Linux desktops"
 authors = ["parththirwani"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 default-run = "dev-console"
 
 [lib]
@@ -28,6 +28,8 @@ age = { version = "0.12", default-features = false, features = ["armor"] }
 keyring = "4"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 libc = "0.2"
+tauri-plugin-updater = "2.14.1"
+tauri-plugin-process = "2.4.0"
 
 [dev-dependencies]
 tempfile = "3"

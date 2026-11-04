@@ -15,11 +15,12 @@ export type IconName =
   | 'alert'
   | 'check'
   | 'shield'
-  | 'gear';
+  | 'gear'
+  | 'update';
 
 /** Single source for the inline icon set (20x20 viewBox, `fill: currentColor`). */
 export const ICON_PATHS: Record<IconName, string> = {
-  command: 'M4 5h12l4 7-4 7H4L0 12l4-7Zm3 4v6h8l2-3-2-3H7Z',
+  command: 'M3 2 1 4l6 6-6 6 2 2 8-8-8-8Zm7 13h8v3h-8v-3Z',
   secret: 'M9 2a5 5 0 0 0-5 5v2H2v9h16V9h-2V7a5 5 0 0 0-5-5Zm0 2a3 3 0 0 1 3 3v2H6V7a3 3 0 0 1 3-3Z',
   lock: 'M11 2a4 4 0 0 0-4 4v2H4v10h14V8h-3V6a4 4 0 0 0-4-4Zm0 2a2 2 0 0 1 2 2v2H9V6a2 2 0 0 1 2-2Z',
   unlock: 'M6 8V6a4 4 0 0 1 7.7-1.5l-1.8.9A2 2 0 0 0 8 6v2h7v10H2V8h4Zm-2 4v4h10v-4H4Z',
@@ -36,5 +37,6 @@ export const ICON_PATHS: Record<IconName, string> = {
   alert: 'M9 1 0 17h18L9 1Zm-1 5h2v6H8V6Zm0 7h2v2H8v-2Z',
   check: 'M15.9 4 7 12.9 4.1 10 2.7 11.4 7 15.7l10.3-10.3L15.9 4Z',
   shield: 'M9 1 2 4v6c0 4.4 3 7.7 7 9 4-1.3 7-4.6 7-9V4L9 1Zm0 2.2 5 2.2V10c0 3.2-2 5.8-5 6.9-3-1.1-5-3.7-5-6.9V5.4l5-2.2Z',
-  gear: 'M9 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm7.4 4 .1-1-.1-1 1.7-1.4-1.6-2.8-2.1.8a6.9 6.9 0 0 0-1.7-1L12.4 1H7.6L7.2 3.6c-.6.2-1.2.5-1.7 1l-2.1-.8L1.8 6.6 3.5 8a6.9 6.9 0 0 0 0 2L1.8 11.4l1.6 2.8 2.1-.8c.5.4 1.1.8 1.7 1l.4 2.6h4.8l.4-2.6c.6-.2 1.2-.5 1.7-1l2.1.8 1.6-2.8L16.4 10Z'
+  gear: 'M9 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm7.4 4 .1-1-.1-1 1.7-1.4-1.6-2.8-2.1.8a6.9 6.9 0 0 0-1.7-1L12.4 1H7.6L7.2 3.6c-.6.2-1.2.5-1.7 1l-2.1-.8L1.8 6.6 3.5 8a6.9 6.9 0 0 0 0 2L1.8 11.4l1.6 2.8 2.1-.8c.5.4 1.1.8 1.7 1l.4 2.6h4.8l.4-2.6c.6-.2 1.2-.5 1.7-1l2.1.8 1.6-2.8L16.4 10Z',
+  update: 'M10 2a8 8 0 0 1 7.7 6h-2.1A6 6 0 0 0 5 5.7V8H3V2h2v1.4A8 8 0 0 1 10 2Zm5 10h2v6h-2v-1.4A8 8 0 0 1 2.3 12h2.1A6 6 0 0 0 15 14.3V12Z'
 };

@@ -74,17 +74,18 @@ and what is still open.
 
 ## Continuous integration
 
-`packaging/ci/github-actions.yml` is the pipeline (Bun job, Rust job, the environment-dependent
-harness job, and a release-plus-native-smoke job). It lives outside `.github/workflows/` because the
-token this repository is pushed with has no `workflow` scope, so GitHub rejects any push that would
-create a workflow file. To enable it:
+`.github/workflows/ci.yml` runs the frontend, Rust, harness, and native smoke checks on pushes to
+`main` and on pull requests. A harness that cannot run in CI exits 77 and is reported as
+UNVERIFIED. After a successful `main` push, `.github/workflows/release.yml` builds a signed Linux
+AppImage and publishes a GitHub release. The first release is `0.0.1`; each later successful push
+increments the patch version. The version is set in the release build, so no version-bump commit
+or extra CI run is created. The repository must be public so the desktop updater can download its
+release assets. The release workflow needs the `TAURI_SIGNING_PRIVATE_KEY` repository secret.
 
-```bash
-git mv packaging/ci/github-actions.yml .github/workflows/ci.yml && git push
-```
-
-Nothing else is required: the jobs call the same scripts documented above, and a harness that
-cannot run in CI exits 77 and is reported rather than hidden.
+Run the AppImage from the GitHub release to receive in-app updates. The library checks at startup,
+when focused, and every 15 minutes. An **Update to x.y.z** button appears when a newer signed
+release is available. Clicking it downloads, verifies, installs, and relaunches the AppImage.
+Linux deb/rpm packages and locally built binaries do not support this in-app AppImage update path.
 
 ## Visual review
 
