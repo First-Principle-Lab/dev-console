@@ -141,3 +141,12 @@ helper. The application never asks polkit to run a privileged binary itself: the
 the authentication prompt is bound to a concrete, auditable action id. When no polkit agent is
 present (a headless container, for instance) the app reports the unlock mechanism as unavailable
 instead of falling back to "just open the vault".
+
+## AppImage launcher icon
+
+The in-app updater replaces only the AppImage. The launcher's `Icon=dev-console` resolves through
+the icon theme, so icons from an earlier `install.sh` run kept showing the old logo after every
+update. When the app runs as an AppImage (`$APPIMAGE` is set) it writes the icons built into the
+binary to `$XDG_DATA_HOME/icons/hicolor/<size>/apps/dev-console.png` at startup. That directory is
+searched before `/usr/local/share` and `/usr/share`. It rewrites only icons whose bytes differ, so
+a normal start changes nothing. Distro packages own their icons and are left alone.
