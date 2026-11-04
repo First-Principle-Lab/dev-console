@@ -9,6 +9,10 @@ use crate::state::AppState;
 pub const LIBRARY: &str = "library";
 pub const FINDER: &str = "finder";
 
+/// The palette's size. The finder window must be exactly this big: anything larger shows as an
+/// empty band around the palette.
+const FINDER_SIZE: (f64, f64) = (680.0, 420.0);
+
 /// Creates a window once and reuses it afterwards, so repeated launches never duplicate a
 /// window or a process.
 fn ensure<R: Runtime>(app: &AppHandle<R>, label: &str, url: &str) -> AppResult<WebviewWindow<R>> {
@@ -26,9 +30,12 @@ fn ensure<R: Runtime>(app: &AppHandle<R>, label: &str, url: &str) -> AppResult<W
         }
         _ => tauri::WebviewWindowBuilder::new(app, FINDER, tauri::WebviewUrl::App(url.into()))
             .title("dev-console-finder")
-            .inner_size(680.0, 420.0)
+            .inner_size(FINDER_SIZE.0, FINDER_SIZE.1)
             .resizable(false)
             .decorations(false)
+            // The palette paints its own rounded shell; whatever a compositor adds around it
+            // stays see-through instead of showing as a dark slab.
+            .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
@@ -79,6 +86,9 @@ pub fn show_library_with<R: Runtime>(
 pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let window = ensure(app, FINDER, "index.html#view=finder")?;
     present(&window)?;
+    // Tiling compositors ignore the creation size: Hyprland mapped the finder at 950x1008.
+    // Asking again once the window is mapped is honoured for floating windows.
+    let _ = window.set_size(tauri::LogicalSize::new(FINDER_SIZE.0, FINDER_SIZE.1));
     // The frontend clears its query and refocuses the input on every appearance.
     window
         .emit("finder-shown", ())

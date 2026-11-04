@@ -13,6 +13,7 @@
   import { absoluteTime } from '../lib/time';
   import { formatArgv, parseArgv } from '../lib/argv';
   import { applyTheme } from '../lib/state.svelte';
+  import { checkForUpdates, installUpdate, updates, updatesSupported } from '../lib/updates.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -280,6 +281,52 @@
     </header>
 
     <div class="body">
+      <section aria-label="Updates" data-testid="updates">
+        <h4>Updates</h4>
+        {#if updatesSupported()}
+          <div class="row">
+            <span data-testid="current-version">Dev Console {updates.current ?? '…'}</span>
+            <span class="spacer"></span>
+            {#if updates.available}
+              <button
+                data-variant="primary"
+                onclick={() => void installUpdate()}
+                disabled={updates.status === 'installing'}
+                data-testid="settings-install-update"
+              >
+                {updates.status === 'installing' ? 'Installing…' : `Update to ${updates.available.version} and restart`}
+              </button>
+            {:else}
+              <button
+                onclick={() => void checkForUpdates()}
+                disabled={updates.status === 'checking'}
+                data-testid="check-updates"
+              >
+                {updates.status === 'checking' ? 'Checking…' : 'Check for updates'}
+              </button>
+            {/if}
+          </div>
+          <p class="muted detail" role="status" data-testid="update-status">
+            {#if updates.status === 'checking'}
+              Checking for a newer release…
+            {:else if updates.status === 'installing'}
+              Downloading and verifying {updates.available?.version}. Dev Console restarts when it is done.
+            {:else if updates.status === 'available'}
+              Version {updates.available?.version} is available. Updating replaces the AppImage and restarts the app.
+            {:else if updates.status === 'current'}
+              You're on the latest version.
+            {:else if updates.status !== 'error'}
+              Dev Console checks for updates when it starts and every 15 minutes.
+            {/if}
+          </p>
+          {#if updates.status === 'error'}
+            <p class="error-banner" role="alert" data-testid="update-error">{updates.error}</p>
+          {/if}
+        {:else}
+          <p class="muted detail" data-testid="update-status">Updates are only available in the installed app.</p>
+        {/if}
+      </section>
+
       {#if settings}
         <section aria-label="Appearance and startup">
           <h4>General</h4>

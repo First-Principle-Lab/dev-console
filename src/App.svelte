@@ -6,6 +6,8 @@
 
   const params = new URLSearchParams(location.hash.replace(/^#/, ''));
   const view = params.get('view') === 'finder' ? 'finder' : 'library';
+  // The finder window is transparent; tokens.css drops the page fill for it.
+  document.documentElement.dataset.view = view;
 
   onMount(() => {
     void loadTheme().catch((error: unknown) => console.error('settings unavailable', error));
