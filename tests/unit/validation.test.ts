@@ -6,7 +6,7 @@ import { isHttpUrl, validateDraft } from '../../src/lib/validation';
 function command(overrides: Partial<EntryDraft> = {}): EntryDraft {
   return {
     ...EMPTY_DRAFT('command'),
-    name: 'Prune containers',
+    name: 'prune-containers',
     type: 'Docker',
     command: 'docker container prune',
     ...overrides
@@ -22,6 +22,12 @@ describe('draft validation', () => {
     expect(validateDraft(command({ name: '  ' }))).toMatch(/name/i);
     expect(validateDraft(command({ type: '' }))).toMatch(/type/i);
     expect(validateDraft(command({ command: '  ' }))).toMatch(/command/i);
+  });
+
+  it('rejects spaces inside a name because Space copies in the finder', () => {
+    expect(validateDraft(command({ name: 'wireguard off' }))).toMatch(/spaces/i);
+    expect(validateDraft(command({ name: 'wireguard\toff' }))).toMatch(/spaces/i);
+    expect(validateDraft(command({ name: '  wireguard-off  ' }))).toBeNull();
   });
 
   it('requires a secret value so an empty reveal cannot wipe a stored secret', () => {
