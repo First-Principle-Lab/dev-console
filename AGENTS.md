@@ -19,14 +19,14 @@ git switch -c feat/<name> origin/dev
 
 ## Workflow
 
-1. **Build on a branch from `dev`.** Run the local checks (below) before pushing.
+1. **Build on a branch from `dev`.** Run the local checks (below) before pushing. Add a line for every user-visible change under `## Unreleased` in `CHANGELOG.md`.
 2. **Merge into `dev`.** Use a PR or a direct push. The `verify` workflow runs on every push to `dev` and on every PR. A red `verify` on `dev` blocks promotion. Fix it on `dev` first.
 3. **Promote `dev` to `main` in batches.** Promote when:
    - two or three features are waiting in `dev`, or
    - one large feature is waiting in `dev`.
 
    Small fixes wait in `dev` for the next batch. The exception is an urgent fix the owner asks to ship now.
-4. **Promote with a PR from `dev` into `main`.** Start it with a merge commit that brings `main` into `dev`, so the two branches never drift. List the features in the batch in the PR description. Merge only once `verify` is green on the PR.
+4. **Promote with a PR from `dev` into `main`.** Start it with a merge commit that brings `main` into `dev`, so the two branches never drift. List the features in the batch in the PR description. In the same PR, rename `## Unreleased` in `CHANGELOG.md` to the version this merge will publish (the latest `v0.0.N` tag plus one, e.g. `## 0.0.5 — 2026-11-04`) and start a fresh, empty `## Unreleased` above it. Merge only once `verify` is green on the PR.
 5. **Confirm the release.** Merging into `main` runs `verify` on `main`. Its `build` job compiles and signs the AppImage alongside the other checks, and its `publish` job releases it once every job has passed. A promotion counts as done only after you check:
    - `gh run list -w verify -L 3` shows `success` for the merge commit on `main`, including its `publish` job (`gh run view <id>`).
    - `gh release list -L 1` shows a new `vX.Y.Z` tagged **Latest**. It must carry `Dev-Console.AppImage`, `Dev-Console.AppImage.sig` and `latest.json`. Check them with `gh release view vX.Y.Z`.

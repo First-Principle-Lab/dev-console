@@ -1,8 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { isTauri } from '@tauri-apps/api/core';
-  import { relaunch } from '@tauri-apps/plugin-process';
-  import { check, type Update } from '@tauri-apps/plugin-updater';
   import EntryList from '../components/EntryList.svelte';
   import EntryDetails from '../components/EntryDetails.svelte';
   import EntryEditor from '../components/EntryEditor.svelte';
@@ -29,6 +26,7 @@
     WindowIntent
   } from '../lib/models';
   import { validateDraft } from '../lib/validation';
+  import { checkForUpdates, installUpdate, updates } from '../lib/updates.svelte';
 
   let app = $state<AppStateInfo | null>(null);
   let vault = $state<VaultState | null>(null);
@@ -53,9 +51,6 @@
   let showSettings = $state(false);
   let narrow = $state(false);
   let authenticating = $state(false);
-  let availableUpdate = $state<Update | null>(null);
-  let updateBusy = $state(false);
-  let updateError = $state<string | null>(null);
   let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
 
   const draftDirty = $derived(JSON.stringify(draft) !== baseline);
@@ -76,29 +71,6 @@
     // Display); without this branch every real failure would show the fallback instead.
     if (typeof error === 'string' && error.length > 0) return error;
     return error instanceof Error && error.message.length > 0 ? error.message : fallback;
-  }
-
-  async function checkForUpdate(): Promise<void> {
-    if (!isTauri() || updateBusy) return;
-    try {
-      availableUpdate = await check();
-      updateError = null;
-    } catch (error: unknown) {
-      updateError = message(error, 'Could not check for updates.');
-    }
-  }
-
-  async function installUpdate(): Promise<void> {
-    if (!availableUpdate || updateBusy) return;
-    updateBusy = true;
-    updateError = null;
-    try {
-      await availableUpdate.downloadAndInstall();
-      await relaunch();
-    } catch (error: unknown) {
-      updateError = message(error, 'Update failed.');
-      updateBusy = false;
-    }
   }
 
   async function refreshVault(): Promise<void> {
@@ -342,9 +314,9 @@
   }
 
   onMount(() => {
-    void checkForUpdate();
-    const updateTimer = window.setInterval(() => void checkForUpdate(), 15 * 60 * 1000);
-    const checkOnFocus = (): void => { void checkForUpdate(); };
+    void checkForUpdates();
+    const updateTimer = window.setInterval(() => void checkForUpdates(), 15 * 60 * 1000);
+    const checkOnFocus = (): void => { void checkForUpdates(); };
     window.addEventListener('focus', checkOnFocus);
     const media = window.matchMedia('(max-width: 900px)');
     narrow = media.matches;
@@ -429,12 +401,17 @@
     </span>
     <span class="spacer"></span>
     {#if authenticating}<span class="muted waiting" role="status">Waiting for authentication…</span>{/if}
-    {#if availableUpdate}
-      <Button variant="primary" size="sm" icon="update" loading={updateBusy} onclick={() => void installUpdate()} data-testid="install-update">
-        Update to {availableUpdate.version}
+    {#if updates.available}
+      <Button variant="primary" size="sm" icon="update" loading={updates.status === 'installing'} onclick={() => void installUpdate()} data-testid="install-update">
+        Update to {updates.available.version}
       </Button>
     {/if}
-    {#if updateError}<span class="muted waiting" role="status" title={updateError}>Update check failed</span>{/if}
+    <!-- The full reason lives in Settings > Updates; the header only says something went wrong. -->
+    {#if updates.status === 'error'}
+      <Button variant="ghost" size="sm" icon="alert" onclick={() => (showSettings = true)} data-testid="update-failed">
+        Update check failed
+      </Button>
+    {/if}
     {#if vault}<VaultStatus {vault} onunlock={unlock} />{/if}
     <Button variant="ghost" size="sm" icon="gear" onclick={() => (showSettings = true)} data-testid="settings"
       >Settings</Button
