@@ -4,6 +4,7 @@ pub mod backup;
 pub mod cli;
 pub mod clipboard;
 pub mod control;
+pub mod desktop_icons;
 pub mod error;
 pub mod execution;
 pub mod ipc;
@@ -93,6 +94,7 @@ fn build(argv: Vec<String>) {
                     Err(error) => eprintln!("dev-console: startup backup skipped ({error})"),
                 }
             }
+            desktop_icons::refresh_for_appimage();
             clipboard::spawn_expiry_worker(Arc::clone(&state));
             control::serve(app.handle(), Arc::clone(&state));
             match intent {
