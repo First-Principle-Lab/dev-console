@@ -2,6 +2,7 @@
   import type { EntryDraft } from '../lib/models';
   import { validateDraft } from '../lib/validation';
   import Button from './Button.svelte';
+  import ExtraFields from './ExtraFields.svelte';
   import Icon from './Icon.svelte';
 
   let {
@@ -111,6 +112,12 @@
       <span class="label">Notes</span>
       <textarea rows="4" bind:value={draft.notes}></textarea>
     </label>
+    {#if !isCommand}
+      <div class="field">
+        <span class="label">Custom fields</span>
+        <ExtraFields fields={draft.fields} editable={true} onChange={(f) => (draft.fields = f)} />
+      </div>
+    {/if}
   </div>
 </form>
 

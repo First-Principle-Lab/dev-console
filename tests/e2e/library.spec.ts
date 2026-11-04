@@ -110,6 +110,26 @@ test('a new secret needs only name, value and notes', async ({ page }) => {
   await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
 });
 
+test('a secret can carry optional custom fields added with the plus button', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('tab-secrets').click();
+  await page.getByTestId('add-entry').click();
+  await page.getByTestId('field-name').fill('Database login');
+  await page.getByTestId('field-value').fill('synthetic-db-password');
+  await page.getByTestId('add-field').click();
+  // adding a field must not submit the form
+  await expect(page.getByTestId('entry-editor')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Field label' }).fill('Username');
+  await page.getByRole('textbox', { name: 'Field value' }).fill('admin');
+  await page.getByTestId('save').click();
+  const state = await mockState(page);
+  expect(state.secrets.at(-1)).toMatchObject({
+    name: 'Database login',
+    fields: [{ label: 'Username', value: 'admin', display: 'text' }]
+  });
+  await expect(page.getByTestId('extra-fields')).toContainText('admin');
+});
+
 test('a locked vault clears the secret list and blocks secret reads', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('tab-secrets').click();
