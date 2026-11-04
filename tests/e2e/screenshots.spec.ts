@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -9,15 +9,32 @@ import { boot } from './helpers';
  * IPC, so every page here runs against the documented IPC test double (`ipc-mock.js`) and the
  * native binary is exercised separately by `scripts/smoke-native.sh`.
  *
- *   SHOT_SET=before bun run test:e2e -- screenshots   # captures artifacts/ui-review/before/
- *   SHOT_SET=after  bun run test:e2e -- screenshots   # captures artifacts/ui-review/after/
+ *   SHOT_SET=before           # historical pre-token set, frozen: artifacts/ui-review/before/
+ *   SHOT_SET=after            # previous review set, frozen: artifacts/ui-review/after/
+ *   SHOT_SET=native           # written by the native smoke session, not by this file
+ *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/raycast-ui-research-2026-11-02.md)
+ *   SHOT_SET=raycast-after    # the redesigned UI
+ *
+ * `before`, `after` and `native` stay on disk untouched: they are the review record for earlier
+ * work, and the redesign compares against `raycast-baseline` instead of rewriting them.
  *
  * Secrets use obviously synthetic values and are captured masked unless the state under
- * review is explicitly a reveal state (there is none).
+ * review is explicitly a reveal state (there is none). `capture()` proves that for every
+ * capture instead of relying on the reviewer to look: a synthetic value reaching the serialized
+ * DOM fails the run. `SHOT_HTML=1` additionally writes the page source beside the PNGs under
+ * `test-results/screenshots/<set>/` (gitignored) for grepping a whole set at once.
  */
 
-const SET = process.env.SHOT_SET ?? 'after';
+// `before`, `after` and `native` are frozen review records for earlier work, so the default is no
+// longer `after`: a plain `bunx playwright test` (which is what `scripts/verify.sh` runs) would
+// otherwise overwrite 41 tracked PNGs with whatever this machine's font rendering produces.
+// docs/raycast-ui-research-2026-11-02.md owns the capture protocol.
+const SET = process.env.SHOT_SET ?? 'raycast-after';
 const OUT_DIR = path.join(import.meta.dirname, '..', '..', 'artifacts', 'ui-review', SET);
+const HTML_DIR = path.join(import.meta.dirname, '..', '..', 'test-results', 'screenshots', SET);
+
+/** Distinctive prefixes of every synthetic secret value seeded below. */
+const SECRET_MARKERS = ['synthetic-masked-value', 'synthetic-db-password', 'synthetic-long-secret'];
 
 const ago = (hours: number): string => new Date(Date.now() - hours * 3600_000).toISOString();
 
@@ -92,6 +109,17 @@ test('settings import review card at the real library size', async ({ page }) =>
   await capture(page, '16-settings-import-review', 1040, 700);
 });
 
+test('library record at the real minimum window size', async ({ page }) => {
+  // 760 x 520 is the smallest window the shell is created with, and under 900px the library
+  // switches to one pane: this is the state where an action area that scrolled off the bottom
+  // would be unreachable.
+  await page.setViewportSize({ width: 760, height: 520 });
+  await boot(page, LONG);
+  await page.getByTestId('entry-row').first().click();
+  await page.getByTestId('entry-details').waitFor();
+  await capture(page, '17-library-minimum-window', 760, 520);
+});
+
 const EMPTY = { commands: [], secrets: [] };
 
 /** Deliberately awkward content: long names, tags, values and paths must not break the layout. */
@@ -141,6 +169,14 @@ async function capture(page: Page, name: string, width: number, height: number):
   fs.mkdirSync(OUT_DIR, { recursive: true });
   await page.setViewportSize({ width, height });
   await page.waitForTimeout(150);
+  const source = await page.content();
+  for (const marker of SECRET_MARKERS) {
+    expect(source, `${name}: synthetic secret "${marker}" reached the captured DOM`).not.toContain(marker);
+  }
+  if (process.env.SHOT_HTML === '1') {
+    fs.mkdirSync(HTML_DIR, { recursive: true });
+    fs.writeFileSync(path.join(HTML_DIR, `${name}__${width}.html`), source);
+  }
   await page.screenshot({ path: path.join(OUT_DIR, `${name}__${width}.png`) });
 }
 

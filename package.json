@@ -10,6 +10,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "check:contrast": "bun scripts/contrast-check.mjs",
     "test:e2e": "bun run build && playwright test",
     "tauri": "tauri",
     "build": "vite build",

@@ -200,7 +200,7 @@
   .editor {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
+    gap: var(--sp-4);
     padding: var(--sp-4);
     height: 100%;
     overflow: auto;
@@ -210,31 +210,31 @@
     align-items: center;
     gap: var(--sp-2);
     padding-bottom: var(--sp-3);
-    border-bottom: var(--border);
+    border-bottom: var(--border-hair);
     position: sticky;
     top: 0;
     background: var(--bg);
     z-index: 2;
   }
+  /* the same kind tile as the palette row, the list row and the inspector */
   .glyph {
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius);
-    color: var(--command-accent);
+    width: var(--tile-lg);
+    height: var(--tile-lg);
+    border-radius: var(--radius-row);
+    color: var(--kind-command);
     background: var(--accent-soft);
-    border: var(--border);
   }
   .glyph.secret {
-    color: var(--secret-accent);
+    color: var(--kind-secret);
     background: var(--secret-soft);
   }
   .titles {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--gap-xs);
   }
   .titles h3 {
     font-size: var(--text-lg);
@@ -242,22 +242,30 @@
   .sub {
     font-size: var(--text-xs);
   }
+  /* Grouped the way the settings panel groups its sections: a label and a gap, not a
+     box inside a box. Every field already has its own outline, so the frame around a
+     group was a second border carrying no information. */
   .group {
-    border: var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--sp-3);
+    border: 0;
+    border-radius: 0;
+    padding: 0;
     margin: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
-    background: var(--bg-panel);
+    background: transparent;
   }
+  /* the shared group-header recipe (identical to the settings section headers), one
+     step up from the .label utility so a group title and its first field label never
+     read as two labels of the same rank */
   .group legend {
-    padding: 0 var(--sp-1);
+    padding: 0;
+    margin: 0;
     color: var(--fg-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: var(--label-tracking);
   }
   .grid {
     display: grid;
@@ -301,7 +309,7 @@
   .hint.warn {
     color: var(--warn);
     background: var(--warn-soft);
-    border: var(--border);
+    border: var(--border-hair);
     border-radius: var(--radius);
     padding: var(--sp-2);
   }

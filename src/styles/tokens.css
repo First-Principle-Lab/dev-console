@@ -7,6 +7,18 @@
    restrained indigo accent used for selection, focus, primary actions and
    important status. A light theme is defined with the same token names and
    meets the same contrast targets.
+
+   The light palette appears twice on purpose: once inside the
+   `prefers-color-scheme` block (for "follow the system") and once under
+   `[data-theme='light']` (for the explicit setting). The two lists must stay
+   identical; tests/unit/design-tokens.test.ts fails the build if a token is
+   added to one and not the other.
+
+   Raycast-inspired pass (docs/raycast-ui-redesign.md): the shell (the floating
+   window frame), the search line, the selected row band and the material layer
+   each get their own tokens instead of borrowing control tokens, so a reviewer
+   can retune the redesign from this file alone. Every value here is a Dev
+   Console starting point, not a measured Raycast value.
    ----------------------------------------------------------------------- */
 
 :root {
@@ -20,6 +32,16 @@
   --text-lg: 15px;
   --text-xl: 18px;
   --leading: 1.45;
+  /* two-line rows (name + one context line) have to fit --row-h, so they lead tighter */
+  --leading-tight: 1.2;
+
+  /* roles: one line each in the palette and the lists */
+  --text-search: 17px;
+  --text-row: 13.5px;
+  --text-row-meta: 11.5px;
+
+  /* the uppercase group label, identical wherever a group needs a name */
+  --label-tracking: 0.06em;
 
   /* spacing + layout rhythm */
   --sp-1: 4px;
@@ -30,20 +52,44 @@
   --sp-6: 32px;
   --gap: var(--sp-3);
   --gap-sm: var(--sp-2);
+  --gap-xs: 2px;
+  --gap-keys: 3px;
+  --gap-tags: 5px;
   --pane-list: 320px;
   --pane-detail-min: 380px;
 
-  /* radii + borders */
+  /* radii: controls stay small, rows get a soft band, the shell gets the arc */
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 10px;
+  --radius-row: 8px;
+  --radius-shell: 14px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
   --border: 1px solid var(--line);
   --border-strong: 1px solid var(--line-strong);
+  --border-hair: 1px solid var(--line-hair);
+  --border-shell: 1px solid var(--line-shell);
+  /* the one deliberate frame: a card that asks before it destroys (run / delete /
+     import review / recovery). Every confirm surface in the app uses this, so a
+     warn outline always means the same thing. */
+  --border-warn: 1px solid var(--warn);
 
   /* control sizes */
   --control-h: 30px;
   --control-h-sm: 26px;
-  --row-h: 46px;
+  --row-h: 40px;
+  --search-h: 46px;
+  --footer-h: 34px;
+  --tab-h: 34px;
+  --tile-sm: 22px;
+  --tile-md: 24px;
+  --tile-lg: 32px;
+  --tile-xl: 40px;
+  --badge-min: 20px;
+  --edge-w: 2px;
+  /* indent for a leading icon inside a field (icon tile + its gap) */
+  --field-icon-indent: 26px;
 
   /* motion */
   --transition: 120ms ease;
@@ -63,15 +109,46 @@
   --line: #2e323b;
   --line-strong: #404652;
   --fg: #e9eaef;
-  --fg-muted: #9ba1ae;
-  --fg-dim: #767d8b;
+  --fg-muted: #a6acb9;
+  /* dim is the quietest text in the app and it still has to clear 4.5:1 on the
+     selected band, which is the darkest place it appears - scripts/contrast-check.mjs
+     measures that pair and fails the build if this drifts back down. */
+  --fg-dim: #959bac;
+
+  /* the floating shell: shaded opaque graphite with a fine light top edge.
+     Opaque is deliberate - compositor blur cannot be proven on this host, so
+     --material-blur ships at 0px and the shell must read on its own. */
+  --shell-bg: #1b1d22;
+  --shell-edge: rgba(255, 255, 255, 0.07);
+  --line-shell: #2a2e36;
+  --line-hair: rgba(255, 255, 255, 0.06);
+  --shadow-shell: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-raised: 0 4px 14px rgba(0, 0, 0, 0.35);
+  --inset-fill: rgba(0, 0, 0, 0.22);
+
+  /* the search line is the loudest thing in the palette: no box, no bright rule */
+  --search-fg: var(--fg);
+  --search-placeholder: #8d93a1;
+  --search-focus-bg: rgba(255, 255, 255, 0.04);
+  --caret: var(--accent);
 
   --accent: #7c8cf8;
   --accent-strong: #6474f0;
   --accent-fg: #0e1020;
   --accent-soft: rgba(124, 140, 248, 0.16);
   --accent-line: rgba(124, 140, 248, 0.45);
-  --selected: rgba(124, 140, 248, 0.18);
+
+  /* selection is a soft band with a quiet edge plus a 2px marker, so it never
+     depends on colour alone; hover is a neutral fill and always weaker */
+  --selected: rgba(124, 140, 248, 0.16);
+  --selected-fg: var(--fg);
+  --selected-edge: rgba(124, 140, 248, 0.28);
+  --selected-marker: inset var(--edge-w) 0 0 var(--accent);
+  --hover-fill: rgba(255, 255, 255, 0.05);
+
+  /* material is opt-in: with a 0px blur every surface stays an opaque fill */
+  --material-blur: 0px;
+  --material-tint: transparent;
 
   --danger: #f08a86;
   --danger-soft: rgba(240, 138, 134, 0.14);
@@ -84,10 +161,13 @@
   --command-accent: var(--accent);
   --secret-accent: #d9a45b;
   --secret-soft: rgba(217, 164, 91, 0.14);
+  --kind-command: var(--command-accent);
+  --kind-secret: var(--secret-accent);
 
   --focus-ring: #aab6ff;
   --backdrop: rgba(8, 9, 12, 0.62);
-  --shadow-dialog: 0 18px 48px rgba(0, 0, 0, 0.48);
+  --footer-fg: var(--fg-dim);
+  --shadow-dialog: var(--shadow-shell);
 }
 
 /* light (same token names, tuned for contrast on a light surface) ---------- */
@@ -103,15 +183,38 @@
     --line: #d5d8e0;
     --line-strong: #b9bec9;
     --fg: #1b1d23;
-    --fg-muted: #5c6270;
-    --fg-dim: #7d8493;
+    --fg-muted: #4b5160;
+    --fg-dim: #5f6673;
+
+    --shell-bg: #ffffff;
+    --shell-edge: rgba(255, 255, 255, 0.75);
+    --line-shell: #dfe2e9;
+    --line-hair: rgba(27, 29, 35, 0.1);
+    --shadow-shell: 0 20px 48px rgba(20, 22, 28, 0.2), 0 2px 6px rgba(20, 22, 28, 0.1);
+    --shadow-raised: 0 3px 10px rgba(20, 22, 28, 0.12);
+    --inset-fill: rgba(20, 22, 28, 0.06);
+
+    --search-fg: var(--fg);
+    /* placeholder has to survive the focus wash under it, so it cannot be lighter
+       than this in the light theme (scripts/contrast-check.mjs) */
+    --search-placeholder: #626976;
+    --search-focus-bg: rgba(27, 29, 35, 0.04);
+    --caret: var(--accent);
 
     --accent: #4553d6;
     --accent-strong: #3846c4;
     --accent-fg: #ffffff;
     --accent-soft: rgba(69, 83, 214, 0.1);
     --accent-line: rgba(69, 83, 214, 0.4);
-    --selected: rgba(69, 83, 214, 0.12);
+
+    --selected: rgba(69, 83, 214, 0.16);
+    --selected-fg: var(--fg);
+    --selected-edge: rgba(69, 83, 214, 0.3);
+    --selected-marker: inset var(--edge-w) 0 0 var(--accent);
+    --hover-fill: rgba(27, 29, 35, 0.05);
+
+    --material-blur: 0px;
+    --material-tint: transparent;
 
     --danger: #a72d28;
     --danger-soft: rgba(167, 45, 40, 0.1);
@@ -123,10 +226,13 @@
     --command-accent: var(--accent);
     --secret-accent: #8a5a12;
     --secret-soft: rgba(138, 90, 18, 0.12);
+    --kind-command: var(--command-accent);
+    --kind-secret: var(--secret-accent);
 
     --focus-ring: #2331a8;
     --backdrop: rgba(24, 26, 32, 0.4);
-    --shadow-dialog: 0 14px 40px rgba(20, 22, 28, 0.24);
+    --footer-fg: var(--fg-dim);
+    --shadow-dialog: var(--shadow-shell);
   }
 }
 
@@ -141,15 +247,38 @@
   --line: #d5d8e0;
   --line-strong: #b9bec9;
   --fg: #1b1d23;
-  --fg-muted: #5c6270;
-  --fg-dim: #7d8493;
+  --fg-muted: #4b5160;
+  --fg-dim: #5f6673;
+
+  --shell-bg: #ffffff;
+  --shell-edge: rgba(255, 255, 255, 0.75);
+  --line-shell: #dfe2e9;
+  --line-hair: rgba(27, 29, 35, 0.1);
+  --shadow-shell: 0 20px 48px rgba(20, 22, 28, 0.2), 0 2px 6px rgba(20, 22, 28, 0.1);
+  --shadow-raised: 0 3px 10px rgba(20, 22, 28, 0.12);
+  --inset-fill: rgba(20, 22, 28, 0.06);
+
+  --search-fg: var(--fg);
+  /* placeholder has to survive the focus wash under it, so it cannot be lighter
+     than this in the light theme (scripts/contrast-check.mjs) */
+  --search-placeholder: #626976;
+  --search-focus-bg: rgba(27, 29, 35, 0.04);
+  --caret: var(--accent);
 
   --accent: #4553d6;
   --accent-strong: #3846c4;
   --accent-fg: #ffffff;
   --accent-soft: rgba(69, 83, 214, 0.1);
   --accent-line: rgba(69, 83, 214, 0.4);
-  --selected: rgba(69, 83, 214, 0.12);
+
+  --selected: rgba(69, 83, 214, 0.16);
+  --selected-fg: var(--fg);
+  --selected-edge: rgba(69, 83, 214, 0.3);
+  --selected-marker: inset var(--edge-w) 0 0 var(--accent);
+  --hover-fill: rgba(27, 29, 35, 0.05);
+
+  --material-blur: 0px;
+  --material-tint: transparent;
 
   --danger: #a72d28;
   --danger-soft: rgba(167, 45, 40, 0.1);
@@ -161,10 +290,49 @@
   --command-accent: var(--accent);
   --secret-accent: #8a5a12;
   --secret-soft: rgba(138, 90, 18, 0.12);
+  --kind-command: var(--command-accent);
+  --kind-secret: var(--secret-accent);
 
   --focus-ring: #2331a8;
   --backdrop: rgba(24, 26, 32, 0.4);
-  --shadow-dialog: 0 14px 40px rgba(20, 22, 28, 0.24);
+  --footer-fg: var(--fg-dim);
+  --shadow-dialog: var(--shadow-shell);
+}
+
+/* ------------------------------------------------------------- material ---
+   Real desktop blur needs a transparent window, a transparent WebView and a
+   compositor that supports it, none of which this repo can prove on Linux, so
+   this file paints no page-level blur at all: every surface is a shaded opaque
+   fill, and no rule anywhere under src/ sets a CSS blur filter. The two material
+   tokens below exist so the native prototype (docs/raycast-ui-redesign.md
+   "Native material outcome") has one place to switch: `data-transparency="on"`
+   supplies the tint and a candidate blur radius, `"off"` and the OS
+   reduced-transparency preference force the opaque values back. Until a capture
+   proves compositor blur, no component may read --material-blur.
+   ----------------------------------------------------------------------- */
+:root[data-transparency='on'] {
+  /* UNVERIFIED prototype values - not proven on any compositor. */
+  --material-blur: 24px;
+  --material-tint: rgba(23, 25, 30, 0.82);
+}
+
+:root[data-theme='light'][data-transparency='on'] {
+  /* UNVERIFIED prototype values - not proven on any compositor. */
+  --material-blur: 24px;
+  --material-tint: rgba(255, 255, 255, 0.82);
+}
+
+:root[data-transparency='off'] {
+  --material-blur: 0px;
+  --material-tint: transparent;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-transparency='on'] {
+    --material-blur: 0px;
+    --material-tint: transparent;
+  }
 }
 
 /* --------------------------------------------------------------- base ---- */
@@ -301,6 +469,7 @@ textarea,
 select {
   font: inherit;
   color: inherit;
+  caret-color: var(--caret);
   background: var(--bg-sunken);
   border: var(--border);
   border-radius: var(--radius);
@@ -416,7 +585,7 @@ select {
   color: var(--fg-muted);
   font-size: var(--text-xs);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--label-tracking);
 }
 
 .error-banner {
@@ -430,17 +599,28 @@ select {
 
 .panel {
   background: var(--bg-panel);
-  border: var(--border);
+  border: var(--border-hair);
   border-radius: var(--radius);
 }
 
 .block {
   background: var(--bg-sunken);
-  border: var(--border);
+  border: var(--border-hair);
   border-radius: var(--radius);
   padding: var(--sp-3);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Floating shell: the one surface allowed to carry material later. Windows and
+   dialogs share it so the frame is defined in exactly one place. */
+.surface-shell {
+  background: var(--shell-bg);
+  border: var(--border-shell);
+  border-radius: var(--radius-shell);
+  box-shadow:
+    inset 0 1px 0 var(--shell-edge),
+    var(--shadow-shell);
 }
 
 /* keycap for keyboard hints */
@@ -452,9 +632,9 @@ kbd,
   color: var(--fg-muted);
   background: var(--bg-raised);
   border: var(--border);
-  border-bottom-width: 2px;
+  border-bottom-width: var(--edge-w);
   border-radius: var(--radius-sm);
-  padding: 3px 5px 2px;
+  padding: var(--gap-keys) var(--gap-tags) var(--edge-w);
   white-space: nowrap;
 }
 
@@ -466,8 +646,8 @@ kbd,
   font-size: var(--text-xs);
   color: var(--fg-muted);
   background: var(--bg-raised);
-  border: var(--border);
-  border-radius: 999px;
+  border: var(--border-hair);
+  border-radius: var(--radius-pill);
   padding: 2px var(--sp-2);
   white-space: nowrap;
 }

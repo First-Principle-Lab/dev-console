@@ -41,7 +41,7 @@
 <div class="backdrop" role="presentation" onclick={(event) => oncancel && event.target === event.currentTarget && oncancel()}
   onkeydown={onkey}>
   <div
-    class="dialog"
+    class="dialog surface-shell"
     role="dialog"
     aria-modal="true"
     tabindex="-1"
@@ -68,11 +68,9 @@
     z-index: 40;
   }
   .dialog {
+    /* The frame itself (fill, edge, radius, elevation) is .surface-shell from
+       tokens.css so every floating surface in the app shares one definition. */
     width: min(520px, 100%);
-    background: var(--bg-panel);
-    border: var(--border-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-dialog);
     padding: var(--sp-4);
     display: flex;
     flex-direction: column;
@@ -97,5 +95,8 @@
     justify-content: flex-end;
     gap: var(--gap-sm);
     flex-wrap: wrap;
+    margin-top: var(--sp-1);
+    padding-top: var(--sp-3);
+    border-top: var(--border-hair);
   }
 </style>

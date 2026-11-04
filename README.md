@@ -54,7 +54,8 @@ features report themselves unavailable and commands keep working.
 bash scripts/verify.sh
 ```
 
-That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests, production build,
+That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests (which include the token
+contrast audit below), production build,
 Playwright (library + Finder + redesign + visual review captures), `cargo fmt --check`, clippy with
 warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 
@@ -91,6 +92,29 @@ cannot run in CI exits 77 and is reported rather than hidden.
 states captured at 1440, 768 and 390 px (`SHOT_SET=before|after bun run test:e2e -- screenshots`).
 These are **UI-shell** checks: the browser preview cannot reach native IPC, so they run against the
 documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
+
+`raycast-baseline/` and `raycast-after/` are the before/after pair for the Raycast-inspired pass
+(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); the baseline set is 41
+PNGs and the redesign set 42 - the extra one, `17-library-minimum-window`, is the state the visual
+pass needed and the old grid did not have (the smallest real library window, one pane, action area
+on screen). Every other filename is shared, so `diff` between the two directory listings names the
+captures that moved. The default `SHOT_SET` is `raycast-after`, which keeps a plain `bunx playwright test` from
+rewriting the frozen `after/` set; `SHOT_HTML=1` writes each captured DOM alongside, and any
+synthetic secret value reaching a capture fails the run.
+
+Contrast is measured rather than asserted: `bun run check:contrast`
+(`scripts/contrast-check.mjs`) reads the palettes out of `src/styles/tokens.css`, composites every
+translucent layer over the surface it is painted on and checks 76 real pairings per theme at
+4.5:1 for text and 3:1 for state indicators, printing each ratio and each deliberate exemption.
+`tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
+contrast fails the gate.
+
+`artifacts/ui-review/native-redesign/` holds the redesign as actually painted by the compiled
+release binary under Xvfb (`scripts/native-capture.sh`): library and palette over a dark and a
+busy X11 background, in both themes, with pixel probes proving the opaque shell never bleeds the
+background through, keeps square window corners, maps without a flash frame and does not repaint
+at rest. Wayland/Hyprland compositor blur cannot be exercised here and stays a manual checklist
+in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
 
 ## Keyboard
 
