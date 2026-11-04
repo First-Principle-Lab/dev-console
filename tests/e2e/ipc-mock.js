@@ -100,13 +100,28 @@
     }).filter(Boolean);
     scored.sort((a, b) => {
       if (terms.length === 0) {
-        return (!b.entry.pinned) - (!a.entry.pinned) || b.entry.usageCount - a.entry.usageCount || a.entry.name.localeCompare(b.entry.name);
+        return (
+          (!b.entry.pinned) - (!a.entry.pinned) ||
+          (b.entry.lastUsedAt || '').localeCompare(a.entry.lastUsedAt || '') ||
+          b.entry.usageCount - a.entry.usageCount ||
+          a.entry.name.localeCompare(b.entry.name)
+        );
       }
       return a.best - b.best || b.entry.usageCount - a.entry.usageCount || a.entry.name.localeCompare(b.entry.name);
     });
     const trimmed = query.trim();
+    // Only the fields models.rs SearchResult serializes: a field the finder reads that the real
+    // backend never sends must fail here too, not just in the shipped app.
     return scored.slice(0, limit).map(({ entry }) => ({
-      ...entry,
+      id: entry.id,
+      kind: entry.kind,
+      name: entry.name,
+      type: entry.type,
+      tags: entry.tags,
+      description: entry.description,
+      pinned: entry.pinned,
+      usageCount: entry.usageCount,
+      lastUsedAt: entry.lastUsedAt,
       completion: trimmed && entry.name.toLowerCase().startsWith(trimmed.toLowerCase()) && entry.name !== trimmed ? entry.name : undefined
     }));
   }

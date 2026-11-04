@@ -66,10 +66,13 @@ pub struct SearchResult {
     pub name: String,
     #[serde(rename = "type")]
     pub entry_type: String,
+    /// The finder renders tags on every row, so a result without them breaks the list.
+    pub tags: Vec<String>,
     pub description: String,
     pub completion: Option<String>,
     pub pinned: bool,
     pub usage_count: i64,
+    pub last_used_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

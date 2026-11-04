@@ -50,8 +50,18 @@ export interface EntryMeta {
   lastUsedAt: string | null;
 }
 
-export interface SearchResult extends EntryMeta {
-  completion?: string;
+/** Exactly what `search_entries` returns (models.rs SearchResult): no revision or updatedAt. */
+export interface SearchResult {
+  id: string;
+  kind: Kind;
+  name: string;
+  type: string;
+  tags: string[];
+  description: string;
+  completion?: string | null;
+  pinned: boolean;
+  usageCount: number;
+  lastUsedAt: string | null;
 }
 
 export interface SearchResponse {

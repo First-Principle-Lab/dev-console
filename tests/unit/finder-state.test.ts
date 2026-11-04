@@ -6,14 +6,12 @@ function row(id: string, name: string, kind: 'command' | 'secret' = 'command'): 
   return {
     id,
     kind,
-    revision: 1,
     name,
     type: 'Git',
     description: '',
     pinned: false,
     usageCount: 0,
     tags: [],
-    updatedAt: '2026-01-01T00:00:00Z',
     lastUsedAt: null
   };
 }

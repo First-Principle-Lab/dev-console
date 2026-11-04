@@ -185,10 +185,13 @@ pub fn rank(entries: &[EntryMeta], query: &str, limit: usize) -> Vec<SearchResul
         .collect();
 
     if terms.is_empty() {
-        // Empty query: pinned first, then most recently used, then name.
+        // Empty query: pinned first, then most recently used, then most used, then name.
+        // Timestamps are UTC RFC 3339, so they order correctly as strings; None (never used)
+        // sorts after every Some.
         scored.sort_by(|a, b| {
             (!a.1)
                 .cmp(&!b.1)
+                .then_with(|| b.3.entry.last_used_at.cmp(&a.3.entry.last_used_at))
                 .then(b.2.cmp(&a.2))
                 .then_with(|| a.3.name.cmp(&b.3.name))
                 .then_with(|| a.3.entry.id.cmp(&b.3.entry.id))
@@ -216,9 +219,11 @@ pub fn rank(entries: &[EntryMeta], query: &str, limit: usize) -> Vec<SearchResul
             kind: key.entry.kind,
             name: key.entry.name.clone(),
             entry_type: key.entry.entry_type.clone(),
+            tags: key.entry.tags.clone(),
             description: key.entry.description.clone(),
             pinned: key.entry.pinned,
             usage_count: usage,
+            last_used_at: key.entry.last_used_at.clone(),
         })
         .collect()
 }
@@ -299,6 +304,29 @@ mod tests {
             .map(|r| r.id)
             .collect();
         assert_eq!(ids, vec!["p", "h"]);
+    }
+
+    #[test]
+    fn empty_query_puts_recently_used_before_frequently_used() {
+        let mut frequent = meta("f", "alpha", "A", &[], "");
+        frequent.usage_count = 9;
+        frequent.last_used_at = Some("2026-10-01T09:00:00Z".into());
+        let mut recent = meta("r", "beta", "B", &[], "");
+        recent.usage_count = 1;
+        recent.last_used_at = Some("2026-11-03T09:00:00Z".into());
+        let never = meta("n", "aardvark", "C", &[], "");
+        let ids: Vec<String> = rank(&[never, frequent, recent], "", 10)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, vec!["r", "f", "n"]);
+    }
+
+    #[test]
+    fn results_carry_tags_for_the_finder_rows() {
+        let entries = vec![meta("w", "wireguard-off", "Network", &["vpn"], "")];
+        let results = rank(&entries, "wire", 10);
+        assert_eq!(results[0].tags, vec!["vpn".to_string()]);
     }
 
     #[test]

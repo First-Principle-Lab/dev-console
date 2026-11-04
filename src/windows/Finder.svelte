@@ -27,13 +27,11 @@
           {
             id: UNLOCK_ID,
             kind: 'command',
-            revision: 0,
             name: 'Unlock vault to search secrets',
             type: 'System',
             tags: [],
             description: '',
             pinned: false,
-            updatedAt: '',
             usageCount: 0,
             lastUsedAt: null
           }
@@ -80,8 +78,8 @@
   function reset(): void {
     requestId += 1;
     query = '';
-    results = [];
-    selectedId = null;
+    // Keep the last list on screen until the fresh one arrives: blanking it here showed
+    // "Searching…" on every open.
     error = null;
     status = null;
     void runSearch('').catch(() => undefined);

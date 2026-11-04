@@ -154,3 +154,24 @@ test('reopening starts with a fresh query instead of the previous search', async
   await page.evaluate(() => (window as never as { __mock: { emit: (e: string, p: unknown) => void } }).__mock.emit('finder-shown', null));
   await expect(page.getByTestId('finder-input')).toHaveValue('');
 });
+
+test('typing shows the matching saved entries with their tags', async ({ page }) => {
+  await boot(page, SEED, 'finder');
+  await page.getByTestId('finder-input').fill('restart');
+  const rows = page.getByTestId('result-row');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Restart containers');
+  await expect(rows.first()).toContainText('#work');
+  await expect(page.getByText('Searching…')).toHaveCount(0);
+});
+
+test('an empty query lists the most recently used entries first', async ({ page }) => {
+  const commands = SEED.commands.map((c) =>
+    c.id === 'c3' ? { ...c, lastUsedAt: '2026-11-03T09:00:00Z' } : c.id === 'c1' ? { ...c, lastUsedAt: '2026-10-01T09:00:00Z' } : c
+  );
+  await boot(page, { ...SEED, commands, secrets: [] }, 'finder');
+  const rows = page.getByTestId('result-row');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText('git revert HEAD');
+  await expect(rows.nth(1)).toContainText('docker');
+});
