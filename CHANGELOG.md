@@ -5,11 +5,13 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.5 — 2026-11-04
+
 ### Added
 - **Settings → Updates.** Shows the running version, has a **Check for updates** button,
   and offers **Update to X and restart** when a newer release exists. If a check fails, the full
   reason is shown there. The header's "Update check failed" button opens that section.
-- This changelog.
+- `CHANGELOG.md`, listing what changed in every version.
 
 ### Fixed
 - **The finder opened as a large black window on Hyprland.** The compositor mapped the 680×420
