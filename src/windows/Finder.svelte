@@ -327,7 +327,7 @@
      nothing is painted here so the shell is defined in exactly one place. */
   .finder {
     height: 100%;
-    background: var(--bg);
+    background: transparent;
     display: grid;
     place-items: center;
     padding: 0;

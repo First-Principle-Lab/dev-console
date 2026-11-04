@@ -357,6 +357,12 @@ body {
   overflow: hidden;
 }
 
+/* The finder window is transparent so only the palette shell is visible, even when the
+   compositor makes the window larger than the palette. */
+html[data-view='finder'] body {
+  background: transparent;
+}
+
 h1,
 h2,
 h3,

@@ -331,6 +331,30 @@
     throw new Error(`unmocked command ${command}`);
   }
 
+  // Stands in for the Tauri updater and process plugins. Only installed when a test seeds
+  // `updater`, so every other spec still sees a build without self-update.
+  if (seed.updater) {
+    state.updater = { checks: 0, installs: 0, relaunches: 0, ...seed.updater };
+    window.__devConsoleUpdater = {
+      currentVersion: async () => state.updater.current,
+      check: async () => {
+        state.updater.checks += 1;
+        if (state.updater.failCheck) throw new Error(state.updater.failCheck);
+        if (!state.updater.available) return null;
+        return {
+          version: state.updater.available,
+          install: async () => {
+            if (state.updater.failInstall) throw new Error(state.updater.failInstall);
+            state.updater.installs += 1;
+          }
+        };
+      },
+      relaunch: async () => {
+        state.updater.relaunches += 1;
+      }
+    };
+  }
+
   window.__mock = {
     state,
     emit,
