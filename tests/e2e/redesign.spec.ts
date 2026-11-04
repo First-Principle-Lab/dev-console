@@ -51,7 +51,7 @@ test('the editor reports unsaved changes and clears them on cancel', async ({ pa
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
   await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);
-  await page.getByTestId('field-name').fill('Half typed');
+  await page.getByTestId('field-name').fill('half-typed');
   await expect(page.getByTestId('dirty-indicator')).toBeVisible();
   await page.getByTestId('cancel-edit').click();
   await expect(page.getByTestId('dirty-indicator')).toHaveCount(0);

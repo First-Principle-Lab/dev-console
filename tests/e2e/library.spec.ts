@@ -24,14 +24,14 @@ test('library lists both same-named commands and shows the selected record', asy
 test('creating a command persists through the backend and refreshes the list', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
-  await page.getByTestId('field-name').fill('Prune volumes');
+  await page.getByTestId('field-name').fill('prune-volumes');
   await page.getByTestId('field-command').fill('docker volume prune -f');
   await page.getByRole('textbox', { name: 'Notes' }).fill('Run only after the backup.');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('entry-details')).toContainText('docker volume prune -f');
   const state = await mockState(page);
   expect(state.commands).toHaveLength(3);
-  expect(state.commands[2].name).toBe('Prune volumes');
+  expect(state.commands[2].name).toBe('prune-volumes');
   expect(state.commands[2]).toMatchObject({
     type: 'Command', notes: 'Run only after the backup.'
   });
@@ -42,7 +42,7 @@ test('a cancelled edit leaves the saved record untouched', async ({ page }) => {
   await page.getByTestId('entry-row').nth(1).click();
   await expect(page.getByTestId('command-text')).toHaveText('echo one');
   await page.getByTestId('edit').click();
-  await page.getByTestId('field-name').fill('Renamed by mistake');
+  await page.getByTestId('field-name').fill('renamed-by-mistake');
   await page.getByTestId('field-command').fill('rm -rf /');
   await page.getByTestId('cancel-edit').click();
   await expect(page.getByTestId('entry-details')).toContainText('Deploy');
@@ -55,11 +55,11 @@ test('a failed write keeps the draft on screen', async ({ page }) => {
   await boot(page, SEED);
   await page.evaluate(() => ((window as never as { __mock: { state: { saveFails: boolean } } }).__mock.state.saveFails = true));
   await page.getByTestId('add-entry').click();
-  await page.getByTestId('field-name').fill('Kept draft');
+  await page.getByTestId('field-name').fill('kept-draft');
   await page.getByTestId('field-command').fill('echo keep');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-error')).toBeVisible();
-  await expect(page.getByTestId('field-name')).toHaveValue('Kept draft');
+  await expect(page.getByTestId('field-name')).toHaveValue('kept-draft');
 });
 
 test('pin, copy and delete confirmation all act on the intended record', async ({ page }) => {
@@ -99,13 +99,13 @@ test('a new secret needs only name, value and notes', async ({ page }) => {
   await page.getByRole('button', { name: 'Show' }).click();
   await expect(page.getByTestId('field-value')).toHaveAttribute('type', 'text');
   await expect(page.getByTestId('validation-hint')).toHaveCount(0);
-  await page.getByTestId('field-name').fill('Build token');
+  await page.getByTestId('field-name').fill('build-token');
   await page.getByTestId('field-value').fill('synthetic-build-token');
   await page.getByRole('textbox', { name: 'Notes' }).fill('Rotate monthly.');
   await page.getByTestId('save').click();
   const state = await mockState(page);
   expect(state.secrets.at(-1)).toMatchObject({
-    name: 'Build token', type: 'Secret', notes: 'Rotate monthly.', value: 'synthetic-build-token'
+    name: 'build-token', type: 'Secret', notes: 'Rotate monthly.', value: 'synthetic-build-token'
   });
   await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
 });
@@ -114,7 +114,7 @@ test('a secret can carry optional custom fields added with the plus button', asy
   await boot(page, SEED);
   await page.getByTestId('tab-secrets').click();
   await page.getByTestId('add-entry').click();
-  await page.getByTestId('field-name').fill('Database login');
+  await page.getByTestId('field-name').fill('database-login');
   await page.getByTestId('field-value').fill('synthetic-db-password');
   await page.getByTestId('add-field').click();
   // adding a field must not submit the form
@@ -124,7 +124,7 @@ test('a secret can carry optional custom fields added with the plus button', asy
   await page.getByTestId('save').click();
   const state = await mockState(page);
   expect(state.secrets.at(-1)).toMatchObject({
-    name: 'Database login',
+    name: 'database-login',
     fields: [{ label: 'Username', value: 'admin', display: 'text' }]
   });
   await expect(page.getByTestId('extra-fields')).toContainText('admin');
@@ -198,4 +198,23 @@ test('backups are refused while the vault is locked', async ({ page }) => {
   await page.getByTestId('settings').click();
   await page.getByTestId('backup-now').click();
   await expect(page.getByTestId('backup-error')).toContainText('the vault is locked');
+});
+
+test('typing a space in a name warns right away and blocks the save', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('add-entry').click();
+  const name = page.getByTestId('field-name');
+  await name.fill('wireguard');
+  await expect(page.getByTestId('name-spaces-hint')).toHaveCount(0);
+  await name.fill('wireguard off');
+  await expect(page.getByTestId('name-spaces-hint')).toContainText("can't contain spaces");
+  await expect(name).toHaveAttribute('aria-invalid', 'true');
+  await page.getByTestId('field-command').fill('sudo wg-quick down wg0');
+  await page.getByTestId('save').click();
+  expect((await mockState(page)).commands).toHaveLength(2);
+  await name.fill('wireguard-off');
+  await expect(page.getByTestId('name-spaces-hint')).toHaveCount(0);
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('entry-details')).toContainText('sudo wg-quick down wg0');
+  expect((await mockState(page)).commands[2].name).toBe('wireguard-off');
 });
