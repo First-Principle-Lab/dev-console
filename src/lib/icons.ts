@@ -1,5 +1,7 @@
 export type IconName =
   | 'command'
+  | 'collection'
+  | 'inbox'
   | 'secret'
   | 'lock'
   | 'unlock'
@@ -20,7 +22,9 @@ export type IconName =
 
 /** Single source for the inline icon set (20x20 viewBox, `fill: currentColor`). */
 export const ICON_PATHS: Record<IconName, string> = {
-  command: 'M3 2 1 4l6 6-6 6 2 2 8-8-8-8Zm7 13h8v3h-8v-3Z',
+  command: 'M3 4.5h14v11H3z M3 7.5h14 M6 10l2 2-2 2 M10 14h3',
+  collection: 'M3 4h3 M9 4h8 M3 10h3 M9 10h8 M3 16h3 M9 16h8',
+  inbox: 'M3 4h14l2 10v4H1v-4L3 4z M1 14h5l1.5 2h5L14 14h5',
   secret: 'M9 2a5 5 0 0 0-5 5v2H2v9h16V9h-2V7a5 5 0 0 0-5-5Zm0 2a3 3 0 0 1 3 3v2H6V7a3 3 0 0 1 3-3Z',
   lock: 'M11 2a4 4 0 0 0-4 4v2H4v10h14V8h-3V6a4 4 0 0 0-4-4Zm0 2a2 2 0 0 1 2 2v2H9V6a2 2 0 0 1 2-2Z',
   unlock: 'M6 8V6a4 4 0 0 1 7.7-1.5l-1.8.9A2 2 0 0 0 8 6v2h7v10H2V8h4Zm-2 4v4h10v-4H4Z',

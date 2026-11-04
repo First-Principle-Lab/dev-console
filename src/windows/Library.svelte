@@ -424,7 +424,7 @@
 <div class="shell" class:narrow data-testid="library">
   <header>
     <span class="brand">
-      <span class="brand-glyph" aria-hidden="true"><Icon name="command" size={14} /></span>
+      <img class="brand-glyph" src="/logo.svg" alt="" />
       <strong>Dev Console</strong>
     </span>
     <span class="spacer"></span>
@@ -444,7 +444,7 @@
   <div class="toolbar">
     <Tabs
       items={[
-        { id: 'command', label: 'Commands', count: counts.command, icon: 'command', testId: 'tab-commands' },
+        { id: 'command', label: 'Commands', count: counts.command, icon: 'collection', testId: 'tab-commands' },
         {
           id: 'secret',
           label: 'Secrets',
@@ -660,16 +660,10 @@
     color: var(--fg-muted);
     font-weight: 600;
   }
-  /* the same kind tile as the finder row and the entry list: one size scale,
-     no border, no second accent fill in the header */
   .brand-glyph {
-    display: grid;
-    place-items: center;
     width: var(--tile-sm);
     height: var(--tile-sm);
-    border-radius: var(--radius-sm);
-    color: var(--kind-command);
-    background: var(--accent-soft);
+    flex: none;
   }
   .waiting {
     font-size: var(--text-sm);
