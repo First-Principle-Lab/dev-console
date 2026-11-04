@@ -167,7 +167,7 @@ export const EMPTY_DRAFT = (kind: Kind): EntryDraft => ({
   id: null,
   expectedRevision: 0,
   name: '',
-  type: '',
+  type: kind === 'command' ? 'Command' : 'Secret',
   tags: [],
   description: '',
   notes: '',

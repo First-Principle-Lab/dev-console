@@ -149,18 +149,18 @@ test('list rows show relative times and never overflow their own line', async ({
   }
 });
 
-test('a fresh editor gives guidance on save, not a warning on open', async ({ page }) => {
+test('a fresh editor asks only for name and command before saving', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
   await expect(page.getByTestId('validation-hint')).toHaveCount(0);
   await expect(page.getByTestId('save-error')).toHaveCount(0);
-  await page.getByTestId('field-name').fill('No type yet');
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await page.getByTestId('field-name').fill('Deploy');
   await page.getByTestId('save').click();
-  await expect(page.getByTestId('save-error')).toContainText('Type is required.');
+  await expect(page.getByTestId('save-error')).toContainText('Command text is required.');
   const after = await mockState(page);
   expect(after.commands).toHaveLength(2);
   // …and the hint follows further typing once the user has tried to save.
-  await page.getByTestId('field-type').fill('Shell');
   await page.getByTestId('field-command').fill('make deploy');
   await page.getByTestId('save').click();
   const saved = await mockState(page);
