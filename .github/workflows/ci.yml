@@ -2,7 +2,7 @@ name: verify
 
 on:
   push:
-    branches: [codex/overnight-mvp, main]
+    branches: [dev, main]
   pull_request:
   workflow_dispatch:
 
