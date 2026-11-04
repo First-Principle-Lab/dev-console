@@ -32,7 +32,6 @@
   let tab = $state<Kind>('command');
   let query = $state('');
   let entries = $state<EntryMeta[]>([]);
-  let typeSuggestions = $state<string[]>([]);
   let selectedId = $state<string | null>(null);
   let details = $state<Details | null>(null);
   let revealed = $state(false);
@@ -76,10 +75,6 @@
   async function refreshVault(): Promise<void> {
     app = await api.appState();
     vault = app.vault;
-  }
-
-  async function loadTypes(): Promise<void> {
-    typeSuggestions = await api.types(tab);
   }
 
   /// Counts for the tab badges. Secret counts read metadata only while the vault is open; a
@@ -157,7 +152,7 @@
     tab = next;
     selectedId = null;
     details = null;
-    void Promise.all([loadList(), loadTypes()]).catch((error: unknown) =>
+    void loadList().catch((error: unknown) =>
       console.error('tab load failed', error)
     );
   }
@@ -225,7 +220,6 @@
       selectedId = saved.id;
       status = 'Saved.';
       await loadList();
-      await loadTypes();
     } catch (error: unknown) {
       // The draft is intentionally preserved so nothing typed is lost on a failed write.
       saveError = message(error, 'Save failed. Your changes were kept.');
@@ -343,7 +337,7 @@
       }),
       on<WindowIntent>('window-intent', (intent) => {
         tab = intent.kind;
-        void Promise.all([loadList(), loadTypes()]).catch(() => undefined);
+        void loadList().catch(() => undefined);
         if (intent.action === 'new-entry') startNew();
         else if (intent.entryId) {
           selectedId = intent.entryId;
@@ -357,7 +351,7 @@
     ];
 
     void refreshVault()
-      .then(() => Promise.all([loadList(), loadTypes()]))
+      .then(() => loadList())
       .catch((error: unknown) => {
         listError = message(error, 'Backend unavailable.');
       })
@@ -480,7 +474,6 @@
       {#if mode === 'edit'}
         <EntryEditor
           {draft}
-          {typeSuggestions}
           {saving}
           dirty={draftDirty}
           error={saveError}

@@ -25,13 +25,16 @@ test('creating a command persists through the backend and refreshes the list', a
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
   await page.getByTestId('field-name').fill('Prune volumes');
-  await page.getByTestId('field-type').fill('Docker');
   await page.getByTestId('field-command').fill('docker volume prune -f');
+  await page.getByRole('textbox', { name: 'Notes' }).fill('Run only after the backup.');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('entry-details')).toContainText('docker volume prune -f');
   const state = await mockState(page);
   expect(state.commands).toHaveLength(3);
   expect(state.commands[2].name).toBe('Prune volumes');
+  expect(state.commands[2]).toMatchObject({
+    type: 'Command', notes: 'Run only after the backup.'
+  });
 });
 
 test('a cancelled edit leaves the saved record untouched', async ({ page }) => {
@@ -53,7 +56,6 @@ test('a failed write keeps the draft on screen', async ({ page }) => {
   await page.evaluate(() => ((window as never as { __mock: { state: { saveFails: boolean } } }).__mock.state.saveFails = true));
   await page.getByTestId('add-entry').click();
   await page.getByTestId('field-name').fill('Kept draft');
-  await page.getByTestId('field-type').fill('Test');
   await page.getByTestId('field-command').fill('echo keep');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-error')).toBeVisible();
@@ -89,6 +91,25 @@ test('secrets are masked in details and only appear through an explicit reveal',
   await expect(page.getByTestId('secret-value')).toHaveText('synthetic-value-1');
 });
 
+test('a new secret needs only name, value and notes', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('tab-secrets').click();
+  await page.getByTestId('add-entry').click();
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Show' }).click();
+  await expect(page.getByTestId('field-value')).toHaveAttribute('type', 'text');
+  await expect(page.getByTestId('validation-hint')).toHaveCount(0);
+  await page.getByTestId('field-name').fill('Build token');
+  await page.getByTestId('field-value').fill('synthetic-build-token');
+  await page.getByRole('textbox', { name: 'Notes' }).fill('Rotate monthly.');
+  await page.getByTestId('save').click();
+  const state = await mockState(page);
+  expect(state.secrets.at(-1)).toMatchObject({
+    name: 'Build token', type: 'Secret', notes: 'Rotate monthly.', value: 'synthetic-build-token'
+  });
+  await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
+});
+
 test('a locked vault clears the secret list and blocks secret reads', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('tab-secrets').click();
@@ -98,19 +119,19 @@ test('a locked vault clears the secret list and blocks secret reads', async ({ p
   await expect(page.getByTestId('entry-row')).toHaveCount(0);
 });
 
-test('custom fields keep their order and survive a save', async ({ page }) => {
+test('editing the short form preserves older entry metadata', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('entry-row').nth(0).click();
   await page.getByTestId('edit').click();
-  await page.getByTestId('add-field').click();
-  await page.locator('[aria-label="Field label"]').last().fill('URL');
-  await page.locator('[aria-label="Field kind"]').last().selectOption('url');
-  await page.locator('[aria-label="Field value"]').last().fill('https://example.test/health');
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await page.getByRole('textbox', { name: 'Notes' }).fill('Still uses /tmp.');
   await page.getByTestId('save').click();
   const state = await mockState(page);
-  const fields = state.commands.find((c) => c.id === 'c2')?.fields as { label: string; display: string }[];
-  expect(fields.map((f) => f.label)).toEqual(['Project', 'URL']);
-  expect(fields[1].display).toBe('url');
+  expect(state.commands.find((c) => c.id === 'c2')).toMatchObject({
+    type: 'Docker', tags: ['home'], description: 'second', pinned: true,
+    workingDirectory: '/tmp', notes: 'Still uses /tmp.',
+    fields: [{ id: 'f1', label: 'Project', value: 'local-api', display: 'text' }]
+  });
 });
 
 test('narrow layout shows one pane instead of squeezing both', async ({ page }) => {
