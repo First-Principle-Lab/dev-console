@@ -50,7 +50,7 @@
       <span>Secret metadata is hidden while the vault is locked.</span>
     </p>
   {:else if entries.length === 0}
-    <EmptyState icon={kind === 'secret' ? 'secret' : 'command'} title="Nothing here yet" hint={emptyText} />
+    <EmptyState icon="inbox" title="Nothing here yet" hint={emptyText} />
   {:else}
     {#each entries as entry (entry.id)}
       <div

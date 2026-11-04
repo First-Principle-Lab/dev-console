@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { isTauri } from '@tauri-apps/api/core';
+  import { relaunch } from '@tauri-apps/plugin-process';
+  import { check, type Update } from '@tauri-apps/plugin-updater';
   import EntryList from '../components/EntryList.svelte';
   import EntryDetails from '../components/EntryDetails.svelte';
   import EntryEditor from '../components/EntryEditor.svelte';
@@ -50,6 +53,9 @@
   let showSettings = $state(false);
   let narrow = $state(false);
   let authenticating = $state(false);
+  let availableUpdate = $state<Update | null>(null);
+  let updateBusy = $state(false);
+  let updateError = $state<string | null>(null);
   let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
 
   const draftDirty = $derived(JSON.stringify(draft) !== baseline);
@@ -70,6 +76,29 @@
     // Display); without this branch every real failure would show the fallback instead.
     if (typeof error === 'string' && error.length > 0) return error;
     return error instanceof Error && error.message.length > 0 ? error.message : fallback;
+  }
+
+  async function checkForUpdate(): Promise<void> {
+    if (!isTauri() || updateBusy) return;
+    try {
+      availableUpdate = await check();
+      updateError = null;
+    } catch (error: unknown) {
+      updateError = message(error, 'Could not check for updates.');
+    }
+  }
+
+  async function installUpdate(): Promise<void> {
+    if (!availableUpdate || updateBusy) return;
+    updateBusy = true;
+    updateError = null;
+    try {
+      await availableUpdate.downloadAndInstall();
+      await relaunch();
+    } catch (error: unknown) {
+      updateError = message(error, 'Update failed.');
+      updateBusy = false;
+    }
   }
 
   async function refreshVault(): Promise<void> {
@@ -313,6 +342,10 @@
   }
 
   onMount(() => {
+    void checkForUpdate();
+    const updateTimer = window.setInterval(() => void checkForUpdate(), 15 * 60 * 1000);
+    const checkOnFocus = (): void => { void checkForUpdate(); };
+    window.addEventListener('focus', checkOnFocus);
     const media = window.matchMedia('(max-width: 900px)');
     narrow = media.matches;
     const onResize = (event: MediaQueryListEvent): void => {
@@ -358,6 +391,8 @@
       .finally(() => (loading = false));
 
     return () => {
+      window.clearInterval(updateTimer);
+      window.removeEventListener('focus', checkOnFocus);
       media.removeEventListener('change', onResize);
       for (const unsubscribe of unsubscribers) unsubscribe();
     };
@@ -389,11 +424,17 @@
 <div class="shell" class:narrow data-testid="library">
   <header>
     <span class="brand">
-      <span class="brand-glyph" aria-hidden="true"><Icon name="command" size={14} /></span>
+      <img class="brand-glyph" src="/logo.svg" alt="" />
       <strong>Dev Console</strong>
     </span>
     <span class="spacer"></span>
     {#if authenticating}<span class="muted waiting" role="status">Waiting for authentication…</span>{/if}
+    {#if availableUpdate}
+      <Button variant="primary" size="sm" icon="update" loading={updateBusy} onclick={() => void installUpdate()} data-testid="install-update">
+        Update to {availableUpdate.version}
+      </Button>
+    {/if}
+    {#if updateError}<span class="muted waiting" role="status" title={updateError}>Update check failed</span>{/if}
     {#if vault}<VaultStatus {vault} onunlock={unlock} />{/if}
     <Button variant="ghost" size="sm" icon="gear" onclick={() => (showSettings = true)} data-testid="settings"
       >Settings</Button
@@ -403,7 +444,7 @@
   <div class="toolbar">
     <Tabs
       items={[
-        { id: 'command', label: 'Commands', count: counts.command, icon: 'command', testId: 'tab-commands' },
+        { id: 'command', label: 'Commands', count: counts.command, icon: 'collection', testId: 'tab-commands' },
         {
           id: 'secret',
           label: 'Secrets',
@@ -619,16 +660,10 @@
     color: var(--fg-muted);
     font-weight: 600;
   }
-  /* the same kind tile as the finder row and the entry list: one size scale,
-     no border, no second accent fill in the header */
   .brand-glyph {
-    display: grid;
-    place-items: center;
     width: var(--tile-sm);
     height: var(--tile-sm);
-    border-radius: var(--radius-sm);
-    color: var(--kind-command);
-    background: var(--accent-soft);
+    flex: none;
   }
   .waiting {
     font-size: var(--text-sm);

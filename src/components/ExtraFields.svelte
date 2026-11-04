@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ExtraField, FieldDisplay } from '../lib/models';
+  import Button from './Button.svelte';
 
   let {
     fields,
@@ -39,10 +40,10 @@
 
 <div class="fields" data-testid="extra-fields">
   {#each fields as field, index (field.id)}
-    <div class="field">
+    <div class="field" class:editing={editable}>
       {#if editable}
         <input
-          class="label"
+          class="label-input"
           placeholder="Label"
           value={field.label}
           oninput={(e) => update(index, { label: e.currentTarget.value })}
@@ -74,15 +75,16 @@
           />
         {/if}
         <div class="row">
-          <button onclick={() => move(index, -1)} disabled={index === 0} title="Move up">↑</button>
+          <button type="button" onclick={() => move(index, -1)} disabled={index === 0} title="Move up">↑</button>
           <button
+            type="button"
             onclick={() => move(index, 1)}
             disabled={index === fields.length - 1}
             title="Move down"
           >
             ↓
           </button>
-          <button onclick={() => remove(index)} data-variant="danger" title="Remove">Remove</button>
+          <button type="button" onclick={() => remove(index)} data-variant="danger" title="Remove">Remove</button>
         </div>
       {:else}
         <div class="viewed">
@@ -99,7 +101,11 @@
     </div>
   {/each}
   {#if editable}
-    <button onclick={add} data-testid="add-field">+ Add field</button>
+    <div class="add">
+      <Button type="button" size="sm" variant="ghost" icon="plus" onclick={add} data-testid="add-field"
+        >Add field</Button
+      >
+    </div>
   {/if}
 </div>
 
@@ -116,11 +122,20 @@
     background: var(--bg-sunken);
     min-width: 0;
   }
+  .add {
+    grid-column: 1 / -1;
+  }
   .field:hover {
     border-color: var(--line-strong);
   }
-  .label {
-    flex: 1;
+  .field.editing {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+  .row {
+    display: flex;
+    gap: var(--sp-1);
   }
   .value {
     word-break: break-word;
