@@ -202,7 +202,7 @@ for (const viewport of VIEWPORTS) {
 
     await libraryShell(page, SEED);
     await page.getByTestId('add-entry').click();
-    await page.getByTestId('field-name').fill('New nightly job');
+    await page.getByTestId('field-name').fill('nightly-job');
     await page.getByTestId('field-command').fill('bun run verify');
     await capture(page, '05-editor-command-dirty', width, height);
 

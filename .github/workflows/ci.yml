@@ -2,9 +2,24 @@ name: verify
 
 on:
   push:
-    branches: [codex/overnight-mvp, main]
+    branches: [dev, main]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every push to main publishes a release, so main runs queue and never cancel each other: the
+# next run must see the tag the previous one created. Anywhere else a newer push supersedes.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # The release is built by the same compile that the native smoke test checks, in parallel
+  # with the other jobs; publish only runs once all of them pass.
+  RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+  CARGO_TERM_COLOR: always
 
 jobs:
   frontend:
@@ -13,13 +28,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run lint
       - run: bun run test
       - run: bun run build
-      - run: bunx playwright install --with-deps chromium
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bunx playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: bunx playwright install-deps chromium
       - run: bun run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
@@ -34,6 +58,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
       - name: System dependencies
         run: |
           sudo apt-get update
@@ -52,6 +79,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      # The keyring, clipboard and native IPC harnesses build and run cargo test binaries.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
       - name: System dependencies
         run: |
           sudo apt-get update
@@ -71,19 +104,100 @@ jobs:
       - name: arch package layout
         run: bash scripts/test-arch-package.sh || test "$?" = 77
 
-  release-smoke:
+  build:
+    # One release compile per run: on main it is bundled into the signed AppImage, everywhere
+    # else it stops at the binary. The native smoke test runs against it either way.
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - uses: dtolnay/rust-toolchain@stable
+      # Restore before the version is stamped: the cache key hashes Cargo.toml and Cargo.lock,
+      # and a key that changed with every release would never hit.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Cache AppImage tooling
+        if: env.RELEASE == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tauri
+          key: tauri-bundler-${{ runner.os }}-${{ hashFiles('bun.lock') }}
       - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev libappindicator3-dev libsqlite3-dev pkg-config \
-            dbus-x11 xvfb x11-utils
+            libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            libsqlite3-dev pkg-config patchelf libfuse2t64 dbus-x11 xvfb x11-utils
+      - name: Choose next release version
+        id: version
+        if: env.RELEASE == 'true'
+        shell: bash
+        run: |
+          last=$(git ls-remote --tags origin 'v0.0.*' | sed -nE 's#.*refs/tags/v0\.0\.([0-9]+)$#\1#p' | sort -n | tail -1)
+          version="0.0.$(( ${last:-0} + 1 ))"
+          python3 scripts/set-release-version.py "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - run: bun install --frozen-lockfile
-      - run: bunx tauri build --no-bundle
+      - name: Release compile
+        if: env.RELEASE != 'true'
+        run: bunx tauri build --no-bundle
+      - name: Build signed AppImage
+        if: env.RELEASE == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          bunx tauri build --bundles appimage --ci
       - name: native smoke against the compiled binary
         run: bash scripts/smoke-native.sh src-tauri/target/release/dev-console || test "$?" = 77
+      - name: Write updater manifest
+        if: env.RELEASE == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          mkdir -p release
+          appimage=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)
+          test -n "$appimage"
+          test -s "$appimage.sig"
+          cp "$appimage" release/Dev-Console.AppImage
+          cp "$appimage.sig" release/Dev-Console.AppImage.sig
+          jq -n \
+            --arg version "$VERSION" \
+            --arg url 'https://github.com/parththirwani/dev-console/releases/latest/download/Dev-Console.AppImage' \
+            --rawfile signature release/Dev-Console.AppImage.sig \
+            '{version: $version, platforms: {"linux-x86_64": {url: $url, signature: $signature}}}' \
+            > release/latest.json
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE == 'true'
+        with:
+          name: release
+          path: release/
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [frontend, backend, harnesses, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cd release
+          gh release create "v$VERSION" Dev-Console.AppImage Dev-Console.AppImage.sig latest.json \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Dev Console $VERSION" --generate-notes --latest

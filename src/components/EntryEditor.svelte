@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { EntryDraft } from '../lib/models';
-  import { validateDraft } from '../lib/validation';
+  import { NAME_SPACES_MESSAGE, nameHasSpaces, validateDraft } from '../lib/validation';
   import Button from './Button.svelte';
   import ExtraFields from './ExtraFields.svelte';
   import Icon from './Icon.svelte';
@@ -25,6 +25,7 @@
   let attempted = $state(false);
   const isCommand = $derived(draft.kind === 'command');
   const problem = $derived(validateDraft(draft));
+  const spacedName = $derived(nameHasSpaces(draft.name));
 </script>
 
 <!-- The app owns validation and its messaging: the native bubbles are unstyled, would be the
@@ -66,15 +67,22 @@
     <p class="error-banner" role="alert" data-testid="save-error">
       <Icon name="alert" size={12} /> {error}
     </p>
-  {:else if problem && attempted}
+  {:else if problem && attempted && !spacedName}
     <p class="hint warn" role="alert" data-testid="validation-hint"><Icon name="alert" size={12} /> {problem}</p>
   {/if}
 
   <div class="fields">
     <label class="field">
       <span class="label">Name</span>
-      <input bind:value={draft.name} data-testid="field-name" required autocomplete="off"
-        aria-invalid={attempted && draft.name.trim().length === 0} />
+      <input bind:value={draft.name} data-testid="field-name" required autocomplete="off" spellcheck="false"
+        aria-describedby={spacedName ? 'name-spaces-hint' : undefined}
+        aria-invalid={spacedName || (attempted && draft.name.trim().length === 0)} />
+      <!-- Shown as soon as a space is typed, not on save: the user should rename before moving on. -->
+      {#if spacedName}
+        <span id="name-spaces-hint" class="hint warn" role="alert" data-testid="name-spaces-hint">
+          <Icon name="alert" size={12} /> {NAME_SPACES_MESSAGE}
+        </span>
+      {/if}
     </label>
     {#if isCommand}
       <label class="field">
