@@ -124,6 +124,7 @@ fn build(argv: Vec<String>) {
             ipc::open_url,
             ipc::copy_entry,
             ipc::run_command,
+            ipc::run_command_captured,
             ipc::lock_vault,
             ipc::unlock_vault,
             ipc::open_library,

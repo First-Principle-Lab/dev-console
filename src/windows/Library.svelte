@@ -22,6 +22,7 @@
     EntryDraft,
     EntryMeta,
     Kind,
+    RunOutput,
     VaultState,
     WindowIntent
   } from '../lib/models';
@@ -47,6 +48,7 @@
   let status = $state<string | null>(null);
   let pendingDelete = $state<EntryMeta | null>(null);
   let pendingRun = $state<Details | null>(null);
+  let runResult = $state<{ name: string; command: string; output: RunOutput | null; error: string | null } | null>(null);
   let pendingClose = $state(false);
   let showSettings = $state(false);
   let narrow = $state(false);
@@ -287,15 +289,27 @@
     }
   }
 
-  async function confirmRun(): Promise<void> {
+  async function confirmRun(inTerminal: boolean): Promise<void> {
     if (!pendingRun) return;
     const target = pendingRun;
     pendingRun = null;
+    if (inTerminal) {
+      try {
+        await api.run(target.meta.id, target.meta.revision, true);
+        status = 'Launched in a terminal.';
+      } catch (error: unknown) {
+        status = message(error, 'Execution failed.');
+      }
+      return;
+    }
+    // Open the result dialog straight away so a slow command visibly "is running".
+    runResult = { name: target.meta.name, command: target.command ?? '', output: null, error: null };
     try {
-      await api.run(target.meta.id, target.meta.revision, true);
-      status = 'Launched in a terminal.';
+      const output = await api.runCaptured(target.meta.id, target.meta.revision, true);
+      if (runResult) runResult = { ...runResult, output };
+      await loadList();
     } catch (error: unknown) {
-      status = message(error, 'Execution failed.');
+      if (runResult) runResult = { ...runResult, error: message(error, 'Execution failed.') };
     }
   }
 
@@ -393,6 +407,8 @@
       pendingDelete = null;
     } else if (event.key === 'Escape' && pendingRun) {
       pendingRun = null;
+    } else if (event.key === 'Escape' && runResult) {
+      runResult = null;
     }
   }
 </script>
@@ -568,7 +584,10 @@
 
 {#if pendingRun}
   <Dialog title="Run this command?" label="Confirm run" oncancel={() => (pendingRun = null)}>
-    <p>It will be launched in your configured terminal after this confirmation.</p>
+    <p>
+      Run shows the output here. Use “Run in terminal” for commands that need a password or other
+      input.
+    </p>
     <pre class="block mono">{pendingRun.command}</pre>
     {#if pendingRun.workingDirectory}
       <p>Working directory: <code>{pendingRun.workingDirectory}</code></p>
@@ -576,9 +595,52 @@
     {#snippet footer()}
       <span class="spacer"></span>
       <Button onclick={() => (pendingRun = null)}>Cancel</Button>
-      <Button variant="primary" icon="run" onclick={() => void confirmRun()} data-testid="confirm-run"
+      <Button icon="run" onclick={() => void confirmRun(true)} data-testid="confirm-run-terminal"
         >Run in terminal</Button
       >
+      <Button variant="primary" icon="run" onclick={() => void confirmRun(false)} data-testid="confirm-run"
+        >Run</Button
+      >
+    {/snippet}
+  </Dialog>
+{/if}
+
+{#if runResult}
+  <Dialog title={runResult.output || runResult.error ? 'Command output' : 'Running…'} label="Command output" oncancel={() => (runResult = null)}>
+    <pre class="block mono">{runResult.command}</pre>
+    {#if runResult.error}
+      <p class="run-fail" data-testid="run-error">{runResult.error}</p>
+    {:else if !runResult.output}
+      <p class="muted" data-testid="run-pending">Running “{runResult.name}”…</p>
+    {:else}
+      {@const out = runResult.output}
+      <p data-testid="run-status" class:run-fail={out.timedOut || out.exitCode !== 0}>
+        {#if out.timedOut}
+          Stopped after the time limit ({Math.round(out.durationMs / 1000)}s).
+        {:else if out.exitCode === 0}
+          Finished successfully in {out.durationMs} ms (exit code 0).
+        {:else}
+          Failed with exit code {out.exitCode ?? 'unknown'} after {out.durationMs} ms.
+        {/if}
+      </p>
+      {#if out.stdout}
+        <span class="label">Output</span>
+        <pre class="block mono run-output" data-testid="run-stdout">{out.stdout}</pre>
+      {/if}
+      {#if out.stderr}
+        <span class="label">Errors</span>
+        <pre class="block mono run-output" data-testid="run-stderr">{out.stderr}</pre>
+      {/if}
+      {#if !out.stdout && !out.stderr}
+        <p class="muted">The command printed nothing.</p>
+      {/if}
+      {#if out.truncated}
+        <p class="muted">Output was cut at 256 KB.</p>
+      {/if}
+    {/if}
+    {#snippet footer()}
+      <span class="spacer"></span>
+      <Button variant="primary" onclick={() => (runResult = null)} data-testid="run-close">Close</Button>
     {/snippet}
   </Dialog>
 {/if}
@@ -614,6 +676,15 @@
 {/if}
 
 <style>
+  .run-output {
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .run-fail {
+    color: var(--danger, #e5484d);
+  }
   .shell {
     display: flex;
     flex-direction: column;

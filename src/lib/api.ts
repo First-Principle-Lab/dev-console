@@ -12,6 +12,7 @@ import type {
   BackupOutcome,
   RecoveryKeyInfo,
   Settings,
+  RunOutput,
   VaultState
 } from './models';
 
@@ -72,6 +73,8 @@ export const api = {
     call('delete_entry', { request: { kind, id, expectedRevision } }),
   copy: (kind: Kind, id: string, expectedRevision: number): Promise<CopyResult> =>
     call('copy_entry', { request: { kind, id, expectedRevision } }),
+  runCaptured: (id: string, expectedRevision: number, approved: boolean): Promise<RunOutput> =>
+    call('run_command_captured', { request: { id, expectedRevision, approved } }),
   run: (id: string, expectedRevision: number, approved: boolean): Promise<void> =>
     call('run_command', { request: { id, expectedRevision, approved } }),
   lockVault: (): Promise<VaultState> => call('lock_vault'),
