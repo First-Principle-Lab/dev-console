@@ -201,6 +201,10 @@
       if (!record) throw new Error('entry not found');
       return details(record, request.kind, false);
     }
+    if (command === 'open_url') {
+      (window.__openedUrls = window.__openedUrls || []).push(payload.url);
+      return null;
+    }
     if (command === 'reveal_secret') {
       requireVault();
       const record = state.secrets.find((r) => r.id === request.id);

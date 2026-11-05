@@ -121,6 +121,7 @@ fn build(argv: Vec<String>) {
             ipc::reveal_secret,
             ipc::save_entry,
             ipc::delete_entry,
+            ipc::open_url,
             ipc::copy_entry,
             ipc::run_command,
             ipc::lock_vault,
