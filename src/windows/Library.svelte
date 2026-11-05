@@ -255,7 +255,13 @@
   }
 
   async function revealEntry(): Promise<void> {
-    if (!selectedId) return;
+    if (!selectedId || !details) return;
+    if (revealed) {
+      // Hiding must also drop the plaintext, not just mask it.
+      details = { ...details, value: '' };
+      revealed = false;
+      return;
+    }
     try {
       details = await api.reveal(tab, selectedId);
       revealed = true;

@@ -89,6 +89,8 @@ test('secrets are masked in details and only appear through an explicit reveal',
   await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
   await page.getByTestId('reveal').click();
   await expect(page.getByTestId('secret-value')).toHaveText('synthetic-value-1');
+  await page.getByTestId('reveal').click();
+  await expect(page.getByTestId('secret-value')).toHaveText('••••••••••');
 });
 
 test('a new secret needs only name, value and notes', async ({ page }) => {
