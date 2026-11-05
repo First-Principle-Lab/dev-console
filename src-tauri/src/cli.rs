@@ -5,7 +5,7 @@ pub enum VaultCommand {
     Status,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Intent {
     /// `dev-console` / `dev-console --library`
     Library,
@@ -14,6 +14,8 @@ pub enum Intent {
     /// `dev-console --finder`
     Finder,
     Vault(VaultCommand),
+    /// `dev-console import bitwarden <file>`
+    ImportBitwarden(String),
     Help,
     Version,
 }
@@ -29,6 +31,8 @@ Usage:
   dev-console vault lock       manually lock the vault (persists until authenticated unlock)
   dev-console vault unlock     unlock with system authentication
   dev-console vault status     print vault state (never prints secret data)
+  dev-console import bitwarden <file>
+                               import a plain Bitwarden JSON export as secrets
   dev-console --version
   dev-console --help
 ";
@@ -58,6 +62,14 @@ where
                 "lock" => Intent::Vault(VaultCommand::Lock),
                 "unlock" => Intent::Vault(VaultCommand::Unlock),
                 "status" | "" => Intent::Vault(VaultCommand::Status),
+                _ => Intent::Help,
+            }
+        }
+        "import" => {
+            let kind = iter.next().map(|s| s.as_ref().to_string());
+            let file = iter.next().map(|s| s.as_ref().to_string());
+            match (kind.as_deref(), file) {
+                (Some("bitwarden"), Some(file)) => Intent::ImportBitwarden(file),
                 _ => Intent::Help,
             }
         }

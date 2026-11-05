@@ -7,6 +7,7 @@ pub mod control;
 pub mod desktop_icons;
 pub mod error;
 pub mod execution;
+pub mod import;
 pub mod ipc;
 pub mod keyring;
 pub mod models;
@@ -39,6 +40,13 @@ pub fn run() {
             std::process::exit(0);
         }
         Intent::Vault(command) => match control::run(command) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ImportBitwarden(file) => match control::run_import(&file) {
             Ok(code) => std::process::exit(code),
             Err(error) => {
                 eprintln!("dev-console: {error}");
