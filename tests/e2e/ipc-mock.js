@@ -201,6 +201,10 @@
       if (!record) throw new Error('entry not found');
       return details(record, request.kind, false);
     }
+    if (command === 'open_url') {
+      (window.__openedUrls = window.__openedUrls || []).push(payload.url);
+      return null;
+    }
     if (command === 'reveal_secret') {
       requireVault();
       const record = state.secrets.find((r) => r.id === request.id);
@@ -251,6 +255,21 @@
       if (!record) throw new Error('entry not found');
       state.runs.push({ id: record.id, revision: record.revision });
       return null;
+    }
+    if (command === 'run_command_captured') {
+      if (!request.approved) throw new Error('running this command needs explicit approval');
+      const record = state.commands.find((r) => r.id === request.id);
+      if (!record) throw new Error('entry not found');
+      state.runs.push({ id: record.id, revision: record.revision, captured: true });
+      const fails = record.command.includes('fail');
+      return {
+        exitCode: fails ? 2 : 0,
+        stdout: fails ? '' : 'mock stdout for ' + record.command + '\n',
+        stderr: fails ? 'mock stderr: it broke\n' : '',
+        truncated: false,
+        timedOut: false,
+        durationMs: 12
+      };
     }
     if (command === 'lock_vault') {
       state.manualLock = true;

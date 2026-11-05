@@ -99,6 +99,16 @@ export interface EntryDetails {
   executionApproved: boolean;
 }
 
+export interface RunOutput {
+  /** null when the command was killed (timeout) or ended by a signal. */
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  timedOut: boolean;
+  durationMs: number;
+}
+
 export interface VaultState {
   unlocked: boolean;
   manualLock: boolean;

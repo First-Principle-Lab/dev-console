@@ -1,4 +1,4 @@
-import { inTauri } from './api';
+import { api, inTauri } from './api';
 
 /** A release the updater found, ready to download, verify and install. */
 export interface PendingUpdate {
@@ -28,7 +28,8 @@ const tauriBackend: UpdateBackend = {
     const update = await check();
     return update ? { version: update.version, install: () => update.downloadAndInstall() } : null;
   },
-  relaunch: async () => (await import('@tauri-apps/plugin-process')).relaunch()
+  // Not the process plugin's relaunch: that replays `--background` and returns an invisible app.
+  relaunch: () => api.restartApp()
 };
 
 function backend(): UpdateBackend | null {

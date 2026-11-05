@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { api } from '../lib/api';
   import type { ExtraField, FieldDisplay } from '../lib/models';
   import Button from './Button.svelte';
 
@@ -90,7 +91,13 @@
         <div class="viewed">
           <span class="label muted">{field.label || 'Field'}</span>
           {#if field.display === 'url' && /^https?:\/\//i.test(field.value)}
-            <code class="value url" data-testid="field-url">{field.value}</code>
+            <button
+              type="button"
+              class="value url link"
+              data-testid="field-url"
+              title="Open in browser"
+              onclick={() => void api.openUrl(field.value.trim())}>{field.value}</button
+            >
           {:else if field.display === 'multiline'}
             <pre class="value multiline">{field.value}</pre>
           {:else}
@@ -142,6 +149,15 @@
   }
   .value.url {
     color: var(--accent);
+  }
+  button.link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline;
   }
   .value.multiline {
     white-space: pre-wrap;

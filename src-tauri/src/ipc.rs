@@ -222,6 +222,27 @@ pub fn save_entry<R: Runtime>(
     Ok(saved)
 }
 
+/// Opens an http(s) link from a URL field in the user's default browser. Anything else is
+/// rejected so a stored value can never launch an arbitrary scheme or program.
+#[tauri::command]
+pub fn open_url<R: Runtime>(window: WebviewWindow<R>, url: String) -> AppResult<()> {
+    require_library(&window)?;
+    let url = url.trim();
+    if !crate::repository::is_http_url(url) || url.starts_with('-') {
+        return Err(AppError::Validation(
+            "only http(s) links can be opened".into(),
+        ));
+    }
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::Other(format!("could not open the browser: {e}")))
+}
+
 #[tauri::command]
 pub fn delete_entry<R: Runtime>(
     app: AppHandle<R>,
@@ -293,14 +314,14 @@ pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppRes
     }
 }
 
-#[tauri::command]
-pub fn run_command<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    request: RunRequest,
-) -> AppResult<()> {
-    require_library(&window)?;
-    let state = state(&app);
+/// Shared by both run paths: ownership, revision and approval checks, then the approval record.
+fn approved_command<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+    request: &RunRequest,
+) -> AppResult<crate::models::EntryRecord> {
+    require_library(window)?;
+    let state = state(app);
     let (record, _, _) = state
         .repo
         .get_command(&request.id)?
@@ -314,9 +335,39 @@ pub fn run_command<R: Runtime>(
     if !state.repo.approval_state(&record)? {
         state.repo.approve_execution(&record)?;
     }
+    Ok(record)
+}
+
+#[tauri::command]
+pub fn run_command<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: RunRequest,
+) -> AppResult<()> {
+    let record = approved_command(&app, &window, &request)?;
+    let state = state(&app);
     execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
     state.repo.record_usage(&record.id)?;
     Ok(())
+}
+
+/// Runs the command inside the app and returns what it printed. Async so the wait (up to the
+/// capture timeout) happens on a blocking worker instead of the main thread.
+#[tauri::command]
+pub async fn run_command_captured<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: RunRequest,
+) -> AppResult<execution::RunOutput> {
+    let record = approved_command(&app, &window, &request)?;
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        execution::capture(&record, "/bin/sh", execution::CAPTURE_TIMEOUT).map(|o| (record, o))
+    })
+    .await
+    .map_err(|e| AppError::Execution(e.to_string()))??;
+    let (record, output) = output;
+    state(&app).repo.record_usage(&record.id)?;
+    Ok(output)
 }
 
 #[tauri::command]
@@ -401,6 +452,30 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) ->
     require_library(&window)?;
     let _ = window.emit("open-settings", ());
     let _ = app;
+    Ok(())
+}
+
+/// Relaunch after an update. Tauri's own restart replays the old argv, and the resident app
+/// starts with `--background`, so it came back as an invisible tray process. This starts the
+/// new binary with `--library` instead, from a detached shell that waits for this process to
+/// exit first, so the single-instance lock is free and the window actually appears.
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    use std::os::unix::process::CommandExt;
+    require_library(&window)?;
+    let binary = tauri::process::current_binary(&app.env())
+        .map_err(|e| AppError::Other(format!("could not locate the app: {e}")))?;
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 1; exec \"$0\" --library")
+        .arg(binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| AppError::Other(format!("could not relaunch: {e}")))?;
+    app.exit(0);
     Ok(())
 }
 
