@@ -218,3 +218,36 @@ test('typing a space in a name warns right away and blocks the save', async ({ p
   await expect(page.getByTestId('entry-details')).toContainText('sudo wg-quick down wg0');
   expect((await mockState(page)).commands[2].name).toBe('wireguard-off');
 });
+
+test('Run shows the command output and exit code in the app', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('entry-row').nth(1).click();
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run').click();
+  const dialog = page.getByRole('dialog', { name: 'Command output' });
+  await expect(dialog.getByTestId('run-status')).toContainText('Finished successfully');
+  await expect(dialog.getByTestId('run-stdout')).toContainText('mock stdout for echo one');
+  expect((await mockState(page)).runs).toEqual([{ id: 'c1', revision: 1, captured: true }]);
+  await page.getByTestId('run-close').click();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('a failing command shows its error output and exit code', async ({ page }) => {
+  await boot(page, {
+    ...SEED,
+    commands: [{ ...SEED.commands[0], command: 'make fail' }]
+  });
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run').click();
+  await expect(page.getByTestId('run-status')).toContainText('exit code 2');
+  await expect(page.getByTestId('run-stderr')).toContainText('it broke');
+});
+
+test('Run in terminal still launches without capturing output', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('entry-row').nth(1).click();
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run-terminal').click();
+  await expect(page.getByTestId('status')).toContainText('Launched in a terminal');
+  expect((await mockState(page)).runs).toEqual([{ id: 'c1', revision: 1 }]);
+});

@@ -123,6 +123,7 @@ fn build(argv: Vec<String>) {
             ipc::delete_entry,
             ipc::copy_entry,
             ipc::run_command,
+            ipc::run_command_captured,
             ipc::lock_vault,
             ipc::unlock_vault,
             ipc::open_library,
