@@ -683,7 +683,7 @@
     word-break: break-word;
   }
   .run-fail {
-    color: var(--danger, #e5484d);
+    color: var(--danger);
   }
   .shell {
     display: flex;
