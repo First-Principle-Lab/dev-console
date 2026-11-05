@@ -455,6 +455,30 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) ->
     Ok(())
 }
 
+/// Relaunch after an update. Tauri's own restart replays the old argv, and the resident app
+/// starts with `--background`, so it came back as an invisible tray process. This starts the
+/// new binary with `--library` instead, from a detached shell that waits for this process to
+/// exit first, so the single-instance lock is free and the window actually appears.
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    use std::os::unix::process::CommandExt;
+    require_library(&window)?;
+    let binary = tauri::process::current_binary(&app.env())
+        .map_err(|e| AppError::Other(format!("could not locate the app: {e}")))?;
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 1; exec \"$0\" --library")
+        .arg(binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| AppError::Other(format!("could not relaunch: {e}")))?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn quit_app<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
     windows::request_quit(&app)

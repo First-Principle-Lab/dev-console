@@ -132,6 +132,7 @@ fn build(argv: Vec<String>) {
             ipc::allow_close,
             ipc::cancel_quit,
             ipc::quit_app,
+            ipc::restart_app,
             ipc::get_settings,
             ipc::save_settings,
             ipc::open_settings,
