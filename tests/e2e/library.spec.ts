@@ -220,3 +220,17 @@ test('typing a space in a name warns right away and blocks the save', async ({ p
   await expect(page.getByTestId('entry-details')).toContainText('sudo wg-quick down wg0');
   expect((await mockState(page)).commands[2].name).toBe('wireguard-off');
 });
+
+test('a URL field opens through the backend and only for http(s) links', async ({ page }) => {
+  await boot(page, {
+    ...SEED,
+    commands: [
+      {
+        ...SEED.commands[0],
+        fields: [{ id: 'u1', label: 'Docs', value: 'https://example.test/docs', display: 'url' }]
+      }
+    ]
+  });
+  await page.getByTestId('field-url').click();
+  expect(await page.evaluate(() => (window as unknown as { __openedUrls: string[] }).__openedUrls)).toEqual(['https://example.test/docs']);
+});

@@ -222,6 +222,27 @@ pub fn save_entry<R: Runtime>(
     Ok(saved)
 }
 
+/// Opens an http(s) link from a URL field in the user's default browser. Anything else is
+/// rejected so a stored value can never launch an arbitrary scheme or program.
+#[tauri::command]
+pub fn open_url<R: Runtime>(window: WebviewWindow<R>, url: String) -> AppResult<()> {
+    require_library(&window)?;
+    let url = url.trim();
+    if !crate::repository::is_http_url(url) || url.starts_with('-') {
+        return Err(AppError::Validation(
+            "only http(s) links can be opened".into(),
+        ));
+    }
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::Other(format!("could not open the browser: {e}")))
+}
+
 #[tauri::command]
 pub fn delete_entry<R: Runtime>(
     app: AppHandle<R>,
