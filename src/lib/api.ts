@@ -67,6 +67,7 @@ export const api = {
   reveal: (kind: Kind, id: string): Promise<EntryDetails> =>
     call('reveal_secret', { request: { kind, id } }),
   save: (draft: EntryDraft): Promise<SavedEntry> => call('save_entry', { request: { draft } }),
+  restartApp: (): Promise<void> => call('restart_app'),
   remove: (kind: Kind, id: string, expectedRevision: number): Promise<void> =>
     call('delete_entry', { request: { kind, id, expectedRevision } }),
   copy: (kind: Kind, id: string, expectedRevision: number): Promise<CopyResult> =>
