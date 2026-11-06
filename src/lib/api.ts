@@ -10,6 +10,8 @@ import type {
   ArchiveSummary,
   BackupInfo,
   BackupOutcome,
+  ProjectImportOutcome,
+  ProjectScan,
   RecoveryKeyInfo,
   RunResult,
   Settings,
@@ -89,5 +91,8 @@ export const api = {
   quit: (): Promise<void> => call('quit_app'),
   settings: (): Promise<Settings> => call('get_settings'),
   terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
-  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings })
+  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings }),
+  scanProject: (path: string): Promise<ProjectScan> => call('scan_project', { request: { path } }),
+  importProject: (path: string, names: string[]): Promise<ProjectImportOutcome> =>
+    call('import_project', { request: { path, names } })
 };

@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     ArrowLeft, Check, Copy, Eye, Inbox, KeyRound, List, LockKeyhole,
-    LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search,
+    LockKeyholeOpen, FolderOpen, Pencil, Pin, Play, Plus, RefreshCw, Search,
     Settings, Shield, Terminal, Trash2, TriangleAlert
   } from '@lucide/svelte';
   import type { IconName } from '../lib/icons';
@@ -20,6 +20,7 @@
     pin: Pin,
     run: Play,
     trash: Trash2,
+    folder: FolderOpen,
     search: Search,
     plus: Plus,
     back: ArrowLeft,

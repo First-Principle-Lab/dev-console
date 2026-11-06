@@ -120,6 +120,37 @@ test('library record at the real minimum window size', async ({ page }) => {
   await capture(page, '17-library-minimum-window', 760, 520);
 });
 
+/** Opens the project-task dialog over a scanned folder; the dialog is the surface under review. */
+async function importDialog(page: Page, large = false): Promise<void> {
+  await boot(page, { ...EMPTY, projectLarge: large });
+  await page.getByTestId('import-project').click();
+  await page.getByTestId('project-path').fill(
+    large ? '/home/dev/projects/bigrepo' : '/home/dev/projects/webapp'
+  );
+  await page.getByTestId('project-scan').click();
+  await page.getByTestId('project-scan-summary').waitFor();
+}
+
+test('project task review at the real library size and at the minimum window size', async ({
+  page
+}) => {
+  // The review list scrolls inside the dialog, so the Import action must stay reachable at both
+  // the size the shell is usually created at and the smallest one it accepts.
+  await importDialog(page);
+  await capture(page, '18-project-import', 1040, 700);
+  await importDialog(page);
+  await capture(page, '18-project-import-minimum', 760, 520);
+  await importDialog(page);
+  await capture(page, '18-project-import-mobile', 390, 780);
+});
+
+test('project task review with far more tasks than fit on screen', async ({ page }) => {
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list', 1440, 900);
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list-minimum', 760, 520);
+});
+
 const EMPTY = { commands: [], secrets: [] };
 
 /** Deliberately awkward content: long names, tags, values and paths must not break the layout. */

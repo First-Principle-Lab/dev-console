@@ -36,6 +36,15 @@ for authentication. In-app output is limited to 64 KiB per stream, and commands 
 terminals found in `PATH` and keeps a custom command option. A saved `x-terminal-emulator` setting
 falls back to an installed terminal when that executable is missing.
 
+**Project tasks** — the library can read the runnable tasks a project folder already defines instead
+of making you retype them: `package.json` scripts (run through whichever package manager the
+folder's lockfile names — bun, pnpm, yarn or npm), Makefile targets, `justfile` recipes and Docker
+Compose services. Scanning lists them grouped by source, ticks the new ones, and marks anything the
+library already has as "Already saved". Importing writes the ticked ones as ordinary commands whose
+working directory is that folder and whose tag is `project:<repo>`. Reading and importing execute
+nothing in the folder — the commands are only written down, and running one still goes through the
+approval above.
+
 **Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
 in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
 truncated file, a corrupted file or a newer format is rejected before anything is applied.
@@ -60,8 +69,9 @@ bash scripts/verify.sh
 
 That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests (which include the token
 contrast audit below), production build,
-Playwright (library + Finder + redesign + visual review captures), `cargo fmt --check`, clippy with
-warnings denied, the Rust test suite, plus the environment-dependent harnesses:
+Playwright (library + Finder + project-task import + redesign + visual review captures),
+`cargo fmt --check`, clippy with warnings denied, the Rust test suite, plus the
+environment-dependent harnesses:
 
 | Script | What it proves | Without the environment |
 | --- | --- | --- |
@@ -189,10 +199,12 @@ exactly what it placed). See `docs/packaging.md`.
 ```
 src/                 Svelte 5 frontend (tokens.css is the only source of colour/spacing)
   components/        Button, Badge, Dialog, EmptyState, EntryDetails, EntryEditor, EntryList,
-                     ExtraFields, Icon, Keycap, SettingsPanel, StatusLine, Tabs, VaultStatus
+                     ExtraFields, Icon, Keycap, ProjectImport, SettingsPanel, StatusLine, Tabs,
+                     VaultStatus
   windows/           Library.svelte, Finder.svelte
 src-tauri/src/       Rust: repository (SQLite), vault (age), keyring, auth (polkit), backup,
-                     clipboard, control (Unix socket), execution, ipc, search, settings, tray
+                     clipboard, control (Unix socket), execution, ipc, projects (task scan), search,
+                     settings, tray
 src-tauri/tests/     native backend integration tests (no test doubles)
 scripts/             verification harnesses (each exits 77 when the environment is missing)
 packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD

@@ -709,3 +709,31 @@ pub fn import_archive<R: Runtime>(
         secrets,
     })
 }
+
+/// Read a project folder without saving anything from it.
+#[tauri::command]
+pub fn scan_project<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: ScanProjectRequest,
+) -> AppResult<crate::projects::ProjectScan> {
+    require_library(&window)?;
+    crate::projects::scan(&request.path, &state(&app).repo)
+}
+
+/// Save the chosen tasks of a project folder as commands. The folder is read again here, so a
+/// scan result can never be replaced by command text supplied by the window.
+#[tauri::command]
+pub fn import_project<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: ImportProjectRequest,
+) -> AppResult<crate::projects::ImportOutcome> {
+    require_library(&window)?;
+    let state = state(&app);
+    let outcome = crate::projects::import(&request.path, &request.names, request.all, &state.repo)?;
+    if outcome.imported > 0 {
+        emit_reload_all(&app);
+    }
+    Ok(outcome)
+}

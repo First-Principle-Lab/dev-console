@@ -259,3 +259,35 @@ export interface BackupOutcome {
   commands: number;
   secrets: number;
 }
+
+/** Where a task came from, and the four shapes the scanner knows. */
+export type ProjectSource = 'npm' | 'make' | 'just' | 'compose';
+
+/** One task a project folder defines, as the backend read it. */
+export interface ProjectCandidate {
+  source: ProjectSource;
+  /** `<project>·<task>`: the name the command is saved under. */
+  name: string;
+  /** Exact text that will be run; the review list shows it verbatim. */
+  command: string;
+  description: string;
+  /** Tool the task belongs to (`bun`, `npm`, `make`, `just`, `compose`). */
+  entryType: string;
+  /** A saved command already runs this text in this folder. */
+  alreadyImported: boolean;
+}
+
+export interface ProjectScan {
+  /** Repository name: the folder holding `.git`, else the scanned folder. */
+  project: string;
+  /** Canonical absolute path every imported command runs in. */
+  dir: string;
+  candidates: ProjectCandidate[];
+}
+
+export interface ProjectImportOutcome {
+  imported: number;
+  duplicates: number;
+  /** Names that could not be saved, each with the reason. */
+  skipped: string[];
+}

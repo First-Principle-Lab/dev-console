@@ -11,6 +11,7 @@ export type IconName =
   | 'pin'
   | 'run'
   | 'trash'
+  | 'folder'
   | 'search'
   | 'plus'
   | 'back'

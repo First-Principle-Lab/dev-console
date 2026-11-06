@@ -5,6 +5,14 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+- **Import from project.** A library action that reads the runnable tasks a project folder already
+  defines — `package.json` scripts (run through whichever package manager its lockfile names),
+  Makefile targets, `justfile` recipes and Docker Compose services — and saves the ones you tick as
+  commands that run in that folder, tagged `project:<name>`. Scanning and importing execute nothing
+  in the folder; a task the library already has is marked "Already saved" and left alone, so
+  scanning the same folder twice writes nothing new.
+
 ## 0.0.8 — 2026-11-06
 
 ### Added
