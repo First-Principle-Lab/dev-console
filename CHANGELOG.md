@@ -5,6 +5,13 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+- The Finder now works out which project the terminal it was opened from is sitting in, and lists
+  that project's commands first, marked with a folder. The palette names the project it ranked by;
+  `Ctrl+P` or clicking the name ignores it for that open. Detection happens beside the palette, so
+  it never delays it, and off Hyprland the palette is ordered exactly as before. Settings → Finder
+  has a switch that skips the lookup entirely, and then `/proc` is not read at all.
+
 ## 0.0.8 — 2026-11-06
 
 ### Added

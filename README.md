@@ -20,6 +20,17 @@ name inline, `↑`/`↓` move the selection, `Enter` copies the value, `Ctrl+O` 
 library, `Esc` dismisses. Everything is reachable from the keyboard, and the list keeps proper
 combobox/listbox semantics.
 
+**Project context** — when the Finder opens, Dev Console asks the compositor which window had
+focus, follows that terminal to the shell it started, and reads the folder that shell is sitting
+in. Commands saved with a working directory inside that project — or tagged `project:<name>` —
+are listed first and marked with a folder icon, and the palette names the
+project it is ranking by. `Ctrl+P`, or clicking that name, ignores it for as long as the palette
+stays open. The whole lookup is in memory for one palette open: nothing is written to disk, and
+`Ctrl+P` is the only way it can be turned off by hand. Off, or on a desktop other than Hyprland
+(where focus is unreadable without a compositor API), the palette is exactly what it has always
+been: no chip, no marks, the old ordering. Settings → Finder has a switch that skips the lookup
+entirely, so `/proc` is not read at all.
+
 **Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
 restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock
 never clears the lock unless the vault actually decrypted.
@@ -135,7 +146,7 @@ in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque s
 | --- | --- |
 | Desktop | `Super+F` Finder (configured in your compositor, see below) |
 | Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
-| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Esc` close |
+| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Ctrl+P` ignore the detected project, `Esc` close |
 
 ## Desktop integration (Hyprland and other Wayland compositors)
 

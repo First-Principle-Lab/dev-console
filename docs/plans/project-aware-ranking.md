@@ -107,3 +107,43 @@ Everything reads local `/proc` and the compositor socket only. Nothing is persis
       frame or two.
 - [ ] Turning the setting off removes the chip and the reordering, and `/proc` is not read.
 - [ ] Screenshots reviewed.
+
+## Status as built
+
+Three deliberate deviations from the sketch above:
+
+* **Socket first, `hyprctl` second.** The plan had `hyprctl activewindow -j` as the primary read
+  with the socket as an optimisation. It is the other way round: `$XDG_RUNTIME_DIR/hypr/<sig>/.socket.sock`
+  is queried directly over a `UnixStream` (no process spawn, no 200 ms shell startup on the path the
+  user waits on), and `hyprctl` is only the fallback for a session whose socket is missing. Both are
+  bounded by the same 200 ms.
+* **Nothing is remembered.** The plan left "remember the last resolved context per terminal pid or
+  per window class" as an option. It is not built: a remembered project would keep ranking commands
+  after the window it came from is gone, for no benefit the user can see. The value lives in memory
+  for one palette open and is dropped when it closes.
+* **The escape hatch is a key, not just a setting.** `Ctrl+P` (or clicking the chip) ignores the
+  context for the current open. A trip to Settings to unblock one palette is too much friction.
+
+Verified here (Ubuntu container, no compositor at all) — see the "Finder project context" section of
+`TEST_REPORT.md` for the numbers:
+
+- [x] All local checks in `AGENTS.md` pass (fmt, clippy `-D warnings`, `cargo test`, svelte-check,
+      eslint, vitest, Playwright).
+- [x] The detection chain itself: process-tree walk over a synthetic `/proc`, project resolution
+      (`.git` walk-up, `$HOME` stop line, manifest fallback) and `activewindow` reply parsing, all
+      as unit tests — 14 new Rust tests.
+- [x] Ranking rules, including that a match tier still outranks context and that "no context" leaves
+      the previous order untouched.
+- [x] From a browser-style palette with no context there is no chip and the order is unchanged
+      (Playwright).
+- [x] The Settings switch hides the row and, with detection off, `/proc` is never read (Playwright +
+      the early return in `detect_context`).
+- [x] Screenshot reviewed: `artifacts/ui-review/raycast-after/18-finder-project-context__680.png`.
+
+Still needs the real desktop, and reported as UNVERIFIED rather than assumed:
+
+- [ ] `bash scripts/test-project-context.sh` on Hyprland: from a Ghostty or Kitty window inside this
+      repo, `Super+F` names this repo and lists its commands first. The harness exits 77 wherever
+      there is no Hyprland session, which is what `verify.sh` records here.
+- [ ] Opening the Finder feels instantaneous with a real compositor answering, and the benchmark in
+      `context.rs` printing a detection time under 30 ms.

@@ -162,3 +162,24 @@ capture at `artifacts/ui-review/native/native-library__xvfb.png`.
 Still honestly open for these fixes (environment-bound, not un-executed work): the interrupted-apply
 rehearsal on the target desktop and the real-keyring recovery reveal/copy session; the clean-checkout
 round and the rc3 artifact round trip were both executed on 2026-10-15/16.
+
+## Finder project context (this session)
+
+Environment: Ubuntu container, rustc 1.99.1, node 24.21 (via npx), **no Hyprland session and no
+compositor at all** - which is the environment every detection claim below has to be read against.
+
+| Check | Result |
+| --- | --- |
+| Process-tree walk (`context.rs`, 10 tests) | **PASS** - terminal to its shell over a synthetic `/proc`: direct child, shell two forks down, youngest of two tabs wins, depth limit respected, non-shell children (`vim`, `tmux`) ignored, login shell `-zsh` matched, git-root walk-up stops at `$HOME`, manifest fallback, plain folder yields nothing |
+| `activewindow` reply parsing | **PASS** - pid + class from a captured Hyprland JSON, and `None` for malformed JSON, a missing pid, pid 0 and a string pid |
+| Ranking with and without a context (`search.rs`) | **PASS** - pinned still outranks context; context outranks recency on an empty query; a match tier still outranks context (exact elsewhere beats fuzzy inside); membership by working directory (including `~/...` expanded exactly as `execution` expands it) and by `project:<name>` tag; `None` context leaves the order byte-identical to before |
+| Detection against a live compositor | **UNVERIFIED** - `scripts/test-project-context.sh` needs a Hyprland session and exits 77 without one, so `verify.sh` reports UNVERIFIED rather than a pass. The in-process timing benchmark prints its own number and reports `no context` here, which measures nothing about a real session |
+| Ranking cost, 5,000 entries | `cargo test --lib -- --ignored` on this container: **4.98 ms per search**, measured both with and without a project context; the extra pass is a per-entry path prefix compare, and the sort dominates. Ignored by default so CI never asserts on machine speed |
+| Frontend behaviour | **PASS** - Playwright: chip names the project and marks its rows (accessible label `in <name>`), click and `Ctrl+P` both drop the chip and restore the old order with no reload, no context means no chip and the same rows as before, and typing narrows without dropping the marker. Settings switch hides the row and persists `projectContextEnabled` |
+| Gates | `cargo fmt --check` ok, `cargo clippy --all-targets -- -D warnings` clean, `cargo test --locked` 84 lib tests (+2 ignored), `svelte-check` 0/0, eslint clean, vitest 24/24, Playwright 116/116 |
+
+What the environment cannot prove, and stays open for the target desktop: that a real Hyprland
+`activewindow` reply leads to the folder the user was actually looking at, and that the whole
+lookup stays inside its budget there. `bash scripts/test-project-context.sh` is the one command
+that answers it, and it is wired into `verify.sh` so the answer is recorded as PASS, FAIL or
+UNVERIFIED rather than assumed.
