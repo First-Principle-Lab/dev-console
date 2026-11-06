@@ -19,8 +19,11 @@
 
 use std::collections::BTreeSet;
 use std::io::Read;
+use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -40,12 +43,11 @@ const JUST_DUMP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3)
 /// Longest task description kept (`package.json` script bodies are the usual candidate).
 const MAX_DESCRIPTION_CHARS: usize = 200;
 
-/// Group separator inside a task name. Deliberately has no spaces: the app's own rule is that
-/// entry names never contain them, because Space copies the selected row in the finder.
+/// Compact separator between the project and task names in the library and review list.
 const NAME_SEPARATOR: char = '·';
 
 const PACKAGE_JSON: &str = "package.json";
-const MAKEFILES: [&str; 3] = ["Makefile", "makefile", "GNUmakefile"];
+const MAKEFILES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];
 const JUSTFILES: [&str; 2] = ["justfile", ".justfile"];
 const COMPOSE_FILES: [&str; 4] = [
     "compose.yaml",
@@ -270,6 +272,19 @@ pub fn import(
             "none of the selected tasks are in this folder any more; scan it again".into()
         }));
     }
+    if !all {
+        for name in wanted {
+            if !scanned
+                .candidates
+                .iter()
+                .any(|candidate| candidate.name == name)
+            {
+                outcome
+                    .skipped
+                    .push(format!("{name} (no longer in this folder; scan it again)"));
+            }
+        }
+    }
     Ok(outcome)
 }
 
@@ -288,7 +303,15 @@ fn target_dir(path: &str) -> AppResult<PathBuf> {
     if trimmed.is_empty() {
         return Err(AppError::Validation("choose a project folder first".into()));
     }
-    let resolved = std::fs::canonicalize(trimmed)
+    let expanded = if trimmed == "~" || trimmed.starts_with("~/") {
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            AppError::Validation("HOME is not set; enter an absolute folder path".into())
+        })?;
+        PathBuf::from(home).join(trimmed.strip_prefix("~/").unwrap_or(""))
+    } else {
+        PathBuf::from(trimmed)
+    };
+    let resolved = std::fs::canonicalize(expanded)
         .map_err(|e| AppError::Validation(format!("cannot open {trimmed}: {e}")))?;
     if !resolved.is_dir() {
         return Err(AppError::Validation(format!(
@@ -478,7 +501,33 @@ fn makefile_tasks(dir: &Path) -> AppResult<Vec<Task>> {
 /// A `## comment` on the same line is the target's help text (`make` itself ignores it).
 fn parse_make_targets(raw: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
+    let mut define_depth = 0usize;
+    let mut continued = false;
     for line in raw.lines() {
+        let was_continued = continued;
+        continued = line.trim_end().ends_with('\\');
+        if was_continued {
+            continue;
+        }
+        let directive = line.trim_start();
+        if !line.starts_with('\t') {
+            // Make allows modifiers before define and nested variable definitions.
+            let words: Vec<_> = directive.split_whitespace().collect();
+            let head = words
+                .iter()
+                .find(|word| !matches!(**word, "override" | "export" | "private"));
+            if head == Some(&"define") {
+                define_depth += 1;
+                continue;
+            }
+            if head == Some(&"endef") {
+                define_depth = define_depth.saturating_sub(1);
+                continue;
+            }
+        }
+        if define_depth > 0 {
+            continue;
+        }
         // Blank, comment, and anything indented: recipe bodies, continuation lines and bodies of
         // nested conditionals all start with whitespace.
         if line.is_empty()
@@ -562,39 +611,76 @@ fn just_dump(dir: &Path) -> Option<String> {
     if !executable_in_path("just") {
         return None;
     }
-    let mut child = std::process::Command::new("just")
-        .args(["--dump", "--dump-format", "json"])
-        .current_dir(dir)
+    dump_output(
+        Command::new("just")
+            .args(["--dump", "--dump-format", "json"])
+            .current_dir(dir),
+        JUST_DUMP_TIMEOUT,
+    )
+}
+
+/// One deadline covers both stdout and exit. A process can close stdout before it exits,
+/// or exit while a descendant still owns the pipe, so neither event alone completes the dump.
+fn dump_output(command: &mut Command, timeout: Duration) -> Option<String> {
+    let deadline = Instant::now() + timeout;
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .process_group(0)
         .spawn()
         .ok()?;
-    let stdout = child.stdout.take()?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut capped = stdout.take(MAX_FILE_BYTES * 4);
-        let mut buf = Vec::new();
-        let outcome = capped
-            .read_to_end(&mut buf)
-            .map(|_| String::from_utf8_lossy(&buf).into_owned());
-        // A dropped receiver only means the caller already gave up.
-        let _ = sender.send(outcome);
-    });
-
-    match receiver.recv_timeout(JUST_DUMP_TIMEOUT) {
-        Ok(Ok(text)) => {
-            child.wait().ok()?;
-            Some(text)
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    // Nonblocking reads let the same deadline cover a pipe held open by descendants,
+    // without leaving a blocked reader thread behind when the process is stopped.
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    let configured =
+        flags >= 0 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } >= 0;
+    let mut output = Vec::new();
+    let mut status = None;
+    let mut eof = false;
+    let mut chunk = [0u8; 65536];
+    let result = loop {
+        if !configured || Instant::now() >= deadline {
+            break None;
         }
-        // Timeout, a read failure, or a child that died without writing: the fallback parser is
-        // still a complete answer for a plain justfile.
-        _ => {
-            child.kill().ok();
-            child.wait().ok();
-            None
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(Some(exit)) if exit.success() => status = Some(exit),
+                Ok(Some(_)) | Err(_) => break None,
+                Ok(None) => {}
+            }
         }
+        let mut read_bytes = false;
+        if !eof {
+            match stdout.read(&mut chunk) {
+                Ok(0) => eof = true,
+                Ok(count) => {
+                    if output.len() + count > MAX_FILE_BYTES as usize * 4 {
+                        break None;
+                    }
+                    output.extend_from_slice(&chunk[..count]);
+                    read_bytes = true;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break None,
+            }
+        }
+        if status.is_some() && eof {
+            break String::from_utf8(output).ok();
+        }
+        if !read_bytes {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // Stop descendants too, including a child holding stdout open after its parent exits.
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
+    let _ = child.wait();
+    result
 }
 
 fn executable_in_path(program: &str) -> bool {
@@ -775,69 +861,42 @@ fn compose_tasks(dir: &Path) -> AppResult<Vec<Task>> {
     Ok(out)
 }
 
-/// Service names from the top level of a compose file.
-///
-/// The only structure that matters is `services:` and its immediate children, so this is a line
-/// reader rather than a YAML dependency: it cannot panic on hostile input, and it needs no YAML
-/// crate for a four-line job. What it cannot express is a file whose services are indented
-/// inconsistently or declared inline; those are reported as validation errors rather than imported
-/// as a half-read service list.
+/// Validate the complete YAML document before extracting service names. Nested syntax errors
+/// must not turn into plausible commands that Docker Compose will later refuse to run.
 fn parse_compose_services(raw: &str, file: &str) -> AppResult<Vec<String>> {
-    let mut services: Vec<String> = Vec::new();
-    let mut inside = false;
-    let mut child_indent: Option<usize> = None;
-    for (index, line) in raw.lines().enumerate() {
-        let number = index + 1;
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        if indent == 0 {
-            // Any other top-level key ends the block. `services:` with a trailing comment or an
-            // inline flow mapping (`services: {}`) ends it too: there is nothing nested to read.
-            inside = trimmed.split(':').next() == Some("services");
-            child_indent = None;
-            continue;
-        }
-        if !inside {
-            continue;
-        }
-        match child_indent {
-            None => child_indent = Some(indent),
-            // Deeper lines are keys *of* a service; a shallower one ends the block. Neither is a
-            // service name.
-            Some(level) if indent != level => continue,
-            Some(_) => {}
-        }
-        let Some((name, rest)) = trimmed.split_once(':') else {
-            return Err(AppError::Validation(format!(
-                "{file} line {number}: expected a service name under services:"
-            )));
-        };
-        let name = name.trim();
-        let rest = rest.trim();
-        if name.is_empty() || name.starts_with('-') {
-            return Err(AppError::Validation(format!(
-                "{file} line {number}: services: must be a mapping of service names, not a list"
-            )));
-        }
-        // A plain `api:`, `api: # note` or `api: {}` declares a service. Anything else on the line
-        // is not a service this reader can trust.
-        let declared = rest.is_empty()
-            || rest.starts_with('#')
-            || rest.starts_with('{')
-            || rest.starts_with('&');
-        if !declared || name.contains(char::is_whitespace) || name.contains(':') {
-            return Err(AppError::Validation(format!(
-                "{file} line {number}: service names must be a plain key on its own line"
-            )));
-        }
-        if !services.iter().any(|seen| seen == name) {
-            services.push(name.to_string());
-        }
+    let invalid = |message: String| AppError::Validation(format!("{file}: {message}"));
+    let document: serde_norway::Value =
+        serde_norway::from_str(raw).map_err(|error| invalid(format!("invalid YAML: {error}")))?;
+    if document.is_null() {
+        return Ok(Vec::new());
     }
-    Ok(services)
+    let root = document
+        .as_mapping()
+        .ok_or_else(|| invalid("expected a mapping".into()))?;
+    let Some(services) = root.get("services") else {
+        return Ok(Vec::new());
+    };
+    let services = services
+        .as_mapping()
+        .ok_or_else(|| invalid("services must be a mapping of service names".into()))?;
+    let mut out = Vec::new();
+    for (name, definition) in services {
+        let name = name
+            .as_str()
+            .ok_or_else(|| invalid("service names must be strings".into()))?;
+        if !name.starts_with(|c: char| c.is_ascii_alphanumeric())
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        {
+            return Err(invalid(format!("invalid service name: {name}")));
+        }
+        if !definition.is_mapping() {
+            return Err(invalid(format!("service {name} must be a mapping")));
+        }
+        out.push(name.to_string());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

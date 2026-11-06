@@ -30,6 +30,7 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 libc = "0.2"
 tauri-plugin-updater = "2.14.1"
 tauri-plugin-process = "2.4.0"
+serde_norway = "0.9.42"
 
 [dev-dependencies]
 tempfile = "3"

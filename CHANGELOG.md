@@ -5,6 +5,12 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+- Project import now enforces the full `just` process deadline, validates Compose YAML,
+  follows Makefile precedence, skips Make variable blocks, expands home paths, reports missing
+  selections, and forwards the CLI `--all` flag. Review dialogs keep keyboard focus and their
+  confirmation buttons visible at the minimum window size.
+
 ### Added
 - **Import from project.** A library action that reads the runnable tasks a project folder already
   defines — `package.json` scripts (run through whichever package manager its lockfile names),

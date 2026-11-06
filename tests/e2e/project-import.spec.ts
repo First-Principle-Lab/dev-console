@@ -315,3 +315,63 @@ test('a folder with far more tasks than fit on screen scrolls instead of growing
   await page.getByTestId('project-import').click();
   await expect(page.getByText('Imported 45 tasks.')).toBeVisible();
 });
+
+
+test('keeps keyboard focus inside the modal and restores it on close', async ({ page }) => {
+  await boot(page, SEED);
+  await openDialog(page);
+  const path = page.getByTestId('project-path');
+  const confirm = page.getByTestId('project-import');
+  await path.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(confirm).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(path).toBeFocused();
+  // showModal makes background controls inert even to attempted programmatic focus.
+  await page.getByTestId('add-entry').evaluate((button) => (button as HTMLElement).focus());
+  await expect(path).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('import-project')).toBeFocused();
+});
+
+test('reports a partially vanished selection and rescans the saved rows', async ({ page }) => {
+  await boot(page, { ...SEED, projectMissingOnImport: true });
+  await openDialog(page);
+  await page.getByTestId('project-import').click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByTestId('status-error')).toContainText('webapp·test');
+  await expect(page.getByTestId('status-error')).toContainText('no longer in this folder');
+  expect(await commandRows(page)).toHaveLength(6);
+  await expect(page.getByTestId('project-candidate')).toHaveCount(6);
+  await expect(page.getByTestId('project-already-saved')).toHaveCount(6);
+  await expect(page.getByTestId('project-import')).toBeDisabled();
+});
+
+for (const theme of ['dark', 'light', 'omarchy-catppuccin', 'omarchy-gruvbox']) {
+  for (const [width, height] of [[1440, 900], [760, 520], [390, 780]]) {
+    test(`long-list footer stays fully visible in ${theme} at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await boot(page, { ...SEED, projectLarge: true, settings: {
+        theme, autostart: false, clipboardExpirySeconds: 30, terminal: ['x-terminal-emulator', '-e']
+      } });
+      await openDialog(page);
+      const dialogColour = await page.getByRole('dialog').evaluate((dialog) => ({
+        actual: getComputedStyle(dialog).color,
+        expected: getComputedStyle(document.body).color
+      }));
+      expect(dialogColour.actual).toBe(dialogColour.expected);
+      const fullyVisible = await page.getByTestId('project-import').evaluate((button) => {
+        const rect = button.getBoundingClientRect();
+        const dialog = button.closest('dialog')!.getBoundingClientRect();
+        return rect.top >= dialog.top && rect.bottom <= dialog.bottom &&
+          rect.left >= dialog.left && rect.right <= dialog.right &&
+          rect.top >= 0 && rect.bottom <= innerHeight;
+      });
+      expect(fullyVisible).toBe(true);
+      await page.getByTestId('project-candidate').last().scrollIntoViewIfNeeded();
+      await expect(page.getByTestId('project-candidate').last()).toBeInViewport();
+      await page.getByTestId('project-import').click();
+      await expect(page.getByText('Imported 45 tasks.')).toBeVisible();
+    });
+  }
+}

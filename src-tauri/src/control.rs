@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::cli::VaultCommand;
 use crate::error::{AppError, AppResult};
@@ -97,7 +97,7 @@ fn code_for(state: &VaultState) -> i32 {
 
 /// Starts the accept loop. A failure to listen must never stop the app from running: the
 /// GUI keeps working and the CLI falls back to its offline behaviour.
-pub fn serve(app: &AppHandle, state: Arc<AppState>) {
+pub fn serve<R: Runtime>(app: &AppHandle<R>, state: Arc<AppState>) {
     let path = socket_path();
     if let Some(parent) = path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
@@ -144,7 +144,11 @@ pub fn remove_socket() {
     std::fs::remove_file(socket_path()).ok();
 }
 
-fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>) -> AppResult<()> {
+fn handle_connection<R: Runtime>(
+    stream: UnixStream,
+    app: &AppHandle<R>,
+    state: &Arc<AppState>,
+) -> AppResult<()> {
     stream.set_read_timeout(Some(REQUEST_TIMEOUT)).ok();
     stream.set_write_timeout(Some(REQUEST_TIMEOUT)).ok();
     let mut reader = BufReader::new(
@@ -177,7 +181,7 @@ fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>)
 ///
 /// The whole request travels in, because `project.import` needs the selected task names as well
 /// as the folder.
-pub fn dispatch(request: &Request, app: &AppHandle, state: &Arc<AppState>) -> Reply {
+pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<AppState>) -> Reply {
     let command = request.command.as_str();
     let path = request.path.as_deref();
     match command {
@@ -548,6 +552,7 @@ pub fn run_project(dir: &str, all: bool) -> AppResult<i32> {
             "project.scan".into()
         },
         path: Some(path.to_string_lossy().into_owned()),
+        all,
         ..Request::default()
     }) else {
         eprintln!(

@@ -708,3 +708,152 @@ fn a_scan_of_a_second_folder_never_sees_the_first_one_saves() {
     assert_eq!((outcome.imported, outcome.duplicates), (1, 0));
     assert_eq!(h.saved().len(), 2);
 }
+
+#[test]
+fn make_uses_the_same_file_precedence_as_the_runner() {
+    let h = Harness::new(
+        "priority",
+        &[
+            ("Makefile", "upper:\n"),
+            ("makefile", "lower:\n"),
+            ("GNUmakefile", "gnu:\n"),
+        ],
+    );
+    assert_eq!(command_of(&h.scan(), "gnu"), "make gnu");
+    assert_eq!(h.scan().candidates.len(), 1);
+    std::fs::remove_file(h.project.join("GNUmakefile")).unwrap();
+    assert_eq!(command_of(&h.scan(), "lower"), "make lower");
+}
+
+#[test]
+fn make_skips_define_blocks_and_continued_lines() {
+    let parsed = parse_make_targets(include_str!("../../tests/fixtures/projects/Makefile"));
+    assert_eq!(parsed, vec![("real".into(), "Real target".into())]);
+}
+
+#[test]
+fn compose_validates_nested_yaml_and_service_types() {
+    for raw in [
+        include_str!("../../tests/fixtures/projects/invalid-compose.yaml"),
+        "services:\n  api: [redis]\n",
+        "services:\n  api:\n    image: redis\n bad: indent\n",
+        "services: {api: {image: redis}, api: {image: nginx}}",
+        "services: {'api;echo': {image: redis}}",
+    ] {
+        assert!(
+            parse_compose_services(raw, "compose.yaml").is_err(),
+            "accepted {raw}"
+        );
+    }
+    assert_eq!(
+        parse_compose_services("---\nservices: {'api': {image: redis}}\n", "compose.yaml").unwrap(),
+        vec!["api"]
+    );
+}
+
+#[test]
+fn tilde_folder_paths_expand_to_home() {
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME"));
+    assert_eq!(
+        target_dir("~").unwrap(),
+        std::fs::canonicalize(&home).unwrap()
+    );
+    let folder = tempfile::tempdir_in(&home).unwrap();
+    let path = format!("~/{}", folder.path().file_name().unwrap().to_str().unwrap());
+    assert_eq!(
+        target_dir(&path).unwrap(),
+        std::fs::canonicalize(folder.path()).unwrap()
+    );
+}
+
+#[test]
+fn partially_stale_selections_report_each_missing_task() {
+    let h = Harness::new(
+        "stale",
+        &[(
+            PACKAGE_JSON,
+            include_str!("../../tests/fixtures/projects/package.json"),
+        )],
+    );
+    std::fs::write(
+        h.project.join(PACKAGE_JSON),
+        r#"{"scripts":{"a":"printf a"}}"#,
+    )
+    .unwrap();
+    let outcome = h.import(&["stale·a", "stale·b"], false).unwrap();
+    assert_eq!(outcome.imported, 1);
+    assert_eq!(outcome.skipped.len(), 1);
+    assert!(outcome.skipped[0].contains("stale·b"));
+}
+
+#[test]
+fn real_just_159_dump_fixture_has_the_expected_shape() {
+    let recipes = parse_just_dump(include_str!(
+        "../../tests/fixtures/projects/just-1.59.0.json"
+    ))
+    .unwrap();
+    assert_eq!(recipes, vec![("public".into(), "Public recipe".into())]);
+}
+
+#[test]
+fn just_dump_deadline_covers_exit_and_inherited_stdout() {
+    for script in [
+        "exec 1>&-; exec sleep 5",
+        "sleep 5 & exit 0",
+        "exec sleep 5",
+    ] {
+        let start = Instant::now();
+        assert!(dump_output(
+            Command::new("/bin/sh").args(["-c", script]),
+            Duration::from_millis(200)
+        )
+        .is_none());
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "timeout failed for {script}"
+        );
+    }
+}
+
+#[test]
+fn just_dump_rejects_failed_and_oversized_output() {
+    assert!(dump_output(
+        Command::new("/bin/sh").args(["-c", "printf '{}'; exit 1"]),
+        Duration::from_secs(2)
+    )
+    .is_none());
+    assert!(dump_output(
+        Command::new("/bin/sh").args(["-c", "yes x"]),
+        Duration::from_secs(2)
+    )
+    .is_none());
+    assert_eq!(
+        dump_output(
+            Command::new("/bin/sh").args(["-c", "printf '{\"recipes\":{}}'"]),
+            Duration::from_secs(2)
+        )
+        .as_deref(),
+        Some("{\"recipes\":{}}")
+    );
+}
+
+#[test]
+#[ignore = "requires a real just binary on PATH; run this test explicitly with --ignored"]
+fn installed_just_dump_imports_only_public_recipes() {
+    assert!(executable_in_path("just"), "install just or add it to PATH");
+    let h = Harness::new(
+        "real-just",
+        &[(
+            "justfile",
+            include_str!("../../tests/fixtures/projects/justfile"),
+        )],
+    );
+    let dump = just_dump(&h.project).expect("real just --dump must succeed, without fallback");
+    assert_eq!(
+        parse_just_dump(&dump).unwrap(),
+        vec![("public".into(), "Public recipe".into())]
+    );
+    assert_eq!(h.import(&[], true).unwrap().imported, 1);
+    let again = h.import(&[], true).unwrap();
+    assert_eq!((again.imported, again.duplicates), (0, 1));
+}

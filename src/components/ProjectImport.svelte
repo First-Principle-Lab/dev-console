@@ -325,6 +325,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
+    min-height: 0;
     max-height: 46vh;
     overflow-y: auto;
     padding-right: var(--sp-1);

@@ -109,6 +109,7 @@
   window.__mockProjectTasks = PROJECT_TASKS;
 
   /** Already-saved rows are derived exactly as the backend derives them: text plus folder. */
+  let missingProjectTask = null;
   function projectScan(dir) {
     const saved = new Set(
       state.commands.map((row) => `${row.command ?? ''}\u0000${row.workingDirectory ?? ''}`)
@@ -116,7 +117,7 @@
     return {
       project: 'webapp',
       dir,
-      candidates: PROJECT_TASKS.map((task) => ({
+      candidates: PROJECT_TASKS.filter((task) => task.name !== missingProjectTask).map((task) => ({
         ...task,
         alreadyImported: saved.has(`${task.command}\u0000${dir}`)
       }))
@@ -516,8 +517,13 @@
       const dir = String(request.path || '');
       const wanted = new Set(request.names || []);
       const outcome = { imported: 0, duplicates: 0, skipped: [] };
+      if (seed.projectMissingOnImport) missingProjectTask = 'webapp·test';
       for (const task of ALL_TASKS) {
         if (!wanted.has(task.name)) continue;
+        if (task.name === missingProjectTask) {
+          outcome.skipped.push(`${task.name} (no longer in this folder; scan it again)`);
+          continue;
+        }
         // Same rule the backend applies: the text and the folder together are the identity.
         if (
           state.commands.some(

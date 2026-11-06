@@ -21,20 +21,41 @@
     footer?: import('svelte').Snippet;
   } = $props();
 
-  let panel = $state<HTMLDivElement | null>(null);
+  let panel = $state<HTMLDialogElement | null>(null);
 
   onMount(() => {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     window.addEventListener('keydown', onkey, true);
     void tick().then(() => {
-      const focusable = panel?.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      if (!panel?.isConnected) return;
+      panel.showModal();
+      const focusable = panel.querySelector<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
       );
-      (focusable ?? panel)?.focus();
+      (focusable ?? panel).focus();
     });
-    return () => window.removeEventListener('keydown', onkey, true);
+    return () => {
+      window.removeEventListener('keydown', onkey, true);
+      panel?.close();
+      if (trigger?.isConnected) trigger.focus();
+    };
   });
 
   function onkey(event: KeyboardEvent): void {
+    // Keep Tab cycling through the controls rather than through browser chrome.
+    if (event.key === 'Tab' && panel?.open) {
+      const controls = [...panel.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      )].filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (!first) { event.preventDefault(); panel.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    }
     if (event.key === 'Escape' && oncancel) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -43,54 +64,57 @@
   }
 </script>
 
-<div class="backdrop" role="presentation" onclick={(event) => oncancel && event.target === event.currentTarget && oncancel()}
-  >
-  <div
-    class="dialog surface-shell" class:wide
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-    aria-label={label ?? title}
-    aria-labelledby={labelledBy}
-    bind:this={panel}
-  >
-    {#if title}<h3 class="title">{title}</h3>{/if}
-    <div class="body">{@render children?.()}</div>
-    {#if footer}
-      <div class="foot">{@render footer()}</div>
-    {/if}
-  </div>
-</div>
+<dialog
+  class="dialog surface-shell" class:wide
+  aria-label={label ?? title}
+  aria-labelledby={labelledBy}
+  bind:this={panel}
+  oncancel={(event) => { event.preventDefault(); oncancel?.(); }}
+  onclick={(event) => {
+    if (event.target !== panel || !oncancel || !panel) return;
+    const bounds = panel.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom) oncancel();
+  }}
+>
+  {#if title}<h3 class="title">{title}</h3>{/if}
+  <div class="body">{@render children?.()}</div>
+  {#if footer}
+    <div class="foot">{@render footer()}</div>
+  {/if}
+</dialog>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
+  .dialog::backdrop {
     background: var(--backdrop);
-    display: grid;
-    place-items: center;
-    padding: var(--sp-4);
-    z-index: 40;
+  }
+  .dialog:not([open]) {
+    display: none;
   }
   .dialog {
     /* The frame itself (fill, edge, radius, elevation) is .surface-shell from
        tokens.css so every floating surface in the app shares one definition. */
     width: min(520px, 100%);
+    color: var(--fg);
     padding: var(--sp-4);
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
     max-height: 90vh;
-    overflow: auto;
+    max-width: calc(100vw - 2 * var(--sp-4));
+    overflow: hidden;
   }
   .dialog.wide {
     width: min(780px, 100%);
   }
   .title {
+    flex-shrink: 0;
     font-size: var(--text-lg);
     word-break: break-word;
   }
   .body {
+    min-height: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
@@ -98,6 +122,7 @@
     font-size: var(--text-sm);
   }
   .foot {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: flex-end;

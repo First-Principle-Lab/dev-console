@@ -121,8 +121,10 @@ test('library record at the real minimum window size', async ({ page }) => {
 });
 
 /** Opens the project-task dialog over a scanned folder; the dialog is the surface under review. */
-async function importDialog(page: Page, large = false): Promise<void> {
-  await boot(page, { ...EMPTY, projectLarge: large });
+async function importDialog(page: Page, large = false, theme = 'dark'): Promise<void> {
+  await boot(page, { ...EMPTY, projectLarge: large, settings: {
+    theme, autostart: false, clipboardExpirySeconds: 30, terminal: ['x-terminal-emulator', '-e']
+  } });
   await page.getByTestId('import-project').click();
   await page.getByTestId('project-path').fill(
     large ? '/home/dev/projects/bigrepo' : '/home/dev/projects/webapp'
@@ -276,5 +278,17 @@ for (const viewport of VIEWPORTS) {
     await page.getByTestId('finder-input').fill('token');
     await page.waitForTimeout(200);
     await capture(page, '12-finder-locked-row', width, height);
+  });
+}
+
+
+for (const theme of ['dark', 'light', 'omarchy-catppuccin', 'omarchy-gruvbox']) {
+  test(`project import review captures in ${theme}`, async ({ page }) => {
+    for (const [width, height] of [[1440, 900], [390, 780]]) {
+      await importDialog(page, false, theme);
+      await capture(page, `20-project-import-${theme}`, width, height);
+      await importDialog(page, true, theme);
+      await capture(page, `21-project-import-long-${theme}`, width, height);
+    }
   });
 }

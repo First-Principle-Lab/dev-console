@@ -43,7 +43,10 @@ Compose services. Scanning lists them grouped by source, ticks the new ones, and
 library already has as "Already saved". Importing writes the ticked ones as ordinary commands whose
 working directory is that folder and whose tag is `project:<repo>`. Reading and importing execute
 nothing in the folder — the commands are only written down, and running one still goes through the
-approval above.
+approval above. The folder field accepts absolute paths and `~/` paths. Makefile discovery
+uses GNU Make's file precedence and ignores `define` blocks. Compose files are validated as YAML.
+The optional read-only `just --dump` process has a three-second deadline covering output and exit.
+If selected tasks disappear before import, the review reports them alongside the saved tasks.
 
 **Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
 in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
