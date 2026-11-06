@@ -8,11 +8,14 @@
     ClipboardExclusion,
     RecoveryKeyInfo,
     Settings,
+    TerminalOption,
+    Theme,
     VaultState
   } from '../lib/models';
   import { absoluteTime } from '../lib/time';
   import { formatArgv, parseArgv } from '../lib/argv';
   import { applyTheme } from '../lib/state.svelte';
+  import { OMARCHY_THEMES } from '../lib/models';
   import { checkForUpdates, installUpdate, updates, updatesSupported } from '../lib/updates.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -25,6 +28,7 @@
   let currentSecrets = $state<number | null>(null);
   let error = $state<string | null>(null);
   let saved = $state(false);
+  let savedTheme: Theme | null = null;
 
   let backups = $state<BackupInfo[]>([]);
   let backupBusy = $state(false);
@@ -41,6 +45,8 @@
   let terminalText = $state('');
   let terminalTokens = $state<string[]>([]);
   let terminalError = $state<string | null>(null);
+  let terminals = $state<TerminalOption[]>([]);
+  let terminalChoice = $state('custom');
 
   let recovery = $state<RecoveryKeyInfo | null>(null);
   let recoveryError = $state<string | null>(null);
@@ -205,6 +211,19 @@
     }
   }
 
+  function chooseTerminal(id: string): void {
+    terminalChoice = id;
+    const terminal = terminals.find((option) => option.id === id);
+    if (terminal) setTerminal(formatArgv(terminal.command));
+    saved = false;
+  }
+
+  function matchesTerminal(command: string[], option: TerminalOption): boolean {
+    return command.length === option.command.length
+      && command[0]?.split('/').pop() === option.id
+      && command.slice(1).every((part, index) => part === option.command[index + 1]);
+  }
+
   /// Counts are a separate, best-effort load: the secret list legitimately fails while the
   /// vault is locked and must never take the General controls down with it.
   async function refreshCounts(): Promise<void> {
@@ -223,12 +242,15 @@
   async function loadGeneral(): Promise<void> {
     error = null;
     try {
-      const [loaded, appState] = await Promise.all([api.settings(), api.appState()]);
+      const [loaded, appState, foundTerminals] = await Promise.all([api.settings(), api.appState(), api.terminals()]);
+      savedTheme = loaded.theme;
       settings = loaded;
       exclusion = appState.clipboardExclusion;
       backupDir = appState.backupDir;
       terminalText = formatArgv(loaded.terminal);
       terminalTokens = loaded.terminal;
+      terminals = foundTerminals;
+      terminalChoice = foundTerminals.find((option) => matchesTerminal(loaded.terminal, option))?.id ?? 'custom';
       await refreshBackups();
       await refreshCounts();
     } catch (problem: unknown) {
@@ -252,14 +274,23 @@
     return () => {
       unsubscribe();
       if (copyTimer) clearTimeout(copyTimer);
+      if (savedTheme) applyTheme(savedTheme);
     };
   });
+
+  function previewTheme(theme: Theme): void {
+    if (!settings) return;
+    settings.theme = theme;
+    applyTheme(theme);
+    saved = false;
+  }
 
   async function save(): Promise<void> {
     if (!settings || terminalError) return;
     error = null;
     try {
       settings = await api.saveSettings(settings);
+      savedTheme = settings.theme;
       applyTheme(settings.theme);
       saved = true;
     } catch (problem: unknown) {
@@ -289,6 +320,7 @@
             <span class="spacer"></span>
             {#if updates.available}
               <button
+                type="button"
                 data-variant="primary"
                 onclick={() => void installUpdate()}
                 disabled={updates.status === 'installing'}
@@ -298,6 +330,7 @@
               </button>
             {:else}
               <button
+                type="button"
                 onclick={() => void checkForUpdates()}
                 disabled={updates.status === 'checking'}
                 data-testid="check-updates"
@@ -333,10 +366,13 @@
           <div class="grid">
             <label class="field">
               <span class="label-text">Theme</span>
-              <select bind:value={settings.theme}>
+              <select bind:value={settings.theme} onchange={(event) => previewTheme(event.currentTarget.value as Theme)}>
                 <option value="system">Follow system</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
+                {#each OMARCHY_THEMES as [slug, name] (slug)}
+                  <option value={`omarchy-${slug}`}>{name}</option>
+                {/each}
               </select>
             </label>
             <label class="field">
@@ -355,14 +391,27 @@
             <span>Start at login (hidden in the tray)</span>
           </label>
           <div class="field">
-            <span class="label-text">Terminal command (quotes kept)</span>
-            <input
-              class="mono"
-              value={terminalText}
-              oninput={(e) => setTerminal(e.currentTarget.value)}
-              aria-describedby="terminal-preview"
-              data-testid="terminal"
-            />
+            <label class="label-text" for="terminal-choice">Terminal</label>
+            <select id="terminal-choice" value={terminalChoice} onchange={(event) => chooseTerminal(event.currentTarget.value)} data-testid="terminal-choice">
+              {#each terminals as terminal (terminal.id)}
+                <option value={terminal.id}>{terminal.name}</option>
+              {/each}
+              <option value="custom">Custom command</option>
+            </select>
+            {#if terminals.length === 0}
+              <p class="muted detail">No supported terminal was found in PATH. Enter a custom command below.</p>
+            {/if}
+            {#if terminalChoice === 'custom'}
+              <label class="label-text" for="terminal-command">Terminal command (quotes kept)</label>
+              <input
+                id="terminal-command"
+                class="mono"
+                value={terminalText}
+                oninput={(e) => setTerminal(e.currentTarget.value)}
+                aria-describedby="terminal-preview"
+                data-testid="terminal"
+              />
+            {/if}
             {#if terminalError}
               <p class="field-error" role="alert" data-testid="terminal-error">{terminalError}</p>
             {:else if terminalTokens.length}

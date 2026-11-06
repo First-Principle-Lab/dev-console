@@ -17,6 +17,7 @@ const TOKENS_FILE = join(import.meta.dirname, '..', '..', 'src', 'styles', 'toke
 const SRC_DIR = join(import.meta.dirname, '..', '..', 'src');
 
 const css = readFileSync(TOKENS_FILE, 'utf8');
+const omarchyCss = readFileSync(join(SRC_DIR, 'styles', 'omarchy.css'), 'utf8');
 
 /** Custom property names declared inside the block that a selector opens. */
 function declaredNames(selectorPattern: RegExp): string[] {
@@ -44,6 +45,15 @@ describe('design tokens', () => {
     expect(dark.length).toBeGreaterThan(40);
     expect(systemLight.sort()).toEqual([...dark].sort());
     expect(explicitLight.sort()).toEqual([...dark].sort());
+  });
+
+  it('gives every Omarchy theme the complete color token set', () => {
+    const blocks = [...omarchyCss.matchAll(/:root\[data-theme='omarchy-[\w-]+'\]\s*\{([\s\S]*?)\n\}/g)];
+    expect(blocks).toHaveLength(22);
+    for (const block of blocks) {
+      const names = [...block[1].matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1]);
+      expect(names.sort()).toEqual([...dark].sort());
+    }
   });
 
   it('keeps colour literals out of components: tokens.css is the only source', () => {

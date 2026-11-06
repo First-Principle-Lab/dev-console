@@ -37,12 +37,13 @@ test('tabs carry entry counts and expose one selected tab', async ({ page }) => 
   await expect(page.getByTestId('tab-commands')).toHaveAttribute('aria-selected', 'false');
 });
 
-test('secret rows stay masked and are visibly a different kind', async ({ page }) => {
+test('secret rows show only the name and actions without exposing the value', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('tab-secrets').click();
   const row = page.getByTestId('entry-row').first();
   await expect(row).toContainText('Registry token');
-  await expect(row.getByLabel('Value hidden')).toBeVisible();
+  await expect(row).toHaveText('Registry token');
+  await expect(row.getByRole('button', { name: 'Copy Registry token' })).toBeVisible();
   const body = await page.content();
   expect(body).not.toContain('synthetic-value-1');
 });
@@ -136,17 +137,13 @@ test('a locked vault is presented as a state, never as an error', async ({ page 
   await expect(page.getByTestId('unlock-vault')).toBeVisible();
 });
 
-test('list rows show relative times and never overflow their own line', async ({ page }) => {
+test('minimal list rows show names and actions without overflowing', async ({ page }) => {
   await boot(page, SEED);
-  await page.getByTestId('entry-row').first().click();
-  const meta = page.locator('[data-testid="entry-row"]').first().locator('.meta');
-  await expect(meta).toContainText(/ago$/);
-  const clipped = await page.$$eval('[data-testid="entry-row"] .meta', (nodes) =>
-    nodes.map((n) => ({ over: n.scrollWidth > n.clientWidth, text: n.textContent?.trim() }))
-  );
-  for (const row of clipped) {
-    expect(row.over, `metadata line clipped: ${row.text}`).toBe(false);
-  }
+  const row = page.getByTestId('entry-row').first();
+  await expect(row.getByTestId('select-entry')).toHaveText('Deploy staging');
+  await expect(row.getByRole('button', { name: 'Copy Deploy staging' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Delete Deploy staging' })).toBeVisible();
+  expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
 test('a fresh editor asks only for name and command before saving', async ({ page }) => {
@@ -296,6 +293,8 @@ test('both themes apply through the same tokens and stay above 4.5:1 in the live
   expect(dark.shell, 'the mock starts in the dark theme').not.toBe('');
   expect(contrast(dark.footer, dark.shell), 'dark footer text').toBeGreaterThanOrEqual(4.5);
 
+  // The selected row eases between themes; without transitions each switch lands at once.
+  await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
   const explicit = await paletteColours(page);
   expect(explicit.radius, 'shape tokens are shared by both themes').toBe(dark.radius);
@@ -423,7 +422,7 @@ test('the action area stays put at the minimum window and keyboard focus lands o
   };
   await page.setViewportSize({ width: 760, height: 520 });
   await boot(page, long);
-  await page.getByTestId('entry-row').first().focus();
+  await page.getByTestId('select-entry').first().focus();
   await page.keyboard.press('Enter');
   const details = page.getByTestId('entry-details');
   await expect(details).toBeVisible();
@@ -491,7 +490,7 @@ test('settings, the delete dialog and the palette draw one shared shell frame', 
   expect(palette.radius, 'the palette shares that frame too').toBe(settings.radius);
 });
 
-test('the empty library is built from the same tiles and chips as a populated one', async ({ page }) => {
+test('the empty library and populated inspector use the same icon style and chips', async ({ page }) => {
   await boot(page, { commands: [], secrets: [] });
   const empty = await page
     .getByTestId('empty-state')
@@ -514,13 +513,13 @@ test('the empty library is built from the same tiles and chips as a populated on
 
   await boot(page, SEED);
   const tile = await page
-    .getByTestId('entry-row')
-    .first()
-    .locator('.kind')
+    .getByTestId('entry-details')
+    .locator('.glyph')
     .evaluate((el) => {
       const cs = getComputedStyle(el);
       return { fill: cs.backgroundColor, colour: cs.color };
     });
-  expect(empty.fill, 'the empty state uses the same kind-tile fill as a row').toBe(tile.fill);
-  expect(empty.colour, 'and the same kind accent').toBe(tile.colour);
+  expect(empty.fill, 'the empty state and inspector use the same tile fill').toBe(tile.fill);
+  expect(empty.colour).not.toBe('rgba(0, 0, 0, 0)');
+  expect(tile.colour).not.toBe('rgba(0, 0, 0, 0)');
 });

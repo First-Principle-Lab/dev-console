@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TOKENS_FILE = join(ROOT, 'src', 'styles', 'tokens.css');
 const css = readFileSync(TOKENS_FILE, 'utf8');
+const omarchyCss = readFileSync(join(ROOT, 'src', 'styles', 'omarchy.css'), 'utf8');
 
 const BLOCKS = {
   dark: [/:root,\s*:root\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/, 'dark'],
@@ -64,6 +65,9 @@ for (const [key, [pattern, label]] of Object.entries(BLOCKS)) {
   const match = css.match(pattern);
   if (!match) throw new Error(`tokens.css: no block matching the ${label} palette`);
   palettes[key] = { ...base, ...parseBlock(match[1]) };
+}
+for (const match of omarchyCss.matchAll(/:root\[data-theme='(omarchy-[\w-]+)'\]\s*\{([\s\S]*?)\n\}/g)) {
+  palettes[match[1]] = { ...base, ...parseBlock(match[2]) };
 }
 
 /** Resolve var() references (with fallbacks) down to a plain CSS value. */
@@ -332,7 +336,7 @@ const failures = [];
 const checkedTokens = new Set();
 const lines = [];
 
-for (const theme of ['dark', 'light']) {
+for (const theme of ['dark', 'light', ...Object.keys(palettes).filter((key) => key.startsWith('omarchy-'))]) {
   const palette = palettes[theme];
   lines.push(`\n${theme} palette (src/styles/tokens.css)`, '');
   for (const section of CHECKS) {
@@ -458,4 +462,4 @@ if (failures.length > 0) {
   console.error(`\n${failures.length} failure(s)`);
   process.exit(1);
 }
-console.log(`\nall checks passed: every pair clears its threshold in the dark and light palettes`);
+console.log(`\nall checks passed: every pair clears its threshold in ${Object.keys(palettes).length - 1} palettes`);

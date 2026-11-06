@@ -1,13 +1,13 @@
-import type { Settings } from './models';
+import type { Settings, Theme } from './models';
 import { api } from './api';
 
 class UiState {
-  theme = $state<'system' | 'light' | 'dark'>('system');
+  theme = $state<Theme>('system');
 }
 
 export const ui = new UiState();
 
-export function applyTheme(theme: 'system' | 'light' | 'dark'): void {
+export function applyTheme(theme: Theme): void {
   ui.theme = theme;
   if (typeof document === 'undefined') return;
   if (theme === 'system') document.documentElement.removeAttribute('data-theme');

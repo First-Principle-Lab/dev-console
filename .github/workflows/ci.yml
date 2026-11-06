@@ -169,7 +169,7 @@ jobs:
           cp "$appimage.sig" release/Dev-Console.AppImage.sig
           jq -n \
             --arg version "$VERSION" \
-            --arg url 'https://github.com/parththirwani/dev-console/releases/latest/download/Dev-Console.AppImage' \
+            --arg url 'https://github.com/First-Principle-Lab/dev-console/releases/latest/download/Dev-Console.AppImage' \
             --rawfile signature release/Dev-Console.AppImage.sig \
             '{version: $version, platforms: {"linux-x86_64": {url: $url, signature: $signature}}}' \
             > release/latest.json

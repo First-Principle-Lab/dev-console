@@ -129,6 +129,62 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> Value {
     })
 }
 
+#[test]
+fn approved_command_returns_output_through_native_ipc() {
+    let h = Harness::new("inline-command-output");
+    let saved = h
+        .save(
+            &h.library,
+            draft(
+                Kind::Command,
+                "List",
+                "printf files; printf warning >&2",
+                "",
+            ),
+        )
+        .expect("save command");
+    let result = invoke(
+        &h.library,
+        "run_command",
+        json!({ "request": {
+        "id": saved["id"], "expectedRevision": saved["revision"], "approved": true
+    } }),
+    )
+    .expect("run command");
+    assert_eq!(result["mode"], json!("inline"));
+    assert_eq!(result["stdout"], json!("files"));
+    assert_eq!(result["stderr"], json!("warning"));
+    assert_eq!(result["exitCode"], json!(0));
+}
+
+#[test]
+fn pin_changes_only_the_requested_command_and_rejects_stale_or_finder_writes() {
+    let h = Harness::new("pin-command");
+    let saved = h
+        .save(
+            &h.library,
+            draft(Kind::Command, "keep-command", "printf intact", ""),
+        )
+        .expect("save command");
+    let request = json!({ "request": {
+        "kind": "command", "id": saved["id"], "expectedRevision": saved["revision"], "pinned": true
+    } });
+    let denied = invoke(&h.finder, "set_pinned", request.clone()).expect_err("finder cannot pin");
+    assert!(denied.contains("not allowed"), "{denied}");
+    let changed = invoke(&h.library, "set_pinned", request.clone()).expect("pin command");
+    assert_eq!(changed["revision"], json!(2));
+    let details = invoke(
+        &h.library,
+        "get_entry",
+        json!({ "request": { "kind": "command", "id": saved["id"] } }),
+    )
+    .expect("get command");
+    assert_eq!(details["meta"]["pinned"], json!(true));
+    assert_eq!(details["command"], json!("printf intact"));
+    assert!(invoke(&h.library, "set_pinned", request).is_err());
+    h.drop_profile();
+}
+
 impl Harness {
     fn new(tag: &str) -> Self {
         let lock = profile_lock();
@@ -157,8 +213,10 @@ impl Harness {
                 dev_console_lib::ipc::get_entry,
                 dev_console_lib::ipc::reveal_secret,
                 dev_console_lib::ipc::save_entry,
+                dev_console_lib::ipc::set_pinned,
                 dev_console_lib::ipc::delete_entry,
                 dev_console_lib::ipc::copy_entry,
+                dev_console_lib::ipc::copy_command_output,
                 dev_console_lib::ipc::run_command,
                 dev_console_lib::ipc::lock_vault,
                 dev_console_lib::ipc::unlock_vault,
