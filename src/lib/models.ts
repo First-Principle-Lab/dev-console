@@ -48,6 +48,8 @@ export interface EntryMeta {
   updatedAt: string;
   usageCount: number;
   lastUsedAt: string | null;
+  /** Saved working directory. Empty for every secret, so it can never hint at vault contents. */
+  workingDirectory: string;
 }
 
 /** Exactly what `search_entries` returns (models.rs SearchResult): no revision or updatedAt. */
@@ -62,6 +64,17 @@ export interface SearchResult {
   pinned: boolean;
   usageCount: number;
   lastUsedAt: string | null;
+  /** Ranks above the rest of its tier: this entry belongs to `finderContext`. */
+  inContext: boolean;
+}
+
+/**
+ * The project the terminal the finder was opened from belongs to. Worked out on every open,
+ * held in memory for that open only, and never written down.
+ */
+export interface FinderContext {
+  root: string;
+  name: string;
 }
 
 export interface SearchResponse {
@@ -126,6 +139,8 @@ export interface AppStateInfo {
   authenticatedUnlockAvailable: boolean;
   clipboardExclusion: ClipboardExclusion;
   backupDir: string;
+  /** What the finder is currently ranking by, if anything. */
+  finderContext: FinderContext | null;
 }
 
 export interface ArchiveSummary {
@@ -152,6 +167,8 @@ export interface Settings {
   autostart: boolean;
   clipboardExpirySeconds: number;
   terminal: string[];
+  /** Rank the project the terminal was in first. Off, nothing is detected at all. */
+  projectContextEnabled: boolean;
 }
 
 export interface TerminalOption {

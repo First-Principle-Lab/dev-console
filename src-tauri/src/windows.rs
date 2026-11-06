@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
+use crate::context::FinderContext;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -85,6 +86,9 @@ pub fn show_library_with<R: Runtime>(
 
 pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let window = ensure(app, FINDER, "index.html#view=finder")?;
+    // Before presenting: asking which window is focused is only meaningful while the terminal
+    // still is, and `present` hands focus to the palette.
+    detect_context(app);
     present(&window)?;
     // Tiling compositors ignore the creation size: Hyprland mapped the finder at 950x1008.
     // Asking again once the window is mapped is honoured for floating windows.
@@ -94,6 +98,43 @@ pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
         .emit("finder-shown", ())
         .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
+}
+
+/// Works out which project the terminal belongs to, on a thread of its own.
+///
+/// The palette is presented without waiting for any of it: the compositor gets 200 ms, and if that
+/// runs out the finder simply opens with no context, which is what every desktop without Hyprland
+/// gets permanently. The result arrives as a `finder-context` event; the chip appears when it does.
+fn detect_context<R: Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
+    };
+    let enabled = state.settings.get().project_context_enabled;
+    // Whatever the last open decided is wrong for this one, so it goes before anything else: the
+    // palette must never be shown ranked against a project it did not come from. The token is what
+    // makes a reply that arrives after this open is history get dropped instead of applied.
+    let token = state.begin_finder_detection();
+    let _ = app.emit("finder-context", Option::<FinderContext>::None);
+    if !enabled {
+        // Off means off: no compositor query and no `/proc` walk at all.
+        return;
+    }
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("finder-context".into())
+        .spawn(move || {
+            let context = crate::context::detect();
+            let applied = handle
+                .try_state::<Arc<AppState>>()
+                .is_some_and(|state| state.finish_finder_detection(token, context.clone()));
+            if applied {
+                let _ = handle.emit("finder-context", context);
+            }
+        });
+    if spawned.is_err() {
+        // A machine that cannot spare one more thread still gets a finder, just an unordered one.
+        eprintln!("dev-console: project detection could not start");
+    }
 }
 
 pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {

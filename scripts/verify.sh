@@ -64,6 +64,19 @@ else
   fi
 fi
 
+echo "== project detection against a live Hyprland focus event =="
+if [[ "${SKIP_PROJECT_CONTEXT_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_PROJECT_CONTEXT_TEST=1)"
+else
+  code=0
+  bash scripts/test-project-context.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: no Hyprland session in this environment, so nothing was focused to detect"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== packaging: staged install, desktop file, polkit policy, exact uninstall =="
 if [[ "${SKIP_PACKAGING_TEST:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_PACKAGING_TEST=1)"

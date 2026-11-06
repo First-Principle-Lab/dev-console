@@ -1,7 +1,9 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::backup::{Archive, ArchiveSeal, BackupManager, RecoveryKey};
 use crate::clipboard::Clipboard;
+use crate::context::FinderContext;
 use crate::error::{AppError, AppResult};
 use crate::models::{CopyResult, EntryMeta, EntryRecord, Kind};
 use crate::recovery::{ApplyCrash, PendingReplacement, RecoveryReport, ReplacementJournal};
@@ -21,6 +23,14 @@ pub struct AppState {
     /// Durable state for a library replacement in flight; see [`crate::recovery`].
     pub journal: ReplacementJournal,
     pub quitting: std::sync::atomic::AtomicBool,
+    /// The project detected for the terminal the finder was opened from, replaced on every open
+    /// and cleared when the user dismisses it. In memory only, for exactly as long as the finder
+    /// is open: see [`crate::context`].
+    pub finder_context: Mutex<Option<FinderContext>>,
+    /// Bumped whenever a detection becomes irrelevant - a new finder open, or a `Ctrl+P`.
+    /// Detection runs beside the palette, so its answer can arrive after the thing it was
+    /// answering for is gone; a result is only applied while its token is still current.
+    pub finder_detection: std::sync::atomic::AtomicU64,
 }
 
 /// Clipboard owner id for a recovery-credential copy. It identifies *which* copy the app owns
@@ -55,6 +65,8 @@ impl AppState {
             recovery: RecoveryKey::load_or_create(crate::paths::recovery_key_path()?)?,
             journal: ReplacementJournal::new(crate::paths::interrupted_apply_dir()?)?,
             quitting: std::sync::atomic::AtomicBool::new(false),
+            finder_context: Mutex::new(None),
+            finder_detection: std::sync::atomic::AtomicU64::new(0),
         };
         // A replacement that was interrupted between its two writes is settled here, inside
         // bootstrap. Nothing is exposed until this returns: the caller cannot manage the state,
@@ -159,6 +171,57 @@ impl AppState {
         let expiry = self.settings.get().clipboard_expiry_seconds;
         self.clipboard
             .copy(Kind::Secret, RECOVERY_COPY_ID, secret, expiry)
+    }
+
+    /// The project the finder was opened from, if detection found one and the user has not
+    /// dismissed it. Cloned out, so the lock is never held across a search.
+    pub fn finder_context(&self) -> Option<FinderContext> {
+        self.finder_context
+            .lock()
+            .expect("finder context lock poisoned")
+            .clone()
+    }
+
+    /// Replaces the detected project. Called on every finder open - with `None` when nothing was
+    /// found - so a project from the previous open can never be ranked against.
+    pub fn set_finder_context(&self, context: Option<FinderContext>) {
+        *self
+            .finder_context
+            .lock()
+            .expect("finder context lock poisoned") = context;
+    }
+
+    /// Starts a detection round for the finder that is about to open: whatever the last one
+    /// decided is dropped, and the returned token is the only one allowed to replace it.
+    pub fn begin_finder_detection(&self) -> u64 {
+        let token = self
+            .finder_detection
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        self.set_finder_context(None);
+        token
+    }
+
+    /// Applies a detection result, unless a newer finder open or a `Ctrl+P` has made it history.
+    /// True when the value given is now the current one, which is also whether the palette should
+    /// hear about it.
+    pub fn finish_finder_detection(&self, token: u64, context: Option<FinderContext>) -> bool {
+        if self.current_finder_token() != token {
+            return false;
+        }
+        self.set_finder_context(context);
+        true
+    }
+
+    /// Invalidates a detection in flight and forgets the project: what `Ctrl+P` does. The next
+    /// open looks again.
+    pub fn cancel_finder_detection(&self) {
+        self.begin_finder_detection();
+    }
+
+    fn current_finder_token(&self) -> u64 {
+        self.finder_detection
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Applies an already-validated archive to both stores.
@@ -384,6 +447,8 @@ mod tests {
                     .expect("recovery"),
                 journal: ReplacementJournal::new(base.join("pending-replace")).expect("journal"),
                 quitting: std::sync::atomic::AtomicBool::new(false),
+                finder_context: Mutex::new(None),
+                finder_detection: std::sync::atomic::AtomicU64::new(0),
             }
         }
 
@@ -811,6 +876,64 @@ mod tests {
             t.state.repo.all_command_records().expect("cmds")[0].0.name,
             "cmd-prev"
         );
+        t.erase();
+    }
+
+    #[test]
+    fn a_finder_open_drops_the_previous_projects_answer() {
+        let t = TempState::new("finder-context");
+        let context = FinderContext {
+            root: std::path::PathBuf::from("/home/dev/projects/api"),
+            name: "api".into(),
+        };
+        let open = t.state.begin_finder_detection();
+        assert!(
+            t.state.finder_context().is_none(),
+            "an open starts with no project"
+        );
+        assert!(t.state.finish_finder_detection(open, Some(context.clone())));
+        assert_eq!(t.state.finder_context(), Some(context));
+        // Re-opening the palette is a fresh question, not a continuation of the last one.
+        assert!(t.state.begin_finder_detection() > open);
+        assert!(t.state.finder_context().is_none());
+        t.erase();
+    }
+
+    #[test]
+    fn an_answer_for_a_finder_open_that_has_already_gone_is_dropped() {
+        let t = TempState::new("finder-context-stale");
+        let api = FinderContext {
+            root: std::path::PathBuf::from("/home/dev/projects/api"),
+            name: "api".into(),
+        };
+        let stale = t.state.begin_finder_detection();
+        // The palette was opened again while that detection was still asking the compositor.
+        let current = t.state.begin_finder_detection();
+        assert!(
+            !t.state.finish_finder_detection(stale, Some(api.clone())),
+            "the stale answer must not be applied"
+        );
+        assert!(
+            t.state.finder_context().is_none(),
+            "and must not show a chip"
+        );
+        assert!(t.state.finish_finder_detection(current, Some(api.clone())));
+        assert_eq!(t.state.finder_context(), Some(api));
+
+        // `Ctrl+P` during a detection must not let that detection put the chip back.
+        let in_flight = t.state.begin_finder_detection();
+        t.state.cancel_finder_detection();
+        assert!(
+            !t.state.finish_finder_detection(
+                in_flight,
+                Some(FinderContext {
+                    root: std::path::PathBuf::from("/home/dev/projects/api"),
+                    name: "api".into(),
+                })
+            ),
+            "a dismissed palette stays dismissed"
+        );
+        assert!(t.state.finder_context().is_none());
         t.erase();
     }
 }

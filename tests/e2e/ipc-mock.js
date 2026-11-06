@@ -19,11 +19,15 @@
     vaultUnlocked: seed.vaultUnlocked !== false,
     manualLock: !!seed.manualLock,
     generation: 1,
+    // The project the palette was "opened from". The real backend works this out from the focused
+    // window; a spec supplies it through the seed instead.
+    context: seed.context ?? null,
     settings: seed.settings || {
       theme: 'dark',
       autostart: false,
       clipboardExpirySeconds: 30,
-      terminal: ['x-terminal-emulator', '-e']
+      terminal: ['x-terminal-emulator', '-e'],
+      projectContextEnabled: true
     },
     terminals: seed.terminals || [
       { id: 'ghostty', name: 'Ghostty', command: ['/usr/bin/ghostty', '-e'] },
@@ -58,8 +62,36 @@
       pinned: !!record.pinned,
       updatedAt: record.updatedAt || now,
       usageCount: record.usageCount || 0,
-      lastUsedAt: record.lastUsedAt || null
+      lastUsedAt: record.lastUsedAt || null,
+      // Secrets never carry one, exactly as the backend has them always empty.
+      workingDirectory: kind === 'command' ? record.workingDirectory || '' : ''
     };
+  }
+
+  /** `$HOME` as the backend would expand `~/...` against it. */
+  const home = seed.home || '/home/mock';
+
+  function expandWorkingDirectory(raw) {
+    const value = (raw || '').trim();
+    if (!value || value === '~') return home;
+    if (value.startsWith('~/')) return `${home}/${value.slice(2)}`;
+    return value;
+  }
+
+  /**
+   * Same two rules the Rust ranks by: the saved working directory is the project root or below it,
+   * or the entry carries a matching `project:<name>` tag. Nothing is in context without
+   * a context, so a spec that seeds none sees the old ordering.
+   */
+  function inContext(entry) {
+    const context = state.context;
+    if (!context) return false;
+    const tag = `project:${context.name}`.toLowerCase();
+    if ((entry.tags || []).some((tagged) => String(tagged).toLowerCase() === tag)) return true;
+    const raw = (entry.workingDirectory || '').trim();
+    if (!raw) return false;
+    const directory = expandWorkingDirectory(raw);
+    return directory === context.root || directory.startsWith(`${context.root}/`);
   }
 
   function allMeta() {
@@ -95,30 +127,39 @@
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const limit = 50;
     let scored = allMeta().map((entry) => {
-      if (terms.length === 0) return { entry, best: 0 };
+      const match = { entry, inContext: inContext(entry) };
+      if (terms.length === 0) return { ...match, best: 0 };
       let best = 0;
       for (const term of terms) {
         const t = tier(entry, term);
         if (t < 0) return null;
         best = Math.max(best, t);
       }
-      return { entry, best };
+      return { ...match, best };
     }).filter(Boolean);
+    // `a` before `b` needs a negative number, so "in context first" is `!a - !b`.
+    const contextFirst = (a, b) => Number(!a.inContext) - Number(!b.inContext);
     scored.sort((a, b) => {
       if (terms.length === 0) {
         return (
           (!b.entry.pinned) - (!a.entry.pinned) ||
+          contextFirst(a, b) ||
           (b.entry.lastUsedAt || '').localeCompare(a.entry.lastUsedAt || '') ||
           b.entry.usageCount - a.entry.usageCount ||
           a.entry.name.localeCompare(b.entry.name)
         );
       }
-      return a.best - b.best || b.entry.usageCount - a.entry.usageCount || a.entry.name.localeCompare(b.entry.name);
+      return (
+        a.best - b.best ||
+        contextFirst(a, b) ||
+        b.entry.usageCount - a.entry.usageCount ||
+        a.entry.name.localeCompare(b.entry.name)
+      );
     });
     const trimmed = query.trim();
     // Only the fields models.rs SearchResult serializes: a field the finder reads that the real
     // backend never sends must fail here too, not just in the shipped app.
-    return scored.slice(0, limit).map(({ entry }) => ({
+    return scored.slice(0, limit).map(({ entry, inContext: isHere }) => ({
       id: entry.id,
       kind: entry.kind,
       name: entry.name,
@@ -128,6 +169,7 @@
       pinned: entry.pinned,
       usageCount: entry.usageCount,
       lastUsedAt: entry.lastUsedAt,
+      inContext: isHere,
       completion: trimmed && entry.name.toLowerCase().startsWith(trimmed.toLowerCase()) && entry.name !== trimmed ? entry.name : undefined
     }));
   }
@@ -177,8 +219,13 @@
         version: 'mock',
         authenticatedUnlockAvailable: false,
         clipboardExclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' },
-        backupDir: '/home/mock/.local/share/dev-console/backups'
+        backupDir: '/home/mock/.local/share/dev-console/backups',
+        finderContext: state.context
       };
+    }
+    if (command === 'clear_finder_context') {
+      state.context = null;
+      return null;
     }
     if (command === 'search_entries') {
       if (state.searchDelayMs && (!state.delayedRequestId || state.delayedRequestId === request.requestId)) {

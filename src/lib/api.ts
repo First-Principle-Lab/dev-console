@@ -62,6 +62,8 @@ export const api = {
   appState: (): Promise<AppStateInfo> => call('app_state'),
   search: (query: string, requestId: number): Promise<SearchResponse> =>
     call('search_entries', { request: { query, requestId } }),
+  /** Forgets the detected project for as long as this finder stays open. */
+  clearFinderContext: (): Promise<void> => call('clear_finder_context'),
   list: (req: ListRequest): Promise<EntryMeta[]> => call('list_entries', { request: req }),
   types: (kind: Kind): Promise<string[]> => call('types_for', { request: { kind } }),
   details: (kind: Kind, id: string): Promise<EntryDetails> =>
