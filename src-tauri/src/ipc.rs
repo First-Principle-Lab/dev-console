@@ -50,6 +50,9 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
         authenticated_unlock_available: crate::auth::mechanism_available(),
         clipboard_exclusion: crate::clipboard::exclusion_status(),
         backup_dir: state(&app).backups.dir().to_string_lossy().to_string(),
+        // Also sent to the library, which ignores it: it is the answer to "what is this palette
+        // ranking by?", and a window created after the detection thread answered still needs it.
+        finder_context: state(&app).active_finder_context(),
     }
 }
 
@@ -57,16 +60,27 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
 pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
     let state = state(&app);
     let entries = state.searchable_metadata(None);
-    let results = search::rank(
+    let context = state.active_finder_context();
+    let results = search::rank_in_context(
         &entries,
         &request.query,
         request.limit.unwrap_or(search::DEFAULT_LIMIT),
+        context.as_ref(),
     );
     SearchResponse {
         request_id: request.request_id,
         vault_generation: state.vault.generation(),
         results,
     }
+}
+
+/// Drops the detected project for as long as the palette stays open (`Ctrl+P`, or clicking the
+/// chip). A detection still in flight is invalidated too, so the chip cannot reappear a moment
+/// after the user got rid of it; the next open looks again.
+#[tauri::command]
+pub fn clear_finder_context<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
+    state(&app).cancel_finder_detection();
+    Ok(())
 }
 
 #[tauri::command]

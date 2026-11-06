@@ -44,8 +44,13 @@ pub fn needs_terminal(source: &str) -> bool {
     })
 }
 
-fn working_directory(record: &EntryRecord) -> AppResult<Option<PathBuf>> {
-    let raw = record.working_directory.as_str();
+/// Expands a stored working directory the way execution reads it: empty or `~` means home, `~/x`
+/// is joined onto it, and anything else is taken as given. Fails only when an entry needs `$HOME`
+/// and the session has none.
+///
+/// Search calls this too, so that a `~/src/api` working directory cannot come to mean one thing
+/// when it is ranked and another when it is finally run.
+pub fn expand_working_directory(raw: &str) -> AppResult<Option<PathBuf>> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let dir = if raw.trim().is_empty() || raw == "~" {
         home
@@ -59,6 +64,12 @@ fn working_directory(record: &EntryRecord) -> AppResult<Option<PathBuf>> {
             "HOME is unavailable for this working directory".into(),
         ));
     }
+    Ok(dir)
+}
+
+fn working_directory(record: &EntryRecord) -> AppResult<Option<PathBuf>> {
+    let raw = record.working_directory.as_str();
+    let dir = expand_working_directory(raw)?;
     if let Some(path) = &dir {
         if !path.is_dir() {
             return Err(AppError::Execution(format!(

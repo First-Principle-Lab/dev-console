@@ -9,8 +9,8 @@
 //! request/acknowledge pair the CLI needs with no dependency on a bus daemon, no well-known
 //! name to collide with, a hard timeout, and access control that is simply the filesystem —
 //! the socket lives in a 0700 directory with 0600 permissions, so only this user can connect.
-//! Nothing but commands and non-sensitive vault state crosses it; secret values, secret
-//! metadata and the vault key never do.
+//! Nothing but commands, non-sensitive vault state and the finder's detected project folder
+//! crosses it; secret values, secret metadata and the vault key never do.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -263,6 +263,19 @@ pub fn dispatch(
             ok: windows::toggle_finder(app).is_ok(),
             code: EXIT_OK,
             message: "finder toggled".into(),
+            vault: None,
+        },
+        // For the live-session harness (`scripts/test-project-context.sh`): what the palette is
+        // ranking by right now. A folder name and path the user is sitting in, never entry data.
+        "finder.context" => Reply {
+            ok: true,
+            code: EXIT_OK,
+            message: serde_json::json!({
+                "enabled": state.settings.get().project_context_enabled,
+                "visible": windows::finder_visible(app),
+                "context": state.active_finder_context(),
+            })
+            .to_string(),
             vault: None,
         },
         "window.library" => Reply {

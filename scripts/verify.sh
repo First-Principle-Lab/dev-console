@@ -64,6 +64,21 @@ else
   fi
 fi
 
+echo "== project detection against a live Hyprland focus event =="
+if [[ "${SKIP_PROJECT_CONTEXT_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_PROJECT_CONTEXT_TEST=1)"
+else
+  code=0
+  bash scripts/test-project-context.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    # The harness printed why (no Hyprland, wrong window focused, or - always, from here - a shell
+    # of verify.sh's own between the terminal and the probe). Run it directly at a prompt to prove it.
+    echo "UNVERIFIED: live project detection (see the reason above; run scripts/test-project-context.sh by hand)"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== packaging: staged install, desktop file, polkit policy, exact uninstall =="
 if [[ "${SKIP_PACKAGING_TEST:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_PACKAGING_TEST=1)"

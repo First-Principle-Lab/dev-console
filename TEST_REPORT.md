@@ -162,3 +162,28 @@ capture at `artifacts/ui-review/native/native-library__xvfb.png`.
 Still honestly open for these fixes (environment-bound, not un-executed work): the interrupted-apply
 rehearsal on the target desktop and the real-keyring recovery reveal/copy session; the clean-checkout
 round and the rc3 artifact round trip were both executed on 2026-10-15/16.
+
+## Finder project context (this session)
+
+Two environments: the original round ran in an Ubuntu container with **no compositor**; the review
+fixes were checked again on the owner's Omarchy desktop, a **live Hyprland session** (Linux 7.2,
+`CONFIG_PROC_CHILDREN` present).
+
+| Check | Result |
+| --- | --- |
+| Process-tree walk (`context.rs`, 16 tests) | **PASS** - terminal to its shell over a synthetic `/proc`: direct child, shell two forks down, youngest of two tabs wins without a title, the shell the window title names beats a younger one (absolute or `~` path, `api` not matched inside `api-v2`), bare `~` only as the whole title, depth limit, non-shell children (`vim`, `tmux`) ignored, login shell `-zsh`, git-root walk-up stops at `$HOME`, manifest fallback, plain folder yields nothing |
+| `activewindow` reply parsing | **PASS** - pid, class and title from a captured Hyprland JSON; `None` for malformed JSON, a missing pid, pid 0 and a string pid. A reply cut off by the socket timeout is discarded, not parsed |
+| Ranking (`search.rs`, 7 tests) | **PASS** - pinned outranks context; context outranks recency on an empty query; a match tier outranks context; membership by working directory (`~/...` expanded as `execution` expands it) and `project:<name>` tag, commands only; `None` context is byte-identical to before; order independent of input order |
+| Detection tokens (`state.rs`, 2 tests) | **PASS** - a re-open or `Ctrl+P` drops a detection still in flight |
+| Socket protocol, live Hyprland | **PASS** - `j/activewindow` with a write shutdown answers in 0.04 ms median (20 runs, max 0.26 ms). This is the read the palette now waits on |
+| In-process detection, live Hyprland | **PASS** - `detect()` resolved the focused window to its repository in **2.5 ms**. The focused window was T3 Code, not a terminal: it counts because its integrated shells sit under it (documented) |
+| Browsers, live Hyprland | **PASS** - Brave and Zen have no shell within three levels, so no context |
+| Live palette open (`scripts/test-project-context.sh`) | **UNVERIFIED** - the in-process half passed; the live half needs this branch's build running, and the installed Dev Console predates `finder.context`, so the harness exited 77 saying so. Not run from a terminal window either |
+| Ranking cost, 5,000 entries | 4.98 ms per search with and without a context (container, `--ignored` benchmark) |
+| Frontend behaviour | **PASS** - Playwright: chip and accessible row marker, click and `Ctrl+P` restore the old order, no context means no chip and the old order, typing keeps the marker, switching the setting off drops chip and reordering even for an already detected project, a project-tagged secret is not marked, a pinned command still leads. The double now sorts pinned first like `search::rank` (it sorted them last) |
+| Screenshots | Reviewed in dark, light, Tokyo Night and Catppuccin Latte at 680x420 |
+| Gates | `cargo fmt --check` ok, `cargo clippy --all-targets -- -D warnings` clean, `cargo test --locked` 88 lib tests (+3 ignored), `svelte-check` 0/0, eslint clean, vitest 24/24, Playwright 122/122 |
+
+What stays open for the target desktop: one run of `bash scripts/test-project-context.sh` from an
+idle prompt in a Ghostty or Kitty window inside the repo, with this branch's build running, which
+drives the real Super+F path and reads back what the palette ranked by.

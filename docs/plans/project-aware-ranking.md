@@ -107,3 +107,63 @@ Everything reads local `/proc` and the compositor socket only. Nothing is persis
       frame or two.
 - [ ] Turning the setting off removes the chip and the reordering, and `/proc` is not read.
 - [ ] Screenshots reviewed.
+
+## Status as built
+
+Deliberate deviations from the sketch above:
+
+* **Focus is read before the palette is shown, the rest beside it.** Asking the compositor on the
+  detection thread raced `present()`, which moves focus to the palette, so the answer could name
+  the palette itself. `windows::detect_context` now reads `j/activewindow` over the socket in line
+  (measured at 0.04 ms on Hyprland, bounded at 50 ms) and leaves only the `/proc` walk and the
+  repository walk-up to the thread.
+* **Socket first, `hyprctl` second.** The plan had `hyprctl activewindow -j` as the primary read.
+  It is the other way round: the socket needs no process spawn, which is what makes the in-line
+  read above affordable. `hyprctl` (200 ms bound) is only the fallback for a session whose socket
+  is missing, and it runs on the thread - after the palette is shown, so it is best effort.
+* **The window title picks the shell, then age.** The plan said "prefer the youngest shell". A
+  terminal with several tabs, or a single-instance Ghostty with several windows, has many shells
+  under one pid and the youngest is often not the one being looked at. The shell whose directory
+  the window title shows wins (longest match first); youngest is only the fallback.
+* **Commands only.** A secret tagged `project:<name>` is not moved up or marked.
+* **The escape hatch is a key, not just a setting.** `Ctrl+P` (or clicking the chip) ignores the
+  context for the current open. A trip to Settings to unblock one palette is too much friction.
+* **Lifetime.** The detected project is in memory only and is replaced on the next open (or by
+  `Ctrl+P`); it is not cleared on hide, which nothing can observe since only the finder ranks by it.
+  The chip and the ranking both read it through `AppState::active_finder_context`, so switching the
+  setting off removes both at once, even for a project detected just before.
+
+Known limits, documented in `context.rs` and the README rather than worked around: any focused app
+with a shell up to three levels below it counts (an editor's integrated terminal does, on purpose);
+tmux started from a shell yields that shell's directory, not the pane's; with a title that names no
+folder, the youngest shell is a guess.
+
+Verified - see the "Finder project context" section of `TEST_REPORT.md` for the numbers:
+
+- [x] All local checks in `AGENTS.md` pass (fmt, clippy `-D warnings`, `cargo test`, svelte-check,
+      eslint, vitest, Playwright).
+- [x] The detection chain: process-tree walk over a synthetic `/proc` (including title-based
+      shell choice), project resolution (`.git` walk-up, `$HOME` stop line, manifest fallback) and
+      `activewindow` parsing - 16 unit tests in `context.rs`; 7 ranking tests in `search.rs`; 2
+      token tests in `state.rs`.
+- [x] Ranking rules, including that a match tier still outranks context and that "no context" leaves
+      the previous order untouched.
+- [x] From a browser window there is no context: checked on a live Hyprland session (Brave and Zen
+      have no shell under them), and in Playwright for the no-context palette.
+- [x] Turning the setting off removes the chip and the reordering (Playwright, including a project
+      detected before the switch). That `/proc` is then never read rests on the early return in
+      `windows::detect_context`, which is code review, not a test.
+- [x] In-process detection on a live Hyprland session, through the same two calls `show_finder`
+      makes: 2.5 ms end to end.
+- [x] Screenshots reviewed in four themes (dark, light, Tokyo Night, Catppuccin Latte):
+      `artifacts/ui-review/raycast-after/18-finder-project-context*__680.png`.
+
+Still needs the real desktop, and reported as UNVERIFIED rather than assumed:
+
+- [ ] `bash scripts/test-project-context.sh`, run by hand at an idle prompt in a Ghostty or Kitty
+      window inside this repo, **with this branch's build of Dev Console running**: it opens the
+      real palette over the control socket (`window.finder`, the Super+F path), reads
+      `finder.context` back and checks it names this repo. It exits 77 with the reason when the
+      session, the focused window, the shells in between or the running app cannot make that
+      meaningful - which is always the case from `verify.sh`, so the gate can never fail on focus.
+- [ ] Super+F by hand with two tabs in different repos, to see the title rule pick the right one.

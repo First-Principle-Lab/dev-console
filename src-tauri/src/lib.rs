@@ -3,6 +3,7 @@ pub mod autostart;
 pub mod backup;
 pub mod cli;
 pub mod clipboard;
+pub mod context;
 pub mod control;
 pub mod desktop_icons;
 pub mod error;
@@ -115,6 +116,7 @@ fn build(argv: Vec<String>) {
         .invoke_handler(tauri::generate_handler![
             ipc::app_state,
             ipc::search_entries,
+            ipc::clear_finder_context,
             ipc::list_entries,
             ipc::types_for,
             ipc::get_entry,
