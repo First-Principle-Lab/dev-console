@@ -71,7 +71,9 @@ else
   code=0
   bash scripts/test-project-context.sh || code=$?
   if [[ "$code" == "77" ]]; then
-    echo "UNVERIFIED: no Hyprland session in this environment, so nothing was focused to detect"
+    # The harness printed why (no Hyprland, wrong window focused, or - always, from here - a shell
+    # of verify.sh's own between the terminal and the probe). Run it directly at a prompt to prove it.
+    echo "UNVERIFIED: live project detection (see the reason above; run scripts/test-project-context.sh by hand)"
   elif [[ "$code" != "0" ]]; then
     exit "$code"
   fi

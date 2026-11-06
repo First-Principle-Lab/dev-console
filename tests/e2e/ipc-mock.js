@@ -80,12 +80,17 @@
 
   /**
    * Same two rules the Rust ranks by: the saved working directory is the project root or below it,
-   * or the entry carries a matching `project:<name>` tag. Nothing is in context without
+   * or the entry carries a matching `project:<name>` tag - for commands only. Nothing is in context without
    * a context, so a spec that seeds none sees the old ordering.
    */
+  /** What the backend's `active_finder_context` answers: nothing while the setting is off. */
+  function activeContext() {
+    return state.settings.projectContextEnabled === false ? null : state.context;
+  }
+
   function inContext(entry) {
-    const context = state.context;
-    if (!context) return false;
+    const context = activeContext();
+    if (!context || entry.kind !== 'command') return false;
     const tag = `project:${context.name}`.toLowerCase();
     if ((entry.tags || []).some((tagged) => String(tagged).toLowerCase() === tag)) return true;
     const raw = (entry.workingDirectory || '').trim();
@@ -142,7 +147,7 @@
     scored.sort((a, b) => {
       if (terms.length === 0) {
         return (
-          (!b.entry.pinned) - (!a.entry.pinned) ||
+          Number(!a.entry.pinned) - Number(!b.entry.pinned) ||
           contextFirst(a, b) ||
           (b.entry.lastUsedAt || '').localeCompare(a.entry.lastUsedAt || '') ||
           b.entry.usageCount - a.entry.usageCount ||
@@ -220,7 +225,7 @@
         authenticatedUnlockAvailable: false,
         clipboardExclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' },
         backupDir: '/home/mock/.local/share/dev-console/backups',
-        finderContext: state.context
+        finderContext: activeContext()
       };
     }
     if (command === 'clear_finder_context') {

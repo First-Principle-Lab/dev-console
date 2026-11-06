@@ -87,7 +87,8 @@ pub fn show_library_with<R: Runtime>(
 pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let window = ensure(app, FINDER, "index.html#view=finder")?;
     // Before presenting: asking which window is focused is only meaningful while the terminal
-    // still is, and `present` hands focus to the palette.
+    // still is, and `present` hands focus to the palette. The focused window is read here, in
+    // line; only the `/proc` walk is left to a thread.
     detect_context(app);
     present(&window)?;
     // Tiling compositors ignore the creation size: Hyprland mapped the finder at 950x1008.
@@ -100,11 +101,14 @@ pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     Ok(())
 }
 
-/// Works out which project the terminal belongs to, on a thread of its own.
+/// Works out which project the terminal belongs to.
 ///
-/// The palette is presented without waiting for any of it: the compositor gets 200 ms, and if that
-/// runs out the finder simply opens with no context, which is what every desktop without Hyprland
-/// gets permanently. The result arrives as a `finder-context` event; the chip appears when it does.
+/// Two halves. The focused window is captured here, synchronously, over the compositor socket
+/// (well under a millisecond on Hyprland, bounded at 50 ms): it has to be, because asking after the
+/// palette is shown would only ever name the palette. Everything else - `hyprctl` for a session
+/// without the socket, the `/proc` walk, the repository walk-up - runs on a thread of its own, and
+/// the palette is presented without waiting for it. The result arrives as a `finder-context`
+/// event; the chip appears when it does.
 fn detect_context<R: Runtime>(app: &AppHandle<R>) {
     let Some(state) = app.try_state::<Arc<AppState>>() else {
         return;
@@ -119,11 +123,14 @@ fn detect_context<R: Runtime>(app: &AppHandle<R>) {
         // Off means off: no compositor query and no `/proc` walk at all.
         return;
     }
+    let focused = crate::context::focused_now();
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
         .name("finder-context".into())
         .spawn(move || {
-            let context = crate::context::detect();
+            let context = focused
+                .or_else(crate::context::focused_via_hyprctl)
+                .and_then(|window| crate::context::resolve(&window));
             let applied = handle
                 .try_state::<Arc<AppState>>()
                 .is_some_and(|state| state.finish_finder_detection(token, context.clone()));
@@ -139,6 +146,12 @@ fn detect_context<R: Runtime>(app: &AppHandle<R>) {
 
 pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {
     window.hide().map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Whether the palette is on screen; what the `finder.context` control query reports.
+pub fn finder_visible<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.get_webview_window(FINDER)
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
 }
 
 /// Super+F semantics: a visible finder hides, anything else shows it.

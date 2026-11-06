@@ -52,7 +52,7 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
         backup_dir: state(&app).backups.dir().to_string_lossy().to_string(),
         // Also sent to the library, which ignores it: it is the answer to "what is this palette
         // ranking by?", and a window created after the detection thread answered still needs it.
-        finder_context: state(&app).finder_context(),
+        finder_context: state(&app).active_finder_context(),
     }
 }
 
@@ -60,12 +60,7 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
 pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
     let state = state(&app);
     let entries = state.searchable_metadata(None);
-    // Off means never looked up, so the stored context is not consulted either.
-    let context = if state.settings.get().project_context_enabled {
-        state.finder_context()
-    } else {
-        None
-    };
+    let context = state.active_finder_context();
     let results = search::rank_in_context(
         &entries,
         &request.query,
@@ -79,9 +74,6 @@ pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> 
     }
 }
 
-/// Dismisses the detected project for as long as this finder stays open (`Ctrl+P`, or clicking the
-/// chip): ranking falls back to the order that has no project in it at all. The next open looks
-/// again.
 /// Drops the detected project for as long as the palette stays open (`Ctrl+P`, or clicking the
 /// chip). A detection still in flight is invalidated too, so the chip cannot reappear a moment
 /// after the user got rid of it; the next open looks again.

@@ -83,19 +83,38 @@ test('finder at the real palette size (680x420)', async ({ page }) => {
   await capture(page, '13-finder-palette-680x420', 680, 420);
 });
 
-test('finder with a detected project, at the real palette size', async ({ page }) => {
-  // The chip and the row markers share the search line and the row's action area with the vault
-  // chip and the Enter keycap, so this is the state where they would collide.
-  const seed = { ...SEED, context: { root: '/home/mock/src/api', name: 'api' } };
-  await boot(page, seed, 'finder');
-  // A review PNG of the palette without its chip would be worthless, so the state is asserted
-  // rather than trusted: the chip names the project, and the one command saved inside it is marked.
-  await expect(page.getByTestId('finder-context')).toHaveText('api');
-  await expect(page.getByTestId('row-in-project')).toHaveCount(1);
-  await expect(page.getByRole('img', { name: 'in api' })).toHaveCount(1);
-  await capture(page, '18-finder-project-context', 680, 420);
-  await expect(page.getByTestId('finder-context'), 'after capture').toHaveText('api');
-});
+// The chip is muted text on a hairline border, which is exactly what a theme can wash out, so it is
+// reviewed in a dark, a light and two Omarchy palettes. Dark keeps the original file name.
+const CONTEXT_THEMES = [
+  ['dark', ''],
+  ['light', '-light'],
+  ['omarchy-tokyo-night', '-tokyo-night'],
+  ['omarchy-catppuccin-latte', '-catppuccin-latte']
+] as const;
+
+for (const [theme, suffix] of CONTEXT_THEMES) {
+  test(`finder with a detected project, at the real palette size (${theme})`, async ({ page }) => {
+    // The chip and the row markers share the search line and the row's action area with the vault
+    // chip and the Enter keycap, so this is the state where they would collide.
+    const seed = {
+      ...SEED,
+      context: { root: '/home/mock/src/api', name: 'api' },
+      settings: {
+        theme, autostart: false, clipboardExpirySeconds: 30,
+        terminal: ['x-terminal-emulator', '-e'], projectContextEnabled: true
+      }
+    };
+    await boot(page, seed, 'finder');
+    // A review PNG of the palette without its chip would be worthless, so the state is asserted
+    // rather than trusted: the chip names the project, and the one command saved inside it is marked.
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect(page.getByTestId('finder-context')).toHaveText('api');
+    await expect(page.getByTestId('row-in-project')).toHaveCount(1);
+    await expect(page.getByRole('img', { name: 'in api' })).toHaveCount(1);
+    await capture(page, `18-finder-project-context${suffix}`, 680, 420);
+    await expect(page.getByTestId('finder-context'), 'after capture').toHaveText('api');
+  });
+}
 
 test('library with a long name and long values (overflow check)', async ({ page }) => {
   await boot(page, LONG);

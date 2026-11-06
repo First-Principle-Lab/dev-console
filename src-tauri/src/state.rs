@@ -24,8 +24,8 @@ pub struct AppState {
     pub journal: ReplacementJournal,
     pub quitting: std::sync::atomic::AtomicBool,
     /// The project detected for the terminal the finder was opened from, replaced on every open
-    /// and cleared when the user dismisses it. In memory only, for exactly as long as the finder
-    /// is open: see [`crate::context`].
+    /// and cleared when the user dismisses it. In memory only, never written to disk; it stays
+    /// until the next open replaces it: see [`crate::context`].
     pub finder_context: Mutex<Option<FinderContext>>,
     /// Bumped whenever a detection becomes irrelevant - a new finder open, or a `Ctrl+P`.
     /// Detection runs beside the palette, so its answer can arrive after the thing it was
@@ -180,6 +180,17 @@ impl AppState {
             .lock()
             .expect("finder context lock poisoned")
             .clone()
+    }
+
+    /// The project the finder should rank by and show: the detected one, unless the setting has
+    /// been switched off since it was detected. Both the chip (`app_state`) and the ranking
+    /// (`search_entries`) read this, so they can never disagree.
+    pub fn active_finder_context(&self) -> Option<FinderContext> {
+        if self.settings.get().project_context_enabled {
+            self.finder_context()
+        } else {
+            None
+        }
     }
 
     /// Replaces the detected project. Called on every finder open - with `None` when nothing was

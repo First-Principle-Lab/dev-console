@@ -272,3 +272,41 @@ test('typing narrows the list without dropping the project marker', async ({ pag
   await expect(page.getByTestId('result-row')).toHaveCount(1);
   await expect(page.getByTestId('row-in-project')).toHaveCount(1);
 });
+
+test('with project ranking switched off, a detected project changes nothing', async ({ page }) => {
+  // The backend never detects while the switch is off; this also covers a project detected just
+  // before it was switched off, which neither the chip nor the ranking may still use.
+  await boot(page, {
+    ...contextSeed(true),
+    settings: {
+      theme: 'dark', autostart: false, clipboardExpirySeconds: 30,
+      terminal: ['x-terminal-emulator', '-e'], projectContextEnabled: false
+    }
+  }, 'finder');
+  await expect(page.getByTestId('result-row')).toHaveCount(7);
+  await expect(page.getByTestId('finder-context')).toHaveCount(0);
+  await expect(page.getByTestId('row-in-project')).toHaveCount(0);
+  expect(await rowNames(page)).toEqual([
+    'cargo bench', 'build release', 'dev-console-lite notes', 'fmt everything',
+    'import scripts', 'just test', 'unrelated'
+  ]);
+});
+
+test('a secret tagged for the project is not moved up or marked', async ({ page }) => {
+  await boot(page, {
+    ...contextSeed(true),
+    secrets: [
+      { id: 's-here', revision: 1, name: 'deploy token', type: 'API key', tags: ['project:dev-console'], description: '', notes: '', fields: [], pinned: false, value: 'synthetic-secret-value' }
+    ]
+  }, 'finder');
+  await expect(page.getByTestId('finder-context')).toContainText('dev-console');
+  await expect(page.getByTestId('row-in-project')).toHaveCount(4);
+  await expect(page.getByRole('option', { name: /deploy token/ }).getByTestId('row-in-project')).toHaveCount(0);
+});
+
+test('a pinned command still leads the empty query, ahead of the project', async ({ page }) => {
+  const seed = contextSeed(true);
+  seed.commands.push(command('pinned', 'zz pinned elsewhere', '/home/dev/scratch', { pinned: true }));
+  await boot(page, seed, 'finder');
+  expect((await rowNames(page)).slice(0, 2)).toEqual(['zz pinned elsewhere', 'build release']);
+});

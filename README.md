@@ -21,15 +21,17 @@ library, `Esc` dismisses. Everything is reachable from the keyboard, and the lis
 combobox/listbox semantics.
 
 **Project context** — when the Finder opens, Dev Console asks the compositor which window had
-focus, follows that terminal to the shell it started, and reads the folder that shell is sitting
-in. Commands saved with a working directory inside that project — or tagged `project:<name>` —
-are listed first and marked with a folder icon, and the palette names the
-project it is ranking by. `Ctrl+P`, or clicking that name, ignores it for as long as the palette
-stays open. The whole lookup is in memory for one palette open: nothing is written to disk, and
-`Ctrl+P` is the only way it can be turned off by hand. Off, or on a desktop other than Hyprland
-(where focus is unreadable without a compositor API), the palette is exactly what it has always
-been: no chip, no marks, the old ordering. Settings → Finder has a switch that skips the lookup
-entirely, so `/proc` is not read at all.
+focus (before the palette takes it), follows that window to the shell it started, and reads the
+folder that shell is sitting in. Commands saved with a working directory inside that project — or
+tagged `project:<name>` — are listed first and marked with a folder icon, and the palette names the
+project it is ranking by. `Ctrl+P`, or clicking that name, ignores it for this open; Settings →
+Finder turns it off entirely, and then neither the compositor nor `/proc` is read. Nothing is
+written to disk. On a desktop other than Hyprland (where focus is unreadable without a compositor
+API) the palette is exactly what it has always been: no chip, no marks, the old ordering.
+
+Which shell counts: when one terminal has several tabs or windows, the one whose folder the window
+title shows, else the newest. Any focused app with a shell under it counts, so an editor's built-in
+terminal does too. Under tmux, the folder is the one tmux was started from, not the pane's.
 
 **Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
 restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock

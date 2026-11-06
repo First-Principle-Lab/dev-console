@@ -2,17 +2,23 @@
 # Manual harness: follow a real Hyprland focus event all the way to a project.
 #
 # What it proves, when it can run: that the focused window really is followed through the terminal
-# to the shell it started, that the repository found is the one the harness runs in, and that the
-# whole lookup stays inside the 30 ms the palette relies on to open without noticing.
+# to the shell it started, that the repository found is the one the harness was started in, that
+# the whole lookup stays inside the 30 ms the palette relies on, and - when this branch's build of
+# Dev Console is running - that a real palette open (`window.finder`, the same path as Super+F)
+# names that repository.
 #
 # What it does NOT prove: any other compositor (there is nothing to read there, by design), nor a
-# terminal whose shell is parented elsewhere, like tmux — both cases are "no context", which is the
+# terminal whose shell is parented elsewhere, like tmux - both cases are "no context", which is the
 # documented behaviour rather than something this harness can assert.
 #
-# Run it from the terminal window you are looking at:  bash scripts/test-project-context.sh
+# Run it from an idle prompt in the terminal window you are looking at, inside the checkout:
+#   bash scripts/test-project-context.sh
 #
-# Exit 77 means UNVERIFIED (no Hyprland session in this environment).
+# Exit 77 means UNVERIFIED: no Hyprland session, the focused window is not the terminal running
+# this, the harness was started through another shell (verify.sh), or no running Dev Console
+# answers `finder.context`. Each says which.
 set -euo pipefail
+start_dir="$PWD"
 cd "$(dirname "$0")/.."
 
 export HOME="${HOME:-/root}"
@@ -32,14 +38,15 @@ if [[ ! -S "$socket" ]]; then
   exit 77
 fi
 
-echo "== Hyprland session ${HYPRLAND_INSTANCE_SIGNATURE}: detecting from the focused window =="
-code=0
-cargo test --manifest-path src-tauri/Cargo.toml --locked --test project-context -- \
-  --ignored --exact --nocapture the_focused_terminal_reports_its_project || code=$?
-
-if [[ "$code" == "0" ]]; then
-  echo "RESULT: PASS (focused window -> shell -> project, inside the 30 ms budget)"
-else
-  echo "RESULT: exit $code"
+if ! expected="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "UNVERIFIED: started from $start_dir, which is not inside a git checkout"
+  exit 77
 fi
-exit "$code"
+
+# Built before anything looks at focus, so a long compile cannot be what moved it.
+echo "== building the harness =="
+cargo test --manifest-path src-tauri/Cargo.toml --locked --test project-context --no-run
+
+# `exec`: this bash is itself a shell under the terminal, and the youngest one. Replacing it with
+# the probe leaves the user's own prompt as the shell detection has to find.
+exec python3 -I scripts/project-context-probe.py "$socket" "$expected"

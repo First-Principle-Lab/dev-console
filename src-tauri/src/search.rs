@@ -176,7 +176,7 @@ pub fn completion_for(query: &str, name: &str) -> Option<String> {
     }
 }
 
-/// True when `entry` belongs to the project the finder was opened from. Two ways in, matching the
+/// True when `entry` is a command of the project the finder was opened from. Two ways in, matching the
 /// two ways a command comes to be about a project:
 ///
 /// * its stored working directory resolves (with `~` expanded exactly as execution expands it) to
@@ -190,6 +190,10 @@ fn in_context(entry: &EntryMeta, context: Option<&FinderContext>) -> bool {
     let Some(context) = context else {
         return false;
     };
+    // A project's *commands* move up. A secret tagged for a project is still just a secret.
+    if entry.kind != crate::models::Kind::Command {
+        return false;
+    }
     let tag = format!("project:{}", context.name).to_lowercase();
     if entry.tags.iter().any(|tagged| tagged.to_lowercase() == tag) {
         return true;
@@ -588,6 +592,12 @@ mod tests {
             meta_at("above", "f", "/home/dev/projects"),
             meta_at("no-directory", "g", ""),
             meta("other-tag", "h", "Shell", &["project:other"], ""),
+            // Secrets never move up, even tagged for the project.
+            {
+                let mut secret = meta("secret", "i", "Token", &["project:api"], "");
+                secret.kind = crate::models::Kind::Secret;
+                secret
+            },
         ];
         assert_eq!(
             in_context_ids(&entries, project),

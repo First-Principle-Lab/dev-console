@@ -11,14 +11,24 @@
 //! ```
 //!
 //! and every step that fails means "no context", which leaves ranking exactly as it was before
-//! this existed. Two limits are deliberate:
+//! this existed. The focused window is read first and on its own ([`focused_now`]), before the
+//! palette is shown, because showing the palette moves focus to it; the `/proc` walk that follows
+//! can then take as long as it likes on another thread.
+//!
+//! What it can and cannot tell apart:
 //!
 //! * Only Hyprland answers "which window is focused". Other compositors would need
 //!   `_NET_ACTIVE_WINDOW` over X11, and the Wayland protocols deliberately do not expose focus to
 //!   clients, so off Hyprland the answer is `None` rather than a guess.
-//! * The shell is found by walking the terminal's children, so a terminal that hands its shells to
-//!   a server process (tmux, or `fish` under a supervisor) has no shell under its own pid and
-//!   detection stops there. Ghostty, Kitty, Foot and Alacritty all parent their shells directly.
+//! * The compositor names a window, not a tab. When one process owns several shells - tabs and
+//!   splits, or every window of a single-instance Ghostty - the shell whose directory the window
+//!   title shows is taken (terminals put the cwd in the title at an idle prompt), and failing
+//!   that the youngest shell, which is a guess.
+//! * Any focused app with a shell a few levels below it counts, not only terminals: an editor with
+//!   an integrated terminal is ranked by that terminal's directory.
+//! * tmux: a shell that started `tmux` is found, but its directory is wherever tmux was launched
+//!   from, not the pane's, because the panes belong to the tmux server. A terminal that runs tmux
+//!   directly has no shell under it, and gets no context.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -29,8 +39,12 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-/// How long the compositor is given to answer, over its socket or through `hyprctl`.
-const FOCUS_TIMEOUT: Duration = Duration::from_millis(200);
+/// How long the compositor is given to answer over its socket. This read happens before the
+/// palette is shown, so it is the one part of detection the user can wait on; Hyprland answers in
+/// well under a millisecond, and a compositor that does not answer in this time gets no context.
+const SOCKET_TIMEOUT: Duration = Duration::from_millis(50);
+/// How long `hyprctl` is given. It only runs on the detection thread, never in front of the palette.
+const HYPRCTL_TIMEOUT: Duration = Duration::from_millis(200);
 /// How far below the window process the shell search looks. A terminal's own children are depth 1,
 /// which is where a shell normally sits; going deeper only ever finds what that shell launched.
 const MAX_DEPTH: usize = 3;
@@ -68,11 +82,13 @@ impl FinderContext {
 }
 
 /// The window the compositor says has focus. `class` is what the app calls itself, and is only
-/// used to notice that the focused window is Dev Console's own palette.
+/// used to notice that the focused window is Dev Console's own palette; `title` picks between
+/// several shells under the same process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusedWindow {
     pub pid: u32,
     pub class: String,
+    pub title: String,
 }
 
 /// Where the focused window comes from. A trait so the walker can be tested with any pid, on a
@@ -95,28 +111,45 @@ impl HyprlandFocus {
     }
 }
 
-impl FocusReader for HyprlandFocus {
-    fn focused(&self) -> Option<FocusedWindow> {
-        let reply = self
-            .socket
-            .as_deref()
-            .and_then(query_socket)
-            .or_else(query_hyprctl)?;
-        parse_active_window(&reply)
+impl HyprlandFocus {
+    /// The socket alone: no process is spawned, so this is safe to run in front of the palette.
+    fn read_socket(&self) -> Option<FocusedWindow> {
+        parse_active_window(&query_socket(self.socket.as_deref()?)?)
     }
 }
 
-/// Detects the project behind the window that had focus when the finder was asked to open.
-///
-/// Runs on a background thread (see [`crate::windows::show_finder`]) because the palette must not
-/// wait for a compositor, and returns `None` - "rank like before" - whenever any step is missing.
+impl FocusReader for HyprlandFocus {
+    fn focused(&self) -> Option<FocusedWindow> {
+        self.read_socket()
+            .or_else(|| parse_active_window(&query_hyprctl()?))
+    }
+}
+
+/// The focused window, read over the compositor socket only. Called before the palette is shown,
+/// because once it is, the palette is what has focus; it never spawns anything and is bounded by
+/// [`SOCKET_TIMEOUT`]. `None` when there is no socket - [`focused_via_hyprctl`] is the fallback.
+pub fn focused_now() -> Option<FocusedWindow> {
+    HyprlandFocus::from_env().read_socket()
+}
+
+/// The fallback for a session without the socket. It spawns `hyprctl`, so it runs on the detection
+/// thread, after the palette has been asked to show: the answer can already be the palette, which
+/// [`resolve_with`] treats as no context. Best effort by construction.
+pub fn focused_via_hyprctl() -> Option<FocusedWindow> {
+    parse_active_window(&query_hyprctl()?)
+}
+
+/// Detects the project behind the window that has focus right now. [`crate::windows::show_finder`]
+/// does the same in two halves ([`focused_now`] before showing, [`resolve`] after), so the palette
+/// never waits on `/proc`; this whole-chain form is what the harness and benchmark measure.
 pub fn detect() -> Option<FinderContext> {
+    resolve(&HyprlandFocus::from_env().focused()?)
+}
+
+/// The project behind an already captured window, read from the real `/proc` and `$HOME`.
+pub fn resolve(window: &FocusedWindow) -> Option<FinderContext> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    detect_with(
-        &HyprlandFocus::from_env(),
-        Path::new("/proc"),
-        home.as_deref(),
-    )
+    resolve_with(window, Path::new("/proc"), home.as_deref())
 }
 
 /// The whole chain, with every outside input supplied by the caller.
@@ -125,21 +158,49 @@ pub fn detect_with(
     proc_root: &Path,
     home: Option<&Path>,
 ) -> Option<FinderContext> {
-    let window = reader.focused()?;
+    resolve_with(&reader.focused()?, proc_root, home)
+}
+
+/// Everything after the compositor: window -> shell -> cwd -> project.
+pub fn resolve_with(
+    window: &FocusedWindow,
+    proc_root: &Path,
+    home: Option<&Path>,
+) -> Option<FinderContext> {
     // Re-opening the palette from the palette itself says nothing about a project.
     if window.class.to_lowercase().contains("dev-console") {
         return None;
     }
-    let cwd = shell_cwd(proc_root, window.pid)?;
+    let (_, cwd) = shell_for_window(proc_root, window, home)?;
     project_root(&cwd, home).and_then(|root| FinderContext::from_root(&root))
 }
 
-/// The cwd of the youngest shell the given window process started, or `None` when it has none
-/// within [`MAX_DEPTH`] levels. "Youngest" matters because every tab and split is a sibling shell
-/// under the same terminal, and the one just used is the newest.
+/// The cwd of the shell the given window is showing, or `None` when the window process has no
+/// shell within [`MAX_DEPTH`] levels. See [`shell_for_window`] for how one shell is picked.
 pub fn shell_cwd(proc_root: &Path, window_pid: u32) -> Option<PathBuf> {
-    let mut found: Option<(u64, u32)> = None;
-    let mut level = children(proc_root, window_pid);
+    let window = FocusedWindow {
+        pid: window_pid,
+        class: String::new(),
+        title: String::new(),
+    };
+    shell_for_window(proc_root, &window, None).map(|(_, cwd)| cwd)
+}
+
+/// The shell (pid and cwd) the focused window is most likely showing.
+///
+/// A terminal with tabs or splits - or a single-instance terminal with several windows - has
+/// several shells under one pid, and the compositor only names the window. At an idle prompt
+/// terminals title the window with the shell's directory, so the shell whose cwd the title shows
+/// wins, the longest such match first (`~/src/api-v2` beats `~/src/api`). Without a match the
+/// youngest shell is taken: a guess, which is right for the common one-shell window.
+pub fn shell_for_window(
+    proc_root: &Path,
+    window: &FocusedWindow,
+    home: Option<&Path>,
+) -> Option<(u32, PathBuf)> {
+    // (title match length, start time, pid) - compared as a tuple, largest wins.
+    let mut found: Option<((usize, u64, u32), PathBuf)> = None;
+    let mut level = children(proc_root, window.pid);
     for _ in 0..MAX_DEPTH {
         if level.is_empty() {
             break;
@@ -148,9 +209,16 @@ pub fn shell_cwd(proc_root: &Path, window_pid: u32) -> Option<PathBuf> {
             if !is_shell(proc_root, *pid) {
                 continue;
             }
-            let candidate = (start_time(proc_root, *pid), *pid);
-            if found.is_none_or(|best| candidate > best) {
-                found = Some(candidate);
+            let Ok(cwd) = fs::read_link(proc_root.join(pid.to_string()).join("cwd")) else {
+                continue;
+            };
+            let rank = (
+                title_match(&window.title, &cwd, home),
+                start_time(proc_root, *pid),
+                *pid,
+            );
+            if found.as_ref().is_none_or(|(best, _)| rank > *best) {
+                found = Some((rank, cwd));
             }
         }
         level = level
@@ -158,8 +226,50 @@ pub fn shell_cwd(proc_root: &Path, window_pid: u32) -> Option<PathBuf> {
             .flat_map(|pid| children(proc_root, *pid))
             .collect();
     }
-    let (_, pid) = found?;
-    fs::read_link(proc_root.join(pid.to_string()).join("cwd")).ok()
+    found.map(|((_, _, pid), cwd)| (pid, cwd))
+}
+
+/// How strongly a window title names `cwd`: the length of the longest spelling of it (absolute,
+/// or `~`-abbreviated) the title contains, `0` for none. Home itself (`~`) only counts as the whole
+/// title, since a bare `~` appears inside every abbreviated path.
+fn title_match(title: &str, cwd: &Path, home: Option<&Path>) -> usize {
+    let title = title.trim();
+    if title.is_empty() {
+        return 0;
+    }
+    let mut spellings = vec![cwd.to_string_lossy().into_owned()];
+    if let Some(home) = home {
+        if let Ok(rest) = cwd.strip_prefix(home) {
+            spellings.push(if rest.as_os_str().is_empty() {
+                "~".to_string()
+            } else {
+                format!("~/{}", rest.to_string_lossy())
+            });
+        }
+    }
+    spellings
+        .into_iter()
+        .filter(|spelling| {
+            if spelling == "~" || spelling == "/" {
+                title == spelling
+            } else {
+                contains_path(title, spelling)
+            }
+        })
+        .map(|spelling| spelling.len())
+        .max()
+        .unwrap_or(0)
+}
+
+/// `title` contains `path` as a whole path: not followed by more of a file name, so `~/src/api`
+/// is not found inside `~/src/api-v2`.
+fn contains_path(title: &str, path: &str) -> bool {
+    title.match_indices(path).any(|(at, _)| {
+        title[at + path.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| !(next.is_alphanumeric() || "-_.".contains(next)))
+    })
 }
 
 /// The project `directory` belongs to: the nearest ancestor that is a repository, else the
@@ -253,8 +363,8 @@ fn socket_path() -> Option<PathBuf> {
 /// is the whole reason the capture can run while the palette is being shown.
 fn query_socket(socket: &Path) -> Option<String> {
     let mut stream = UnixStream::connect(socket).ok()?;
-    stream.set_read_timeout(Some(FOCUS_TIMEOUT)).ok()?;
-    stream.set_write_timeout(Some(FOCUS_TIMEOUT)).ok()?;
+    stream.set_read_timeout(Some(SOCKET_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(SOCKET_TIMEOUT)).ok()?;
     stream.write_all(b"j/activewindow").ok()?;
     stream.flush().ok()?;
     stream.shutdown(std::net::Shutdown::Write).ok()?;
@@ -264,8 +374,8 @@ fn query_socket(socket: &Path) -> Option<String> {
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(count) => bytes.extend_from_slice(&chunk[..count]),
-            // A read timeout with bytes in hand is a usable answer; without any it is not.
-            Err(_) => break,
+            // A reply cut off by the timeout is not an answer, so the caller can try `hyprctl`.
+            Err(_) => return None,
         }
     }
     (!bytes.is_empty()).then(|| String::from_utf8_lossy(&bytes).into_owned())
@@ -273,7 +383,7 @@ fn query_socket(socket: &Path) -> Option<String> {
 
 /// The same question through `hyprctl`, used when the session does not expose the socket. The
 /// child is waited on with a deadline rather than with `output()`, so a hung compositor costs
-/// [`FOCUS_TIMEOUT`] and not a blocked finder.
+/// [`HYPRCTL_TIMEOUT`] and not a stuck detection thread.
 fn query_hyprctl() -> Option<String> {
     let mut child = Command::new("hyprctl")
         .args(["activewindow", "-j"])
@@ -282,7 +392,7 @@ fn query_hyprctl() -> Option<String> {
         .stdout(Stdio::piped())
         .spawn()
         .ok()?;
-    let deadline = Instant::now() + FOCUS_TIMEOUT;
+    let deadline = Instant::now() + HYPRCTL_TIMEOUT;
     loop {
         if child.try_wait().ok()?.is_some() {
             let output = child.wait_with_output().ok()?;
@@ -306,14 +416,17 @@ pub fn parse_active_window(reply: &str) -> Option<FocusedWindow> {
     if pid == 0 {
         return None;
     }
-    let class = value
-        .get("class")
-        .and_then(|class| class.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(|field| field.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
     Some(FocusedWindow {
         pid: pid as u32,
-        class,
+        class: text("class"),
+        title: text("title"),
     })
 }
 
@@ -333,6 +446,7 @@ mod tests {
                 window: Some(FocusedWindow {
                     pid,
                     class: "ghostty".into(),
+                    title: String::new(),
                 }),
             }
         }
@@ -481,6 +595,66 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_the_window_title_names_beats_a_younger_one() {
+        let tree = Tree::new("title");
+        let home = scratch("title-home");
+        let looked_at = home.join("src").join("api");
+        let newer = home.join("src").join("api-v2");
+        repo(&looked_at);
+        repo(&newer);
+        // One single-instance terminal process, two windows: the older shell is the one focused.
+        tree.process(310, "ghostty", &[311, 312], None);
+        tree.process_started_at(311, "zsh", 500, Some(&looked_at));
+        tree.process_started_at(312, "zsh", 900, Some(&newer));
+        let window = |title: &str| FocusedWindow {
+            pid: 310,
+            class: "com.mitchellh.ghostty".into(),
+            title: title.into(),
+        };
+
+        let pick = |title: &str| {
+            shell_for_window(tree.path(), &window(title), Some(&home)).map(|(pid, _)| pid)
+        };
+        assert_eq!(
+            pick("~/src/api"),
+            Some(311),
+            "the title names the older shell's folder"
+        );
+        assert_eq!(
+            pick(&format!("user@host: {}", looked_at.display())),
+            Some(311),
+            "an absolute path in the title counts too"
+        );
+        assert_eq!(
+            pick("~/src/api-v2"),
+            Some(312),
+            "`~/src/api` inside `~/src/api-v2` is not a match for the shorter folder"
+        );
+        assert_eq!(
+            pick("cargo test"),
+            Some(312),
+            "a title naming no folder falls back to the youngest shell"
+        );
+        tree.erase();
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn home_in_the_title_only_counts_as_the_whole_title() {
+        let home = Path::new("/home/dev");
+        assert_eq!(title_match("~", home, Some(home)), 1);
+        assert_eq!(title_match("~/notes", home, Some(home)), 0);
+        assert_eq!(
+            title_match("~/src/api", Path::new("/home/dev/src/api"), Some(home)),
+            9
+        );
+        assert_eq!(
+            title_match("", Path::new("/home/dev/src/api"), Some(home)),
+            0
+        );
+    }
+
+    #[test]
     fn shells_below_the_depth_limit_are_not_found() {
         let tree = Tree::new("limit");
         let project = scratch("limit");
@@ -587,6 +761,7 @@ mod tests {
         .expect("window");
         assert_eq!(window.pid, 4242);
         assert_eq!(window.class, "kitty");
+        assert_eq!(window.title, "zsh");
     }
 
     #[test]
@@ -646,6 +821,7 @@ mod tests {
                 Some(FocusedWindow {
                     pid: 700,
                     class: "dev-console".into(),
+                    title: String::new(),
                 })
             }
         }
