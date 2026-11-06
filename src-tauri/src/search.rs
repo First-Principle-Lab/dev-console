@@ -435,9 +435,9 @@ mod tests {
 
     /// Manual benchmark, ignored so CI never asserts on machine speed: the palette re-searches
     /// the whole library on every keystroke, so the context pass must not be what makes typing
-    /// feel slow. Run it on the target machine and put the printed number in `TEST_REPORT.md`.
+    /// feel slow. Run it on the target machine and put the printed number in `docs/project/TEST_REPORT.md`.
     #[test]
-    #[ignore = "a timing benchmark: the number belongs in TEST_REPORT.md, not in CI"]
+    #[ignore = "a timing benchmark: the number belongs in docs/project/TEST_REPORT.md, not in CI"]
     fn ranking_the_whole_library_stays_well_inside_a_frame() {
         use std::time::Instant;
 

@@ -138,7 +138,7 @@ with a shell up to three levels below it counts (an editor's integrated terminal
 tmux started from a shell yields that shell's directory, not the pane's; with a title that names no
 folder, the youngest shell is a guess.
 
-Verified - see the "Finder project context" section of `TEST_REPORT.md` for the numbers:
+Verified - see the "Finder project context" section of `docs/project/TEST_REPORT.md` for the numbers:
 
 - [x] All local checks in `AGENTS.md` pass (fmt, clippy `-D warnings`, `cargo test`, svelte-check,
       eslint, vitest, Playwright).
