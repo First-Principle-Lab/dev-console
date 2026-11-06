@@ -226,3 +226,67 @@ test('an unreadable history is silent: no panel, no error, list intact', async (
   await expect(page.getByTestId('entry-row')).toHaveCount(1);
   await expect(page.getByTestId('status-line')).toHaveCount(0);
 });
+
+test('Settings brings every dismissed suggestion back, and the panel offers it again', async ({ page }) => {
+  await boot(page, {
+    ...SEED,
+    history: [
+      { command: 'docker compose up', count: 12 },
+      { command: 'bun run test:watch', count: 7 }
+    ]
+  });
+  await page.getByTestId('history-suggestion-dismiss').first().click();
+  await expect(page.getByTestId('history-suggestion-row')).toHaveCount(1);
+
+  await page.getByTestId('settings').click();
+  const restore = page.getByTestId('history-suggestions-restore');
+  await expect(restore).toHaveText('Bring back 1 dismissed suggestion');
+  await restore.click();
+  await expect(restore).toHaveCount(0);
+  await page.getByTestId('close-settings').click();
+
+  await expect(page.getByTestId('history-suggestion-row')).toHaveCount(2);
+  await expect(page.getByTestId('history-suggestion-row').first()).toContainText('docker compose up');
+});
+
+test('with nothing dismissed, Settings shows no bring-back button', async ({ page }) => {
+  await boot(page, { ...SEED, history: [{ command: 'docker compose up', count: 12 }] });
+  await page.getByTestId('settings').click();
+  await page.getByTestId('history-suggestions-setting').waitFor();
+  await expect(page.getByTestId('history-suggestions-restore')).toHaveCount(0);
+});
+
+test('Backspace on a suggestion does nothing: only Delete dismisses', async ({ page }) => {
+  await boot(page, { ...SEED, history: [{ command: 'docker compose up', count: 12 }] });
+  await page.getByTestId('history-suggestion-command').first().focus();
+  await page.keyboard.press('Backspace');
+  await expect(page.getByTestId('history-suggestion-row')).toHaveCount(1);
+});
+
+test('every row keeps its name, count and buttons on one line, under the command, in the narrow list pane', async ({ page }) => {
+  await page.setViewportSize({ width: 941, height: 1004 });
+  await boot(page, {
+    ...SEED,
+    history: [
+      { command: 'docker compose up -d', count: 9 },
+      { command: 'cargo test --workspace', count: 6 },
+      { command: 'kubectl get pods -n staging', count: 4 }
+    ]
+  });
+  const rows = page.getByTestId('history-suggestion-row');
+  await expect(rows).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    const row = rows.nth(index);
+    const count = await row.getByTestId('history-suggestion-count').boundingBox();
+    const save = await row.getByTestId('history-suggestion-save').boundingBox();
+    expect(count && save, `row ${index} laid out`).toBeTruthy();
+    // Same line: the Save button's vertical centre sits within the count chip's height.
+    const saveMiddle = save!.y + save!.height / 2;
+    expect(saveMiddle).toBeGreaterThan(count!.y - 4);
+    expect(saveMiddle).toBeLessThan(count!.y + count!.height + 4);
+    // And the line starts where the command does, rather than floating in the middle of the row.
+    const command = await row.getByTestId('history-suggestion-command').boundingBox();
+    const name = await row.locator('.name').boundingBox();
+    expect(Math.abs(name!.x - command!.x), `row ${index} name aligned`).toBeLessThan(2);
+  }
+});

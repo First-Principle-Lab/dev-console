@@ -94,5 +94,9 @@ export const api = {
   /** Ranked suggestions from the shell's history. The backend reads the file per call. */
   historySuggestions: (limit?: number): Promise<HistorySuggestion[]> =>
     call('history_suggestions', { limit: limit ?? null }),
-  dismissSuggestion: (key: string): Promise<void> => call('dismiss_suggestion', { key })
+  dismissSuggestion: (key: string): Promise<void> => call('dismiss_suggestion', { key }),
+  /** How many suggestions are dismissed, for the Settings row that brings them back. */
+  dismissedSuggestionCount: (): Promise<number> => call('dismissed_suggestion_count'),
+  /** Forgets every dismissal; returns how many there were. */
+  clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions')
 };

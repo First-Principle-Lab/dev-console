@@ -21,6 +21,8 @@
   let { onClose }: { onClose: () => void } = $props();
 
   let settings = $state<Settings | null>(null);
+  /** Suggestions the user dismissed; the Settings row below brings them back. */
+  let dismissedSuggestions = $state(0);
   let exclusion = $state<ClipboardExclusion | null>(null);
   let backupDir = $state('');
   let currentCommands = $state(0);
@@ -253,6 +255,19 @@
       terminalChoice = foundTerminals.find((option) => matchesTerminal(loaded.terminal, option))?.id ?? 'custom';
       await refreshBackups();
       await refreshCounts();
+      // Not worth failing the whole tab over: without the count the row simply stays hidden.
+      dismissedSuggestions = await api.dismissedSuggestionCount().catch(() => 0);
+    } catch (problem: unknown) {
+      error = String(problem);
+    }
+  }
+
+  /** Dismissing is the only way a suggestion goes away for good, so it needs a way back. */
+  async function bringBackSuggestions(): Promise<void> {
+    try {
+      await api.clearDismissedSuggestions();
+      dismissedSuggestions = 0;
+      emitLocal('suggestions-restored', null);
     } catch (problem: unknown) {
       error = String(problem);
     }
@@ -404,6 +419,13 @@
             Reads your zsh, bash or fish history on this machine when the library opens. Nothing is
             uploaded, and a command you dismiss is remembered only as a hash.
           </p>
+          {#if dismissedSuggestions > 0}
+            <div>
+              <button type="button" onclick={() => void bringBackSuggestions()} data-testid="history-suggestions-restore">
+                Bring back {dismissedSuggestions} dismissed {dismissedSuggestions === 1 ? 'suggestion' : 'suggestions'}
+              </button>
+            </div>
+          {/if}
           <div class="field">
             <label class="label-text" for="terminal-choice">Terminal</label>
             <select id="terminal-choice" value={terminalChoice} onchange={(event) => chooseTerminal(event.currentTarget.value)} data-testid="terminal-choice">

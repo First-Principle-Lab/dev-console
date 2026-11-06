@@ -11,7 +11,7 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 - 22 Omarchy themes with immediate preview in Settings and an explicit Save action.
 - A selector for installed terminals, including Ghostty and Kitty, with a custom command option.
 - **Suggestions from your shell history.** The Commands tab offers the most-used commands from your zsh, bash or fish history as starting points for a new entry, ranked by how often and how recently you ran them. Saving opens the normal editor prefilled, so nothing is written until you confirm, and each
-suggestion is a keyboard stop: `Tab` to the command, `Enter` saves it, `Delete` dismisses it. Dismissing one is remembered as a SHA-256 digest rather than the command, the history file is opened only while the feature is on (Settings → General), and a line that looks like it carries a credential is never offered.
+suggestion is a keyboard stop: `Tab` to the command, `Enter` saves it, `Delete` dismisses it. Dismissing one is remembered as a SHA-256 digest rather than the command (Settings → General brings dismissed ones back), the history file is opened only while the feature is on (Settings → General), and a line that looks like it carries a credential is never offered.
 - Command output and errors in the app, with separate copy buttons. Commands containing `sudo` open the selected terminal.
 - Copy, pin, and delete buttons on each library row. All app icons now use Lucide.
 

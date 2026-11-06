@@ -453,6 +453,8 @@
         suggestions = saved.historySuggestionsEnabled ? suggestions : [];
         if (saved.historySuggestionsEnabled) void loadSuggestions();
       }),
+      // Settings forgot every dismissal: those commands are candidates again.
+      on('suggestions-restored', () => void loadSuggestions()),
       on<{ reason: string }>('close-requested', () => {
         if (mode === 'edit' && draftDirty) pendingClose = true;
         else void allowClose().catch(() => undefined);

@@ -28,7 +28,7 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       onSave(suggestion);
-    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    } else if (event.key === 'Delete') {
       event.preventDefault();
       onDismiss(suggestion);
     }
@@ -60,7 +60,7 @@
     {#if open}
       <ul class="rows" id="history-suggestion-list" data-testid="history-suggestion-list">
         {#each suggestions as suggestion (suggestion.key)}
-          <li class="row" data-testid="history-suggestion-row">
+          <li class="suggestion" data-testid="history-suggestion-row">
             <!--
               The command itself is the keyboard target: Enter runs the same action as **Save**,
               Delete dismisses. A real button rather than a focusable list item, so it is in the
@@ -185,7 +185,9 @@
     padding: 0;
     list-style: none;
   }
-  .row {
+  /* not `.row`: that is a global layout class in tokens.css (centred, for form rows), and in this
+     column it would shrink and centre the meta line instead of letting it span the row */
+  .suggestion {
     display: flex;
     flex-direction: column;
     gap: var(--gap-xs);
@@ -194,10 +196,10 @@
     border: 1px solid transparent;
     transition: background var(--transition);
   }
-  .row:hover {
+  .suggestion:hover {
     background: var(--hover-fill);
   }
-  .row:focus-visible {
+  .suggestion:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
@@ -223,14 +225,17 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
+  /* one line in every row, however narrow the list pane: the name gives way (ellipsis) before the
+     count or the buttons do, so Save never drops to a line of its own in some rows only */
   .meta {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: var(--gap-sm);
     min-width: 0;
   }
   .name {
+    flex: 0 1 auto;
     min-width: 0;
     font-size: var(--text-xs);
     white-space: nowrap;
@@ -238,10 +243,12 @@
     text-overflow: ellipsis;
   }
   .uses {
+    flex: none;
     font-size: var(--text-xs);
     white-space: nowrap;
   }
   .actions {
+    flex: none;
     display: flex;
     align-items: center;
     gap: var(--gap-xs);

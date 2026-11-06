@@ -575,6 +575,13 @@ impl Repository {
         Ok(())
     }
 
+    /// Forgets every dismissal. Returns how many were removed.
+    pub fn clear_dismissed_suggestions(&self) -> AppResult<usize> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute("DELETE FROM dismissed_suggestions", [])
+            .map_err(AppError::storage)
+    }
+
     #[cfg(test)]
     pub fn exec_for_test(&self, sql: &str) -> AppResult<()> {
         let conn = self.conn.lock().expect("db lock poisoned");
@@ -987,6 +994,19 @@ mod tests {
         let keys = repo.dismissed_suggestion_keys().expect("dismissed");
         assert_eq!(keys.len(), 1);
         assert!(keys.contains(&key));
+
+        assert_eq!(repo.clear_dismissed_suggestions().expect("clear"), 1);
+        assert!(
+            repo.dismissed_suggestion_keys()
+                .expect("dismissed")
+                .is_empty(),
+            "clearing brings every dismissed suggestion back"
+        );
+        let (record, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert_eq!(
+            record.command, "make ship",
+            "clearing dismissals touches no command"
+        );
     }
 
     #[test]

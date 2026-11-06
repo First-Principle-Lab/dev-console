@@ -16,11 +16,9 @@ use sha2::{Digest, Sha256};
 use crate::models::EntryRecord;
 
 pub const DEFAULT_LIMIT: usize = 5;
-/// A panel longer than this is a list to scroll, not a suggestion.
+/// The most suggestions one request can ask for: a panel longer than this is a list to scroll, not
+/// a suggestion.
 pub const MAX_LIMIT: usize = 20;
-/// The most history lines `history_suggestions` will consider, so a client cannot ask for a
-/// whole-history scan.
-pub const REQUEST_LIMIT: usize = 50;
 
 /// Reading more bytes than this cannot change the ranking usefully, and history files in the wild
 /// run to hundreds of megabytes. The tail is what matters: it holds the recent commands.
@@ -39,10 +37,53 @@ const DENY_LIST: [&str; 7] = ["ls", "cd", "clear", "exit", "history", "pwd", "gi
 
 /// Substrings that make an environment assignment a credential rather than a setting.
 const SECRET_NAME_MARKERS: [&str; 5] = ["TOKEN", "SECRET", "PASS", "KEY", "AUTH"];
-/// Long options that exist only to carry a secret.
-const SECRET_FLAGS: [&str; 5] = ["--password", "--passwd", "--pass", "--token", "--secret"];
+/// Substrings that make a long option, or a dotted/dashed/underscored setting name, one that
+/// carries a credential: `--api-key`, `--client-secret`, `aws_secret_access_key`, `user.password`.
+const SECRET_WORD_MARKERS: [&str; 11] = [
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "apikey",
+    "api-key",
+    "api_key",
+    "access-key",
+    "access_key",
+    "private-key",
+    "private_key",
+];
 /// Options that take a `user:password` value.
 const CREDENTIAL_FLAGS: [&str; 3] = ["-u", "--user", "--username"];
+/// Programs (and the `login` subcommand of docker, podman, helm …) whose standalone `-p` takes a
+/// password as the next argument - unlike `ssh -p 2222` or `docker run -p 8080:80`, a port.
+const PASSWORD_P_COMMANDS: [&str; 7] = [
+    "sshpass",
+    "mysql",
+    "mysqldump",
+    "mysqladmin",
+    "mariadb",
+    "mariadb-dump",
+    "login",
+];
+/// Header names (in `-H 'Name: value'`) that carry a credential. `Authorization` is caught on its
+/// own, wherever it appears.
+const SECRET_HEADER_MARKERS: [&str; 7] = [
+    "key", "token", "secret", "auth", "cookie", "password", "session",
+];
+/// git subcommands that take a commit id, so a 40- or 64-character hex argument there is a hash,
+/// not a credential.
+const GIT_REVISION_COMMANDS: [&str; 10] = [
+    "checkout",
+    "switch",
+    "show",
+    "revert",
+    "cherry-pick",
+    "reset",
+    "log",
+    "diff",
+    "rebase",
+    "branch",
+];
 
 /// A shorter command than this is almost always something the user types over and over rather than
 /// saves.
@@ -113,7 +154,8 @@ pub fn locate() -> Vec<HistorySource> {
 /// `locate` with its inputs supplied, so nothing has to read a real home directory to be tested.
 ///
 /// A `$HISTFILE` replaces the zsh default rather than adding to it - zsh only ever writes one
-/// history file - and the same path is never offered twice.
+/// history file - and the same path is never offered twice. The sources come back least recently
+/// written first, which is what [`collect`] relies on for recency.
 pub fn locate_with(env: impl Fn(&str) -> Option<String>, home: &Path) -> Vec<HistorySource> {
     let mut sources = Vec::new();
     let zsh = env("HISTFILE")
@@ -130,6 +172,12 @@ pub fn locate_with(env: impl Fn(&str) -> Option<String>, home: &Path) -> Vec<His
         Shell::Fish,
         &xdg_data.join("fish").join("fish_history"),
     );
+    // Stable, so files with the same (or an unreadable) modification time keep the order above.
+    sources.sort_by_key(|source| {
+        std::fs::metadata(&source.path)
+            .and_then(|meta| meta.modified())
+            .ok()
+    });
     sources
 }
 
@@ -155,9 +203,10 @@ fn home_dir() -> PathBuf {
 
 /// Every command line from every source, oldest first within a file.
 ///
-/// Files are concatenated in `locate` order rather than merged by timestamp: the ranking only needs
-/// *relative* recency, and the most recently used shell is last, so its commands carry the highest
-/// weight.
+/// Files are concatenated in `locate` order - least recently written first - rather than merged by
+/// timestamp: the ranking only needs *relative* recency, and the shell written to most recently is
+/// last, so its commands carry the highest weight. A bash history nobody has touched in months
+/// cannot outrank the zsh history in use today just by being read second.
 pub fn collect(sources: &[HistorySource]) -> Vec<String> {
     let mut lines = Vec::new();
     for source in sources {
@@ -393,20 +442,46 @@ pub fn looks_like_secret(command: &str) -> bool {
     if url_has_credentials(&lower) {
         return true;
     }
-    for flag in SECRET_FLAGS {
-        // `--password=x`, `--password x`, and the flag as the last word on the line.
-        if lower.contains(&format!("{flag}="))
-            || lower.contains(&format!("{flag} "))
-            || lower.ends_with(flag)
-        {
-            return true;
-        }
-    }
 
     let tokens: Vec<&str> = lower.split_whitespace().collect();
+    let password_p = tokens.iter().any(|token| {
+        let program = token.rsplit('/').next().unwrap_or(token);
+        PASSWORD_P_COMMANDS.contains(&program)
+    });
     for (index, token) in tokens.iter().enumerate() {
         if short_password_flag(token) {
             return true;
+        }
+        // `sshpass -p pw`, `docker login -p pw`: the password is the next word.
+        if password_p
+            && *token == "-p"
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| !next.starts_with('-'))
+        {
+            return true;
+        }
+        if secret_long_flag(token) {
+            return true;
+        }
+        if (*token == "-h" || *token == "--header" || token.starts_with("--header="))
+            && header_carries_secret(token, tokens.get(index + 1).copied())
+        {
+            return true;
+        }
+        // `aws configure set aws_secret_access_key X`, `git config user.password X`, and the same
+        // name with its value attached: `db-password=x`.
+        if secret_setting_name(token)
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| !next.starts_with('-'))
+        {
+            return true;
+        }
+        if let Some((name, value)) = token.split_once('=') {
+            if !value.is_empty() && secret_setting_name(name) {
+                return true;
+            }
         }
         if CREDENTIAL_FLAGS.contains(token)
             && option_value(token, index, &tokens).is_some_and(looks_like_credential_pair)
@@ -416,6 +491,54 @@ pub fn looks_like_secret(command: &str) -> bool {
     }
 
     high_entropy_argument(command).is_some()
+}
+
+/// A long option whose name says it carries a credential: `--password`, `--api-key=…`,
+/// `--client-secret`, `--token`. Flagged whether or not a value follows, because one that prompts
+/// is as useless to save as one that leaks.
+fn secret_long_flag(token: &str) -> bool {
+    let Some(flag) = token.strip_prefix("--") else {
+        return false;
+    };
+    let name = flag.split_once('=').map_or(flag, |(name, _)| name);
+    name == "pass"
+        || SECRET_WORD_MARKERS
+            .iter()
+            .any(|marker| name.contains(marker))
+}
+
+/// The header an `-H`/`--header` option sets, when its name carries a credential
+/// (`X-Api-Key:`, `Private-Token:`, `Cookie:`). The value arrives either after `=` or as the next
+/// word, usually quoted.
+fn header_carries_secret(token: &str, next: Option<&str>) -> bool {
+    let value = match token.strip_prefix("--header=") {
+        Some(value) => value,
+        None => match next {
+            Some(next) => next,
+            None => return false,
+        },
+    };
+    let value = value.trim_start_matches(['"', '\'']);
+    let Some((name, _)) = value.split_once(':') else {
+        return false;
+    };
+    SECRET_HEADER_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker))
+}
+
+/// A setting key that names a credential: a single word joined by `_`, `-` or `.` that contains a
+/// credential marker (`aws_secret_access_key`, `user.password`, `db-password`). A bare word like
+/// `secret` - `kubectl get secret` - is not one.
+fn secret_setting_name(token: &str) -> bool {
+    !token.starts_with('-')
+        && token.contains(['_', '-', '.'])
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+        && SECRET_WORD_MARKERS
+            .iter()
+            .any(|marker| token.contains(marker))
 }
 
 /// `-p<value>`: mysql's way of passing a password inline. A value that reads as a port or a publish
@@ -474,16 +597,26 @@ fn looks_like_credential_pair(value: &str) -> bool {
     })
 }
 
-/// `scheme://user:pass@host`. Only the authority is scanned, so an `@` in a later path segment
-/// (`https://example.test/at/issue`) does not look like credentials.
+/// `scheme://user:pass@host`, and `https://<token>@host` - a personal access token as the whole
+/// user part, which is how GitHub and GitLab tokens are usually pasted into a clone URL. A plain
+/// user name outside http(s) (`ssh://git@host`) is left alone. Only the authority is scanned, so
+/// an `@` in a later path segment (`https://example.test/at/issue`) does not look like
+/// credentials.
 fn url_has_credentials(lower: &str) -> bool {
     let mut rest = lower;
     while let Some(scheme) = rest.find("://") {
         let after = &rest[scheme + 3..];
         let end = after.find(['/', '?', '#', ' ']).unwrap_or(after.len());
         let authority = &after[..end];
-        if authority.contains('@') && authority.contains(':') {
-            return true;
+        if let Some((userinfo, _host)) = authority.rsplit_once('@') {
+            let scheme_name = rest[..scheme]
+                .rsplit(|ch: char| !ch.is_ascii_alphanumeric() && ch != '+')
+                .next()
+                .unwrap_or("");
+            let http = scheme_name.starts_with("http");
+            if userinfo.contains(':') || (http && !userinfo.is_empty()) || userinfo.len() >= 20 {
+                return true;
+            }
         }
         let Some(next) = rest[scheme + 3 + end..].find("://") else {
             break;
@@ -497,8 +630,15 @@ fn url_has_credentials(lower: &str) -> bool {
 /// suggesting, so those commands stay out of the panel. Requiring a digit as well as a letter keeps
 /// long flags, ordinary words and simple paths in play.
 fn high_entropy_argument(command: &str) -> Option<String> {
-    command
-        .split_whitespace()
+    let words: Vec<&str> = command.split_whitespace().collect();
+    // `git checkout 3f2a9c…`: a commit id, not a token.
+    let git_revision = words.first() == Some(&"git")
+        && words
+            .get(1)
+            .is_some_and(|sub| GIT_REVISION_COMMANDS.contains(sub));
+    words
+        .into_iter()
+        .filter(|token| !(git_revision && is_commit_id(token)))
         .find(|token| {
             let body = token
                 .trim_matches(['"', '\'', '`', '(', ')', '[', ']', '{', '}', ';', ','].as_slice());
@@ -511,6 +651,11 @@ fn high_entropy_argument(command: &str) -> Option<String> {
                 && body.bytes().any(|byte| byte.is_ascii_alphabetic())
         })
         .map(str::to_string)
+}
+
+/// A full SHA-1 or SHA-256 commit id.
+fn is_commit_id(token: &str) -> bool {
+    matches!(token.len(), 40 | 64) && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// The name a saved suggestion gets: the first two plain words of the command, plus the first plain
@@ -863,6 +1008,48 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_token_as_the_whole_user_part_of_an_http_url() {
+        for command in [
+            "git clone https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/acme/private",
+            "git remote set-url origin https://glpat-abc123@gitlab.example.test/acme/app.git",
+            "curl https://bot@registry.example.test/v2/",
+            "git clone git+ssh://a0b1c2d3e4f5a6b7c8d9e0f1@example.test/acme/app",
+        ] {
+            assert!(looks_like_secret(command), "missed: {command}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_password_given_as_the_word_after_dash_p() {
+        for command in [
+            "sshpass -p hunter2 ssh deploy@host.example.test",
+            "docker login -u bot -p S3cretPass registry.example.test",
+            "podman login registry.example.test -p hunter2",
+            "mysql -u root -p hunter2 appdb",
+            "/usr/bin/mysqldump -p hunter2 appdb",
+        ] {
+            assert!(looks_like_secret(command), "missed: {command}");
+        }
+    }
+
+    #[test]
+    fn rejects_credential_headers_flags_and_setting_names() {
+        for command in [
+            "curl -H 'X-Api-Key: abc123def456' https://api.example.test",
+            "curl -H \"Private-Token: abc123\" https://gitlab.example.test/api",
+            "curl --header=Cookie:session=abc https://app.example.test",
+            "openai --api-key sk-short123 chat",
+            "stripe login --api-key sk_test_123",
+            "az login --client-secret abc --tenant t",
+            "aws configure set aws_secret_access_key AbCd1234",
+            "git config --global user.password hunter2",
+            "vault write auth/token db-password=x",
+        ] {
+            assert!(looks_like_secret(command), "missed: {command}");
+        }
+    }
+
+    #[test]
     fn rejects_long_high_entropy_arguments() {
         for command in [
             "op item get 1b2c3d4e5f60718293a4b5c6d7e8f9012345",
@@ -895,9 +1082,33 @@ mod tests {
             "make deploy staging",
             "tar -czf build.tar.gz dist",
             "rg --hidden --no-ignore TODO src",
+            // A port after `-p`, where `-p` is not a password option.
+            "ssh -p 2222 deploy@host.example.test",
+            "kubectl port-forward svc/api 8080:80 -n staging",
+            // A user name in a URL that is not http(s), and a non-secret header.
+            "git clone ssh://git@github.com/acme/app.git",
+            "psql postgres://app@db.internal/app",
+            "curl -H 'Content-Type: application/json' https://api.example.test",
+            // The resource kind, not a credential.
+            "kubectl get secret -n staging",
+            "kubectl describe secret db-password -n staging",
+            // A full commit id where git expects a revision.
+            "git checkout 3f2a9c1e5b7d4a6f8e0c2b4d6f8a0c2e4b6d8f0a",
+            "git show 9f86d081884c7d65a90f051b18e8d1c8f2a5b7e9d0c1f3a5b7d9e1f3a5b7d9e1",
         ] {
             assert!(!looks_like_secret(command), "false positive: {command}");
         }
+    }
+
+    #[test]
+    fn a_long_hex_value_outside_a_git_revision_is_still_a_secret() {
+        // Old GitHub tokens are 40 hex characters too: only git's revision slots are excused.
+        assert!(looks_like_secret(
+            "gh auth login --hostname example.test 3f2a9c1e5b7d4a6f8e0c2b4d6f8a0c2e4b6d8f0a"
+        ));
+        assert!(looks_like_secret(
+            "git config http.extraheader 3f2a9c1e5b7d4a6f8e0c2b4d6f8a0c2e4b6d8f0a"
+        ));
     }
 
     // ---- naming ------------------------------------------------------------
@@ -1134,6 +1345,16 @@ mod tests {
         std::fs::write(home.join(".zsh_history"), b"zsh one\nzsh two\n").expect("zsh");
         std::fs::write(home.join(".bash_history"), b"bash one\n").expect("bash");
         std::fs::write(fish.join("fish_history"), b"- cmd: fish one\n").expect("fish");
+        // The same modification time everywhere, so the order below is the tie-break alone.
+        let same =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for file in [
+            home.join(".zsh_history"),
+            home.join(".bash_history"),
+            fish.join("fish_history"),
+        ] {
+            set_modified(&file, same);
+        }
 
         let sources = locate_with(|_| None, &home);
         assert_eq!(
@@ -1146,6 +1367,53 @@ mod tests {
         assert_eq!(
             collect(&sources),
             lines(&["zsh one", "zsh two", "bash one", "fish one"])
+        );
+    }
+
+    fn set_modified(path: &Path, time: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open")
+            .set_modified(time)
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn the_history_written_most_recently_is_read_last_and_ranks_as_recent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        // An old bash history read after a live zsh one would hand its stale commands the top
+        // recency weight. Ordered by when each was last written, the live one comes last.
+        std::fs::write(home.join(".bash_history"), b"make old-thing\n").expect("bash");
+        std::fs::write(home.join(".zsh_history"), b"make new-thing\n").expect("zsh");
+        let epoch = std::time::SystemTime::UNIX_EPOCH;
+        set_modified(
+            &home.join(".bash_history"),
+            epoch + std::time::Duration::from_secs(1_600_000_000),
+        );
+        set_modified(
+            &home.join(".zsh_history"),
+            epoch + std::time::Duration::from_secs(1_700_000_000),
+        );
+
+        let sources = locate_with(|_| None, &home);
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.shell)
+                .collect::<Vec<_>>(),
+            vec![Shell::Bash, Shell::Zsh]
+        );
+        let ranked = suggest(&collect(&sources), &[], &HashSet::new(), 5);
+        assert_eq!(
+            ranked
+                .iter()
+                .map(|suggestion| suggestion.command.as_str())
+                .collect::<Vec<_>>(),
+            vec!["make new-thing", "make old-thing"],
+            "equal counts: the command from the history in use today wins"
         );
     }
 

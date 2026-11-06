@@ -55,19 +55,14 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> EntryDraft {
     }
 }
 
-/// Exactly what the `history_suggestions` IPC handler does, minus the window check: read the
-/// history the environment points at, drop what the library already holds or the user dismissed.
-fn scan(state: &AppState, limit: usize) -> Vec<history::Suggestion> {
-    let lines = history::collect(&history::locate());
-    let saved: Vec<_> = state
-        .repo
-        .all_command_records()
-        .expect("commands")
-        .into_iter()
-        .map(|(record, _, _)| record)
-        .collect();
-    let dismissed = state.repo.dismissed_suggestion_keys().expect("dismissed");
-    history::suggest(&lines, &saved, &dismissed, limit)
+/// The `history_suggestions` handler's own code path (`AppState::history_suggestions`), minus the
+/// window check, with the history located inside `home` - never the developer's real one, which
+/// would both change the result and put real commands into a failure message.
+fn scan(state: &AppState, home: &std::path::Path, limit: usize) -> Vec<history::Suggestion> {
+    let sources = history::locate_with(|_| None, home);
+    state
+        .history_suggestions(&sources, limit)
+        .expect("suggestions")
 }
 
 /// A disposable profile per test, so a bare `cargo test` can never open (or create) the
@@ -308,7 +303,9 @@ fn the_command_store_refuses_a_stale_writer_and_keeps_the_winner() {
 fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backend() {
     let _profile = Profile::new("native-crud-history");
     let temp = tempfile::tempdir().expect("tempdir");
-    let history_file = temp.path().join("zsh_history");
+    // A home of its own: `locate` also reads `.bash_history` and fish's history from `$HOME`.
+    let home = temp.path();
+    let history_file = home.join(".zsh_history");
     std::fs::write(
         &history_file,
         b": 1700000001:0;make ship\n\
@@ -318,11 +315,9 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
 : 1700000005:0;export GITHUB_TOKEN=ghp_syntheticvalue0123456789\n",
     )
     .expect("write history");
-    // The only way `locate` should find this file: exactly what the handler does on a real machine.
-    std::env::set_var("HISTFILE", &history_file);
 
     let state = bootstrap();
-    let first = scan(&state, 5);
+    let first = scan(&state, home, 5);
     assert_eq!(
         first
             .iter()
@@ -337,7 +332,7 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
     // Saving the command takes it out of the panel, even with different spacing to the library's.
     let mut draft = draft(Kind::Command, "Ship it", "make  ship", "");
     state.repo.save_command(&mut draft).expect("save command");
-    let after_save = scan(&state, 5);
+    let after_save = scan(&state, home, 5);
     assert_eq!(
         after_save
             .iter()
@@ -373,9 +368,7 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
         "the dismissal is stored, by digest only"
     );
     assert!(
-        scan(&restarted, 5).is_empty(),
+        scan(&restarted, home, 5).is_empty(),
         "a dismissed suggestion stays gone after a restart"
     );
-
-    std::env::remove_var("HISTFILE");
 }

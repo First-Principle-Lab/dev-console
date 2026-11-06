@@ -340,7 +340,7 @@
       if (!state.settings.historySuggestionsEnabled) return [];
       state.historyScans += 1;
       const raw = payload && payload.limit != null ? payload.limit : 5;
-      return readHistory(Math.max(1, Math.min(Number(raw), 50)));
+      return readHistory(Math.max(1, Math.min(Number(raw), 20)));
     }
     if (command === 'dismiss_suggestion') {
       const key = String((payload && payload.key) || '');
@@ -354,6 +354,15 @@
         saveDismissals(state.dismissed);
       }
       return null;
+    }
+    if (command === 'dismissed_suggestion_count') {
+      return dismissedKeys().length;
+    }
+    if (command === 'clear_dismissed_suggestions') {
+      const count = dismissedKeys().length;
+      state.dismissed = [];
+      saveDismissals([]);
+      return count;
     }
     if (command === 'set_pinned') {
       if (request.kind === 'secret') requireVault();
