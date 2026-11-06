@@ -1,29 +1,35 @@
 <script lang="ts">
-  import { ICON_PATHS, type IconName } from '../lib/icons';
+  import {
+    ArrowLeft, Check, Copy, Eye, Inbox, KeyRound, List, LockKeyhole,
+    LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search,
+    Settings, Shield, Terminal, Trash2, TriangleAlert
+  } from '@lucide/svelte';
+  import type { IconName } from '../lib/icons';
 
   let { name, size = 14 }: { name: IconName; size?: number } = $props();
-  const outlined = $derived(name === 'command' || name === 'collection' || name === 'inbox');
+  const icons = {
+    command: Terminal,
+    collection: List,
+    inbox: Inbox,
+    secret: KeyRound,
+    lock: LockKeyhole,
+    unlock: LockKeyholeOpen,
+    copy: Copy,
+    reveal: Eye,
+    edit: Pencil,
+    pin: Pin,
+    run: Play,
+    trash: Trash2,
+    search: Search,
+    plus: Plus,
+    back: ArrowLeft,
+    alert: TriangleAlert,
+    check: Check,
+    shield: Shield,
+    gear: Settings,
+    update: RefreshCw
+  } satisfies Record<IconName, typeof Terminal>;
+  let Component = $derived(icons[name]);
 </script>
 
-<svg
-  class="icon"
-  width={size}
-  height={size}
-  viewBox="0 0 20 20"
-  fill={outlined ? 'none' : 'currentColor'}
-  stroke={outlined ? 'currentColor' : 'none'}
-  stroke-width="1.8"
-  stroke-linecap="round"
-  stroke-linejoin="round"
-  aria-hidden="true"
-  focusable="false"
->
-  <path d={ICON_PATHS[name]}></path>
-</svg>
-
-<style>
-  .icon {
-    flex: none;
-    display: block;
-  }
-</style>
+<Component {size} strokeWidth={1.75} aria-hidden="true" focusable="false" />

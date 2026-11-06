@@ -355,6 +355,42 @@ impl Repository {
         Ok(())
     }
 
+    pub fn set_command_pinned(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        pinned: bool,
+    ) -> AppResult<SavedEntry> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let changed = conn
+            .execute(
+                "UPDATE entries SET pinned = ?1, revision = revision + 1, updated_at = ?2
+                 WHERE id = ?3 AND kind = 'command' AND revision = ?4",
+                params![pinned as i64, now_rfc3339(), id, expected_revision],
+            )
+            .map_err(AppError::storage)?;
+        if changed == 0 {
+            let exists = conn
+                .query_row(
+                    "SELECT 1 FROM entries WHERE id = ?1 AND kind = 'command'",
+                    params![id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(AppError::storage)?;
+            return Err(if exists.is_some() {
+                AppError::Conflict
+            } else {
+                AppError::NotFound
+            });
+        }
+        Ok(SavedEntry {
+            id: id.to_string(),
+            revision: expected_revision + 1,
+            kind: Kind::Command,
+        })
+    }
+
     /// Replaces the whole command table with `records`, in one transaction. Used by archive
     /// import, which validates everything before anything is applied.
     pub fn replace_all_commands(&self, records: &[EntryRecord]) -> AppResult<usize> {

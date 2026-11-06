@@ -524,6 +524,33 @@ impl VaultService {
         })
     }
 
+    pub fn set_pinned(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        pinned: bool,
+    ) -> AppResult<SavedEntry> {
+        let now = crate::repository::now_rfc3339();
+        self.write(|file| {
+            let record = file
+                .records
+                .iter_mut()
+                .find(|r| r.id == id)
+                .ok_or(AppError::NotFound)?;
+            if record.revision != expected_revision {
+                return Err(AppError::Conflict);
+            }
+            record.pinned = pinned;
+            record.revision += 1;
+            record.updated_at = now;
+            Ok(SavedEntry {
+                id: id.to_string(),
+                revision: record.revision,
+                kind: Kind::Secret,
+            })
+        })
+    }
+
     pub fn record_usage(&self, id: &str) -> AppResult<()> {
         let now = crate::repository::now_rfc3339();
         self.write(|file| {
@@ -715,6 +742,25 @@ mod tests {
         assert_eq!(record.value, "synthetic-value-1");
         assert_eq!(record.name, "Registry token");
         assert_eq!(record.fields[0].value, "svc-build@example.test");
+        h.erase();
+    }
+
+    #[test]
+    fn pinning_a_secret_preserves_its_value_and_rejects_stale_revisions() {
+        let h = Harness::new();
+        let vault = h.unlocked();
+        let saved = vault
+            .save(&mut secret("Registry token", "synthetic-value-1"))
+            .expect("save");
+        let pinned = vault
+            .set_pinned(&saved.id, saved.revision, true)
+            .expect("pin");
+        assert_eq!(pinned.revision, 2);
+        assert!(vault.set_pinned(&saved.id, saved.revision, false).is_err());
+        let reopened = h.unlocked();
+        let record = reopened.get(&saved.id).expect("get");
+        assert!(record.pinned);
+        assert_eq!(record.value, "synthetic-value-1");
         h.erase();
     }
 

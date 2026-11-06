@@ -1,7 +1,7 @@
 /* ------------------------------------------------------------------ tokens
    Every colour, radius, space, control height and shadow in the application
-   comes from this file. Components must not hardcode colours; if a shade is
-   missing here, add a token instead of a literal.
+   comes from tokens here or the Omarchy palette overrides in omarchy.css.
+   Components must not hardcode colours; if a shade is missing, add a token.
 
    Dark graphite is the default surface family (never pure black), with one
    restrained indigo accent used for selection, focus, primary actions and

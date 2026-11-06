@@ -224,6 +224,22 @@ test('the terminal field parses quoted arguments instead of splitting on spaces'
   expect(stored).toEqual(['/usr/bin/my terminal', '--title', 'Dev Console', '-e']);
 });
 
+test('Settings lists installed terminals and saves the selected launch command', async ({ page }) => {
+  await openSettings(page);
+  const choice = page.getByTestId('terminal-choice');
+  await expect(choice.getByRole('option')).toHaveText(['Ghostty', 'Kitty', 'Custom command']);
+  await choice.selectOption('kitty');
+  await expect(page.getByTestId('terminal')).toHaveCount(0);
+  await expect(page.getByTestId('terminal-tokens')).toContainText('/usr/bin/kitty');
+  await page.screenshot({ path: 'artifacts/ui-review/terminal-settings.png' });
+  await page.getByTestId('save-settings').click();
+  const stored = await page.evaluate(() => (window as unknown as { __mock: { state: { settings: { terminal: string[] } } } }).__mock.state.settings.terminal);
+  expect(stored).toEqual(['/usr/bin/kitty', '--']);
+  await page.getByTestId('close-settings').click();
+  await page.getByTestId('settings').click();
+  await expect(page.getByTestId('terminal-choice')).toHaveValue('kitty');
+});
+
 test('an unbalanced quote blocks saving the terminal setting', async ({ page }) => {
   await openSettings(page);
   await page.getByTestId('terminal').fill('foot --title "broken');

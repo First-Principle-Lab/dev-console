@@ -6,6 +6,7 @@
     title,
     label,
     labelledBy,
+    wide = false,
     oncancel,
     children,
     footer
@@ -14,6 +15,7 @@
     /** Accessible name when it should differ from the visible title. */
     label?: string;
     labelledBy?: string;
+    wide?: boolean;
     oncancel?: () => void;
     children?: import('svelte').Snippet;
     footer?: import('svelte').Snippet;
@@ -22,26 +24,29 @@
   let panel = $state<HTMLDivElement | null>(null);
 
   onMount(() => {
+    window.addEventListener('keydown', onkey, true);
     void tick().then(() => {
       const focusable = panel?.querySelector<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
       (focusable ?? panel)?.focus();
     });
+    return () => window.removeEventListener('keydown', onkey, true);
   });
 
   function onkey(event: KeyboardEvent): void {
     if (event.key === 'Escape' && oncancel) {
-      event.stopPropagation();
+      event.preventDefault();
+      event.stopImmediatePropagation();
       oncancel();
     }
   }
 </script>
 
 <div class="backdrop" role="presentation" onclick={(event) => oncancel && event.target === event.currentTarget && oncancel()}
-  onkeydown={onkey}>
+  >
   <div
-    class="dialog surface-shell"
+    class="dialog surface-shell" class:wide
     role="dialog"
     aria-modal="true"
     tabindex="-1"
@@ -77,6 +82,9 @@
     gap: var(--sp-3);
     max-height: 90vh;
     overflow: auto;
+  }
+  .dialog.wide {
+    width: min(780px, 100%);
   }
   .title {
     font-size: var(--text-lg);

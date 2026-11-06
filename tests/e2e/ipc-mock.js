@@ -25,13 +25,19 @@
       clipboardExpirySeconds: 30,
       terminal: ['x-terminal-emulator', '-e']
     },
+    terminals: seed.terminals || [
+      { id: 'ghostty', name: 'Ghostty', command: ['/usr/bin/ghostty', '-e'] },
+      { id: 'kitty', name: 'Kitty', command: ['/usr/bin/kitty', '--'] }
+    ],
     copied: [],
+    copiedOutputs: [],
     hidden: [],
     opened: [],
     closes: 0,
     quits: 0,
     runs: [],
     failCopy: false,
+    failCopyOutput: false,
     searchDelayMs: 0,
     delayedRequestId: 0,
     revisionMismatch: false,
@@ -201,6 +207,10 @@
       if (!record) throw new Error('entry not found');
       return details(record, request.kind, false);
     }
+    if (command === 'open_url') {
+      (window.__openedUrls = window.__openedUrls || []).push(payload.url);
+      return null;
+    }
     if (command === 'reveal_secret') {
       requireVault();
       const record = state.secrets.find((r) => r.id === request.id);
@@ -226,6 +236,18 @@
       emit('entries-changed', { kind: draft.kind, id, revision: 1, operation: 'created', vaultGeneration: state.generation });
       return { id, revision: 1, kind: draft.kind };
     }
+    if (command === 'set_pinned') {
+      if (request.kind === 'secret') requireVault();
+      const pool = request.kind === 'command' ? state.commands : state.secrets;
+      const record = pool.find((r) => r.id === request.id);
+      if (!record) throw new Error('entry not found');
+      if (record.revision !== request.expectedRevision) throw new Error('this entry was changed elsewhere');
+      record.pinned = request.pinned;
+      record.revision += 1;
+      record.updatedAt = now;
+      emit('entries-changed', { kind: request.kind, id: record.id, revision: record.revision, operation: 'updated', vaultGeneration: state.generation });
+      return { id: record.id, revision: record.revision, kind: request.kind };
+    }
     if (command === 'delete_entry') {
       if (request.kind === 'secret') requireVault();
       const pool = request.kind === 'command' ? state.commands : state.secrets;
@@ -245,12 +267,36 @@
       state.copied.push({ id: record.id, kind: request.kind, value: request.kind === 'command' ? record.command : record.value });
       return { kind: request.kind, id: record.id, expiresAtMs: Date.now() + 30000, excluded: false, exclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' } };
     }
+    if (command === 'copy_command_output') {
+      if (state.failCopyOutput) throw new Error('clipboard provider is unavailable');
+      if (!payload.text || payload.text.length > 64 * 1024) throw new Error('command output is empty or too large to copy');
+      state.copiedOutputs.push(payload.text);
+      return { kind: 'command', id: 'command-output', expiresAtMs: Date.now() + 30000, excluded: false, exclusion: { supported: false, mechanism: 'none', detail: 'mocked clipboard provider' } };
+    }
     if (command === 'run_command') {
       if (!request.approved) throw new Error('running this command needs explicit approval');
       const record = state.commands.find((r) => r.id === request.id);
       if (!record) throw new Error('entry not found');
       state.runs.push({ id: record.id, revision: record.revision });
-      return null;
+      const terminal = /(^|[^a-zA-Z0-9_])sudo(?=$|[^a-zA-Z0-9_])/.test(record.command);
+      if (terminal) return { mode: 'terminal', stdout: '', stderr: '', exitCode: null, truncated: false, timedOut: false };
+      return { mode: 'inline', stdout: '', stderr: '', exitCode: 0, truncated: false, timedOut: false,
+        ...(seed.runResults?.[record.command] || {}) };
+    }
+    if (command === 'run_command_captured') {
+      if (!request.approved) throw new Error('running this command needs explicit approval');
+      const record = state.commands.find((r) => r.id === request.id);
+      if (!record) throw new Error('entry not found');
+      state.runs.push({ id: record.id, revision: record.revision, captured: true });
+      const fails = record.command.includes('fail');
+      return {
+        exitCode: fails ? 2 : 0,
+        stdout: fails ? '' : 'mock stdout for ' + record.command + '\n',
+        stderr: fails ? 'mock stderr: it broke\n' : '',
+        truncated: false,
+        timedOut: false,
+        durationMs: 12
+      };
     }
     if (command === 'lock_vault') {
       state.manualLock = true;
@@ -327,6 +373,7 @@
       if (!payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
       return { source: payload.path, commands: 2, secrets: 1 };
     }
+    if (command === 'list_terminals') return clone(state.terminals);
     if (command === 'save_settings') { state.settings = clone(payload.settings); return clone(state.settings); }
     throw new Error(`unmocked command ${command}`);
   }

@@ -1,8 +1,8 @@
 <script lang="ts">
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
+  import { Copy, Pin, PinOff, Trash2 } from '@lucide/svelte';
   import type { EntryMeta } from '../lib/models';
-  import { absoluteTime, relativeTime } from '../lib/time';
 
   let {
     entries,
@@ -11,7 +11,11 @@
     locked,
     emptyText,
     kind,
-    onSelect
+    onSelect,
+    onCopy,
+    onPin,
+    onDelete,
+    actionsDisabled = false
   }: {
     entries: EntryMeta[];
     selectedId: string | null;
@@ -20,20 +24,12 @@
     emptyText: string;
     kind: 'command' | 'secret';
     onSelect: (entry: EntryMeta) => void;
+    onCopy: (entry: EntryMeta) => void;
+    onPin: (entry: EntryMeta) => void;
+    onDelete: (entry: EntryMeta) => void;
+    actionsDisabled?: boolean;
   } = $props();
 
-  function usage(entry: EntryMeta): string {
-    if (entry.usageCount === 1) return 'used once';
-    if (entry.usageCount > 1) return `used ${entry.usageCount}×`;
-    return 'unused';
-  }
-
-  function onkeydown(event: KeyboardEvent, entry: EntryMeta): void {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      onSelect(entry);
-    }
-  }
 </script>
 
 <div class="list" id="entry-list" role="listbox" aria-label="{kind === 'secret' ? 'Secrets' : 'Commands'}" aria-busy={loading}
@@ -55,44 +51,26 @@
     {#each entries as entry (entry.id)}
       <div
         class="row-wrap"
-        role="option"
-        tabindex={entry.id === selectedId ? 0 : -1}
-        aria-selected={entry.id === selectedId}
+        role="presentation"
         class:selected={entry.id === selectedId}
-        class:secret={entry.kind === 'secret'}
-        onclick={() => onSelect(entry)}
-        onkeydown={(event) => onkeydown(event, entry)}
+        data-entry-id={entry.id}
         data-testid="entry-row"
       >
-        <span class="kind" aria-hidden="true">
-          <Icon name={entry.kind === 'secret' ? 'secret' : 'command'} size={14} />
-        </span>
-        <span class="main">
-          <span class="name truncate">
-            {#if entry.pinned}<span class="pin" title="Pinned"><Icon name="pin" size={11} /></span>{/if}
-            {entry.name}
-          </span>
-          <span class="meta truncate">
-            <span class="type">{entry.type}</span>
-            {#each entry.tags.slice(0, 2) as tag (tag)}
-              <span class="tag">#{tag}</span>
-            {/each}
-            <span class="dot" aria-hidden="true">·</span>
-            <span>{usage(entry)}</span>
-            {#if entry.updatedAt}
-              <span class="dot" aria-hidden="true">·</span>
-              <span title={absoluteTime(entry.updatedAt)}>{relativeTime(entry.updatedAt)}</span>
-            {/if}
-          </span>
-        </span>
-        {#if entry.kind === 'secret'}
-          <!-- A wide "hidden" pill ate enough width that the updated time ellipsised away on
-               every secret row at the default pane width. The glyph says the same thing here,
-               and the detail pane spells the rule out in full. -->
-          <span class="masked" title="Value hidden" role="img" aria-label="Value hidden">
-            <Icon name="lock" size={11} />
-          </span>
-        {/if}
+        <button class="row-select" type="button" role="option" aria-selected={entry.id === selectedId}
+          onclick={() => onSelect(entry)} data-testid="select-entry">
+          <span class="name truncate">{entry.name}</span>
+        </button>
+        <div class="row-actions">
+          <button class="icon-action" type="button" aria-label={`Copy ${entry.name}`} title={`Copy ${entry.name}`}
+            onclick={() => onCopy(entry)} data-testid="row-copy"><Copy size={14} strokeWidth={1.75} /></button>
+          <button class="icon-action" class:active={entry.pinned} type="button" aria-label={`${entry.pinned ? 'Unpin' : 'Pin'} ${entry.name}`}
+            aria-pressed={entry.pinned} title={`${entry.pinned ? 'Unpin' : 'Pin'} ${entry.name}`} disabled={actionsDisabled}
+            onclick={() => onPin(entry)} data-testid="row-pin">
+            {#if entry.pinned}<PinOff size={14} strokeWidth={1.75} />{:else}<Pin size={14} strokeWidth={1.75} />{/if}
+          </button>
+          <button class="icon-action delete-action" type="button" aria-label={`Delete ${entry.name}`} title={`Delete ${entry.name}`}
+            disabled={actionsDisabled} onclick={() => onDelete(entry)} data-testid="row-delete"><Trash2 size={14} strokeWidth={1.75} /></button>
+        </div>
       </div>
     {/each}
   {/if}
@@ -111,11 +89,10 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    min-height: var(--row-h);
-    padding: var(--sp-2);
+    min-height: 44px;
+    padding: 4px var(--sp-2);
     border-radius: var(--radius-row);
     border: 1px solid transparent;
-    cursor: pointer;
     transition:
       background var(--transition),
       border-color var(--transition),
@@ -135,74 +112,58 @@
   .row-wrap.selected:hover {
     background: var(--selected);
   }
-  .kind {
-    display: grid;
-    place-items: center;
-    width: var(--tile-md);
-    height: var(--tile-md);
-    flex: none;
+  .row-select {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0;
+    border: 0;
     border-radius: var(--radius-sm);
-    color: var(--kind-command);
+    background: transparent;
+    text-align: left;
+    white-space: normal;
+  }
+  .row-select:hover:not(:disabled) {
+    background: transparent;
+    border: 0;
+  }
+  .row-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .row-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+  }
+  .icon-action {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--fg-muted);
+  }
+  .icon-action.active {
+    color: var(--accent);
     background: var(--accent-soft);
   }
-  .secret .kind {
-    color: var(--kind-secret);
-    background: var(--secret-soft);
+  .delete-action {
+    color: var(--danger);
   }
-  .main {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-    flex: 1;
-    /* The ellipsis needs a little air before the trailing badge, otherwise the clipped
-       character reads as the end of the word. */
-    padding-right: var(--sp-2);
-  }
-  /* The name and metadata lines clip with a real ellipsis. A flex container cannot ellipsize its
-     own overflow, which is why the review screenshots showed rows cut mid-word with a dangling
-     separator; these lines are inline text, so the `.truncate` utility only works on them while
-     they are laid out inline. */
   .name {
     display: block;
+    min-width: 0;
     color: var(--fg);
     font-size: var(--text-row);
     font-weight: 550;
-  }
-  .pin {
-    color: var(--accent);
-    display: inline-flex;
-    vertical-align: -1px;
-    margin-right: var(--gap-keys);
-  }
-  .meta {
-    display: block;
-    color: var(--fg-muted);
-    font-size: var(--text-row-meta);
-  }
-  .meta > * + * {
-    margin-left: var(--gap-tags);
-  }
-  .type {
-    color: var(--fg-muted);
-  }
-  .tag {
-    color: var(--fg-dim);
-  }
-  .dot {
-    color: var(--fg-dim);
-  }
-  .masked {
-    display: grid;
-    place-items: center;
-    width: var(--badge-min);
-    height: var(--badge-min);
-    flex: none;
-    border: var(--border);
-    border-color: var(--kind-secret);
-    border-radius: var(--radius-pill);
-    background: var(--secret-soft);
-    color: var(--kind-secret);
   }
   .locked-note {
     display: flex;

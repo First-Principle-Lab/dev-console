@@ -40,6 +40,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 #[serde(rename_all = "camelCase")]
 pub struct Request {
     pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +153,7 @@ fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>)
     }
     let request: Request = serde_json::from_str(line.trim())
         .map_err(|_| AppError::Validation("control request was not valid JSON".into()))?;
-    let reply = dispatch(&request.command, app, state);
+    let reply = dispatch(&request.command, request.path.as_deref(), app, state);
     let mut stream = stream;
     stream
         .write_all(serde_json::to_vec(&reply)?.as_slice())
@@ -162,8 +164,45 @@ fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>)
 }
 
 /// The authoritative implementation, shared by the socket server and the in-process paths.
-pub fn dispatch(command: &str, app: &AppHandle, state: &Arc<AppState>) -> Reply {
+pub fn dispatch(
+    command: &str,
+    path: Option<&str>,
+    app: &AppHandle,
+    state: &Arc<AppState>,
+) -> Reply {
     match command {
+        "import.bitwarden" => {
+            let result = match path {
+                Some(path) => crate::import::bitwarden(state, path),
+                None => Err(AppError::Validation("a file path is required".into())),
+            };
+            match result {
+                Ok(outcome) => {
+                    if outcome.imported + outcome.renamed > 0 {
+                        let _ = app.emit("vault-state-changed", state.vault.state());
+                    }
+                    let mut message = format!(
+                        "imported {} secrets, renamed {}, {} already existed",
+                        outcome.imported, outcome.renamed, outcome.duplicates
+                    );
+                    for skipped in &outcome.skipped {
+                        message.push_str(&format!("\nskipped: {skipped}"));
+                    }
+                    Reply {
+                        ok: true,
+                        code: EXIT_OK,
+                        message,
+                        vault: None,
+                    }
+                }
+                Err(error) => Reply {
+                    ok: false,
+                    code: EXIT_ERROR,
+                    message: error.to_string(),
+                    vault: Some(state.vault.state()),
+                },
+            }
+        }
         "vault.lock" => {
             // Order matters: secrets stop being readable first, then any app-owned copy in the
             // clipboard is cleared while it is still the app's value.
@@ -281,6 +320,7 @@ fn send(request: &Request) -> Option<Reply> {
 pub fn instance_running() -> bool {
     send(&Request {
         command: "vault.status".into(),
+        path: None,
     })
     .is_some()
 }
@@ -294,6 +334,7 @@ pub fn run(command: VaultCommand) -> AppResult<i32> {
     };
     if let Some(reply) = send(&Request {
         command: name.into(),
+        path: None,
     }) {
         if reply.ok {
             println!("{}", reply.message);
@@ -358,5 +399,25 @@ pub fn run(command: VaultCommand) -> AppResult<i32> {
             );
             Ok(EXIT_NOT_RUNNING)
         }
+    }
+}
+
+/// CLI entry point for `import bitwarden`. Needs the resident app, which owns the unlocked vault.
+pub fn run_import(file: &str) -> AppResult<i32> {
+    let path = std::fs::canonicalize(file)
+        .map_err(|e| AppError::Validation(format!("cannot open {file}: {e}")))?;
+    let Some(reply) = send(&Request {
+        command: "import.bitwarden".into(),
+        path: Some(path.to_string_lossy().into_owned()),
+    }) else {
+        eprintln!("dev-console: no running instance; start Dev Console and unlock the vault first");
+        return Ok(EXIT_NOT_RUNNING);
+    };
+    if reply.ok {
+        println!("{}", reply.message);
+        Ok(EXIT_OK)
+    } else {
+        eprintln!("dev-console: {}", reply.message);
+        Ok(reply.code.max(EXIT_ERROR))
     }
 }

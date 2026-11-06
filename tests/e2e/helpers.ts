@@ -22,6 +22,7 @@ export function mockState(page: Page): Promise<{
   commands: { id: string; name: string; type: string; pinned: boolean; revision: number; fields: unknown[] }[];
   secrets: { id: string; name: string; value: string; revision: number }[];
   copied: { id: string; kind: string; value: string }[];
+  copiedOutputs: string[];
   hidden: string[];
   opened: unknown[];
   runs: unknown[];

@@ -7,6 +7,7 @@ pub mod control;
 pub mod desktop_icons;
 pub mod error;
 pub mod execution;
+pub mod import;
 pub mod ipc;
 pub mod keyring;
 pub mod models;
@@ -39,6 +40,13 @@ pub fn run() {
             std::process::exit(0);
         }
         Intent::Vault(command) => match control::run(command) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ImportBitwarden(file) => match control::run_import(&file) {
             Ok(code) => std::process::exit(code),
             Err(error) => {
                 eprintln!("dev-console: {error}");
@@ -112,8 +120,11 @@ fn build(argv: Vec<String>) {
             ipc::get_entry,
             ipc::reveal_secret,
             ipc::save_entry,
+            ipc::set_pinned,
             ipc::delete_entry,
+            ipc::open_url,
             ipc::copy_entry,
+            ipc::copy_command_output,
             ipc::run_command,
             ipc::lock_vault,
             ipc::unlock_vault,
@@ -122,7 +133,9 @@ fn build(argv: Vec<String>) {
             ipc::allow_close,
             ipc::cancel_quit,
             ipc::quit_app,
+            ipc::restart_app,
             ipc::get_settings,
+            ipc::list_terminals,
             ipc::save_settings,
             ipc::open_settings,
             ipc::create_backup,

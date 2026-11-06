@@ -223,6 +223,51 @@ pub fn save_entry<R: Runtime>(
 }
 
 #[tauri::command]
+pub fn set_pinned<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: PinRequest,
+) -> AppResult<SavedEntry> {
+    require_library(&window)?;
+    let state = state(&app);
+    let saved = match request.kind {
+        Kind::Command => {
+            state
+                .repo
+                .set_command_pinned(&request.id, request.expected_revision, request.pinned)?
+        }
+        Kind::Secret => {
+            state
+                .vault
+                .set_pinned(&request.id, request.expected_revision, request.pinned)?
+        }
+    };
+    emit_entries_changed(&app, &saved, "updated");
+    Ok(saved)
+}
+
+/// Opens an http(s) link from a URL field in the user's default browser. Anything else is
+/// rejected so a stored value can never launch an arbitrary scheme or program.
+#[tauri::command]
+pub fn open_url<R: Runtime>(window: WebviewWindow<R>, url: String) -> AppResult<()> {
+    require_library(&window)?;
+    let url = url.trim();
+    if !crate::repository::is_http_url(url) || url.starts_with('-') {
+        return Err(AppError::Validation(
+            "only http(s) links can be opened".into(),
+        ));
+    }
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::Other(format!("could not open the browser: {e}")))
+}
+
+#[tauri::command]
 pub fn delete_entry<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
@@ -294,11 +339,30 @@ pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppRes
 }
 
 #[tauri::command]
-pub fn run_command<R: Runtime>(
+pub fn copy_command_output<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    text: String,
+) -> AppResult<CopyResult> {
+    require_library(&window)?;
+    if text.is_empty() || text.len() > 64 * 1024 {
+        return Err(AppError::Validation(
+            "command output is empty or too large to copy".into(),
+        ));
+    }
+    let state = state(&app);
+    let expiry = state.settings.get().clipboard_expiry_seconds;
+    state
+        .clipboard
+        .copy(Kind::Command, "command-output", &text, expiry)
+}
+
+#[tauri::command]
+pub async fn run_command<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: RunRequest,
-) -> AppResult<()> {
+) -> AppResult<execution::RunResult> {
     require_library(&window)?;
     let state = state(&app);
     let (record, _, _) = state
@@ -314,9 +378,24 @@ pub fn run_command<R: Runtime>(
     if !state.repo.approval_state(&record)? {
         state.repo.approve_execution(&record)?;
     }
-    execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
-    state.repo.record_usage(&record.id)?;
-    Ok(())
+    let record_id = record.id.clone();
+    let result = if execution::needs_terminal(&record.command) {
+        execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
+        execution::RunResult {
+            mode: "terminal",
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            truncated: false,
+            timed_out: false,
+        }
+    } else {
+        tauri::async_runtime::spawn_blocking(move || execution::execute_inline(&record, "/bin/sh"))
+            .await
+            .map_err(|error| AppError::Execution(format!("command task failed: {error}")))??
+    };
+    state.repo.record_usage(&record_id)?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -404,6 +483,27 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) ->
     Ok(())
 }
 
+/// Relaunch into the library after an update, even when this process started in the background.
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    use std::os::unix::process::CommandExt;
+    require_library(&window)?;
+    let binary = tauri::process::current_binary(&app.env())
+        .map_err(|e| AppError::Other(format!("could not locate the app: {e}")))?;
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 1; exec \"$0\" --library")
+        .arg(binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| AppError::Other(format!("could not relaunch: {e}")))?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn quit_app<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
     windows::request_quit(&app)
@@ -416,6 +516,14 @@ pub fn get_settings<R: Runtime>(
 ) -> AppResult<Settings> {
     require_library(&window)?;
     Ok(state(&app).settings.get())
+}
+
+#[tauri::command]
+pub fn list_terminals<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> AppResult<Vec<execution::TerminalOption>> {
+    require_library(&window)?;
+    Ok(execution::available_terminals())
 }
 
 #[tauri::command]
