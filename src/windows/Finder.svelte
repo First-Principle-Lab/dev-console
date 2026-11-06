@@ -142,6 +142,8 @@
    */
   async function ignoreContext(): Promise<void> {
     context = null;
+    // A new order, so a new first row: keeping the old selection would leave it mid-list.
+    selectedId = null;
     try {
       await api.clearFinderContext();
     } catch {
@@ -228,6 +230,10 @@
         const next = payload ?? null;
         if (next?.root === context?.root && next?.name === context?.name) return;
         context = next;
+        // The first search usually ran before this arrived and selected its own top row. The
+        // project's commands now lead, so the selection starts again at the top: Enter straight
+        // after Super+F must copy the first project command, not whatever led a moment ago.
+        selectedId = null;
         void runSearch(query).catch(() => undefined);
       })
     ];

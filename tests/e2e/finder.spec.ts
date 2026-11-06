@@ -310,3 +310,24 @@ test('a pinned command still leads the empty query, ahead of the project', async
   await boot(page, seed, 'finder');
   expect((await rowNames(page)).slice(0, 2)).toEqual(['zz pinned elsewhere', 'build release']);
 });
+
+test('a project detected after the first search moves the selection to its first command', async ({ page }) => {
+  // The real backend answers beside the palette, so the first search runs with no project and
+  // selects the most recently used command; the project then arrives as an event.
+  await boot(page, contextSeed(false), 'finder');
+  const input = page.getByTestId('finder-input');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-elsewhere');
+  await page.evaluate((project) => {
+    const mock = (window as never as {
+      __mock: { state: { context: unknown }; emit: (e: string, p: unknown) => void };
+    }).__mock;
+    mock.state.context = project;
+    mock.emit('finder-context', project);
+  }, PROJECT);
+  await expect(page.getByTestId('finder-context')).toContainText('dev-console');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-nested');
+  // Ignoring the project starts from the top of the restored order, too.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Control+p');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-elsewhere');
+});
