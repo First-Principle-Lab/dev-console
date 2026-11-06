@@ -18,4 +18,7 @@ export type IconName =
   | 'check'
   | 'shield'
   | 'gear'
-  | 'update';
+  | 'update'
+  | 'sparkle'
+  | 'close'
+  | 'chevron';

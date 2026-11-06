@@ -6,7 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::*;
 use crate::repository::validate_draft;
 use crate::state::AppState;
-use crate::{execution, search, tray, windows};
+use crate::{execution, history, search, tray, windows};
 
 /// Frontend windows are untrusted. Every privileged operation is re-checked here against the
 /// calling window label, so the restriction does not depend on hidden buttons or on the
@@ -516,6 +516,51 @@ pub fn get_settings<R: Runtime>(
 ) -> AppResult<Settings> {
     require_library(&window)?;
     Ok(state(&app).settings.get())
+}
+
+/// Ranked suggestions taken from the user's own shell history.
+///
+/// The history files are located and parsed here, on request, and only for the library window;
+/// nothing is written to a log and nothing is persisted. With the setting off, the files are never
+/// opened at all.
+#[tauri::command]
+pub fn history_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    limit: Option<usize>,
+) -> AppResult<Vec<history::Suggestion>> {
+    require_library(&window)?;
+    let state = state(&app);
+    if !state.settings.get().history_suggestions_enabled {
+        return Ok(Vec::new());
+    }
+    let limit = limit
+        .unwrap_or(history::DEFAULT_LIMIT)
+        .clamp(1, history::REQUEST_LIMIT);
+    let lines = history::collect(&history::locate());
+    if lines.is_empty() {
+        return Ok(Vec::new());
+    }
+    let saved: Vec<_> = state
+        .repo
+        .all_command_records()?
+        .into_iter()
+        .map(|(record, _, _)| record)
+        .collect();
+    let dismissed = state.repo.dismissed_suggestion_keys()?;
+    Ok(history::suggest(&lines, &saved, &dismissed, limit))
+}
+
+/// Marks one suggestion as never to be offered again. Only its digest is stored, so a dismissal
+/// cannot put a history line into the database either.
+#[tauri::command]
+pub fn dismiss_suggestion<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    key: String,
+) -> AppResult<()> {
+    require_library(&window)?;
+    state(&app).repo.dismiss_suggestion(&key)
 }
 
 #[tauri::command]

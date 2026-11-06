@@ -310,6 +310,9 @@ pub struct Settings {
     pub autostart: bool,
     pub clipboard_expiry_seconds: u64,
     pub terminal: Vec<String>,
+    /// Offer commands taken from the shell's own history as starting points for new entries.
+    /// Off, the history files are never opened.
+    pub history_suggestions_enabled: bool,
 }
 
 impl Default for Settings {
@@ -319,6 +322,7 @@ impl Default for Settings {
             autostart: false,
             clipboard_expiry_seconds: 30,
             terminal: vec!["x-terminal-emulator".into(), "-e".into()],
+            history_suggestions_enabled: true,
         }
     }
 }

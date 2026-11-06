@@ -23,7 +23,8 @@
       theme: 'dark',
       autostart: false,
       clipboardExpirySeconds: 30,
-      terminal: ['x-terminal-emulator', '-e']
+      terminal: ['x-terminal-emulator', '-e'],
+      historySuggestionsEnabled: true
     },
     terminals: seed.terminals || [
       { id: 'ghostty', name: 'Ghostty', command: ['/usr/bin/ghostty', '-e'] },
@@ -38,6 +39,10 @@
     runs: [],
     failCopy: false,
     failCopyOutput: false,
+    // Fake shell history: `{ command, count }`, ranked and filtered exactly like the backend does.
+    history: (seed.history || []).map((entry) => ({ count: 1, ...entry })),
+    dismissed: [],
+    historyScans: 0,
     searchDelayMs: 0,
     delayedRequestId: 0,
     revisionMismatch: false,
@@ -45,6 +50,100 @@
   };
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
+
+  /* ------------------------------------------------------------------------------------------------
+   * Shell-history suggestions. The real backend parses the user's history file and hashes each
+   * command with SHA-256; the double does the counting and the ranking in memory with a stub
+   * digest (the key only ever has to be stable within one page).
+   * ----------------------------------------------------------------------------------------------*/
+  const DISMISSALS_KEY = 'dev-console-test-dismissed-suggestions';
+
+  /// Read at call time, never at init: this double is installed at document start, where storage
+  /// is not always reachable yet, and "a dismissed suggestion stays gone" has to survive a reload.
+  function dismissedKeys() {
+    try {
+      const stored = window.localStorage.getItem(DISMISSALS_KEY);
+      if (stored) state.dismissed = JSON.parse(stored);
+    } catch {
+      /* storage not reachable yet: the in-memory copy still stands for this page */
+    }
+    return state.dismissed;
+  }
+
+  function saveDismissals(keys) {
+    try {
+      window.localStorage.setItem(DISMISSALS_KEY, JSON.stringify(keys));
+    } catch {
+      /* a test double has no durability promises to keep beyond the page */
+    }
+  }
+
+  /// Not SHA-256 - the double has no synchronous crypto here - but the same 64-hex shape, so a
+  /// test that asserts "a digest, never the command" reads the same against either backend.
+  function stubDigest(normalised) {
+    let hash = 0x811c9dc5;
+    for (const ch of normalised) {
+      hash ^= ch.charCodeAt(0);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0').repeat(8);
+  }
+
+  function normaliseCommand(command) {
+    return command.trim().replace(/\s+/g, ' ');
+  }
+
+  /// Mirrors `history::is_word_like`: short, and only characters that read well in a label.
+  function isWordLike(token) {
+    return token.length > 0 && token.length <= 20 && /^[A-Za-z0-9_:@#-]+$/.test(token);
+  }
+
+  /// Mirrors `history::suggested_name`: the first two plain words plus the first plain argument
+  /// after them, dashed - entry names may not contain a space.
+  function suggestName(command) {
+    const tokens = command.trim().split(/\s+/);
+    const words = [];
+    let argument = null;
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (token.startsWith('"') || token.startsWith("'")) {
+        // A quoted value, and everything until the quotes close again, is not a name.
+        while (index + 1 < tokens.length && !tokens[index + 1].endsWith('"') && !tokens[index + 1].endsWith("'")) {
+          index += 1;
+        }
+        index += 1;
+        continue;
+      }
+      if (token.startsWith('-')) {
+        // A short option takes the token after it as its value; a long one spells it out with `=`.
+        if (token.length === 2 && !token.includes('=')) index += 1;
+        continue;
+      }
+      if (!isWordLike(token)) continue;
+      if (words.length < 2) words.push(token);
+      else if (!argument) argument = token;
+    }
+    if (argument && !words.includes(argument)) words.push(argument);
+    return words.join('-');
+  }
+
+  function readHistory(limit) {
+    const saved = new Set(
+      state.commands.map((record) => normaliseCommand(record.command || '')).filter(Boolean)
+    );
+    return state.history
+      .filter((entry) => entry.command.trim().length > 0)
+      .map((entry) => ({
+        key: stubDigest(normaliseCommand(entry.command)),
+        command: entry.command,
+        count: entry.count ?? 1,
+        suggestedName: entry.suggestedName ?? suggestName(entry.command)
+      }))
+      .filter((suggestion) => !saved.has(normaliseCommand(suggestion.command)))
+      .filter((suggestion) => !dismissedKeys().includes(suggestion.key))
+      .sort((left, right) => right.count - left.count || left.command.localeCompare(right.command))
+      .slice(0, limit);
+  }
 
   function meta(record, kind) {
     return {
@@ -235,6 +334,26 @@
       pool.push({ ...clone(draft), id, revision: 1, createdAt: now, updatedAt: now, usageCount: 0 });
       emit('entries-changed', { kind: draft.kind, id, revision: 1, operation: 'created', vaultGeneration: state.generation });
       return { id, revision: 1, kind: draft.kind };
+    }
+    if (command === 'history_suggestions') {
+      // Off means "never read the file at all", which is what the Rust handler guarantees too.
+      if (!state.settings.historySuggestionsEnabled) return [];
+      state.historyScans += 1;
+      const raw = payload && payload.limit != null ? payload.limit : 5;
+      return readHistory(Math.max(1, Math.min(Number(raw), 50)));
+    }
+    if (command === 'dismiss_suggestion') {
+      const key = String((payload && payload.key) || '');
+      const known = state.history.some(
+        (entry) => stubDigest(normaliseCommand(entry.command)) === key
+      );
+      if (!known) throw new Error('unknown suggestion');
+      const remembered = dismissedKeys();
+      if (!remembered.includes(key)) {
+        state.dismissed = [...remembered, key];
+        saveDismissals(state.dismissed);
+      }
+      return null;
     }
     if (command === 'set_pinned') {
       if (request.kind === 'secret') requireVault();

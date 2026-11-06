@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Already in the build through `age`; used directly for the dismissal keys in `history`.
+sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 age = { version = "0.12", default-features = false, features = ["armor"] }
 keyring = "4"

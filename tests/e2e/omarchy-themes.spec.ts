@@ -10,7 +10,12 @@ const SEED = {
     fields: [], pinned: true, command: 'make deploy', workingDirectory: '~/project', usageCount: 4 }],
   secrets: [{ id: 'secret', revision: 1, name: 'Registry token', type: 'API key',
     tags: ['infra'], description: 'Used by the publish job', notes: '', fields: [],
-    pinned: false, value: 'synthetic-theme-secret' }]
+    pinned: false, value: 'synthetic-theme-secret' }],
+  // A seeded history, so the suggestion panel is on screen for every theme capture below.
+  history: [
+    { command: 'docker compose -f compose.yml up --build api', count: 12 },
+    { command: 'bun run test:watch', count: 5 }
+  ]
 };
 
 async function checkViewport(page: import('@playwright/test').Page): Promise<void> {
@@ -53,11 +58,15 @@ for (const [slug, name] of OMARCHY_THEMES) {
   test(`${name} renders library, secrets, editor, settings and finder`, async ({ page }) => {
     const theme = `omarchy-${slug}`;
     const settings = { theme, autostart: false, clipboardExpirySeconds: 30,
-      terminal: ['x-terminal-emulator', '-e'] };
+      terminal: ['x-terminal-emulator', '-e'],
+      historySuggestionsEnabled: true };
     await page.setViewportSize({ width: 1040, height: 700 });
     await boot(page, { ...SEED, settings });
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await expect(page.getByTestId('entry-row')).toHaveCount(1);
+    // The suggestion panel sits above that list and is built from the same palette, so this is the
+    // capture that shows whether its text and rules stay readable in this theme.
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(2);
     await checkViewport(page);
     await page.screenshot({ path: path.join(OUT, `${slug}-library.png`) });
 

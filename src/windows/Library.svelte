@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import EntryList from '../components/EntryList.svelte';
+  import HistorySuggestions from '../components/HistorySuggestions.svelte';
   import EntryDetails from '../components/EntryDetails.svelte';
   import EntryEditor from '../components/EntryEditor.svelte';
   import VaultStatus from '../components/VaultStatus.svelte';
@@ -21,6 +22,7 @@
     EntryDetails as Details,
     EntryDraft,
     EntryMeta,
+    HistorySuggestion,
     Kind,
     RunResult,
     VaultState,
@@ -39,6 +41,10 @@
   let revealed = $state(false);
   let loading = $state(true);
   let listError = $state<string | null>(null);
+  // Commands from the shell's own history, offered as starting points for a new entry. The
+  // backend is the authority on whether they are read at all (the setting is checked there).
+  let suggestions = $state<HistorySuggestion[]>([]);
+  let suggestionsBusy = $state(false);
   let mode = $state<'view' | 'edit'>('view');
   let draft = $state<EntryDraft>(EMPTY_DRAFT('command'));
   let baseline = $state('');
@@ -174,6 +180,51 @@
     await loadDetails(entry.id);
   }
 
+  async function loadSuggestions(): Promise<void> {
+    suggestionsBusy = true;
+    try {
+      suggestions = await api.historySuggestions();
+    } catch {
+      // A missing or unreadable history file is not a failure the user needs to hear about:
+      // there is simply nothing to offer.
+      suggestions = [];
+    } finally {
+      suggestionsBusy = false;
+    }
+  }
+
+  /** Opens the normal editor with the suggestion prefilled; nothing is saved until it is saved. */
+  function saveSuggestion(suggestion: HistorySuggestion): void {
+    if (mode === 'edit' && draftDirty) {
+      status = 'Save or discard the open edit first.';
+      return;
+    }
+    tab = 'command';
+    mode = 'edit';
+    selectedId = null;
+    details = null;
+    draft = {
+      ...EMPTY_DRAFT('command'),
+      name: suggestion.suggestedName || suggestion.command.slice(0, 60),
+      command: suggestion.command
+    };
+    baseline = JSON.stringify(draft);
+    saveError = null;
+    status = null;
+  }
+
+  async function dismissSuggestion(suggestion: HistorySuggestion): Promise<void> {
+    // Gone immediately; the backend only ever learns the digest.
+    suggestions = suggestions.filter((other) => other.key !== suggestion.key);
+    try {
+      await api.dismissSuggestion(suggestion.key);
+      status = 'Dismissed - only its hash is remembered.';
+    } catch (error: unknown) {
+      status = message(error, 'Could not dismiss that suggestion.');
+      void loadSuggestions();
+    }
+  }
+
   function startNew(): void {
     mode = 'edit';
     selectedId = null;
@@ -227,6 +278,8 @@
       selectedId = saved.id;
       status = 'Saved.';
       await loadList();
+      // A command that is now in the library must stop being offered.
+      void loadSuggestions();
     } catch (error: unknown) {
       // The draft is intentionally preserved so nothing typed is lost on a failed write.
       saveError = message(error, 'Save failed. Your changes were kept.');
@@ -394,12 +447,19 @@
           void loadDetails(intent.entryId).catch(() => undefined);
         }
       }),
+      on<{ historySuggestionsEnabled: boolean }>('settings-saved', (saved) => {
+        // Switching the setting off must hide the panel without a reload; switching it back on
+        // re-reads, because the file is never opened while the setting is off.
+        suggestions = saved.historySuggestionsEnabled ? suggestions : [];
+        if (saved.historySuggestionsEnabled) void loadSuggestions();
+      }),
       on<{ reason: string }>('close-requested', () => {
         if (mode === 'edit' && draftDirty) pendingClose = true;
         else void allowClose().catch(() => undefined);
       })
     ];
 
+    void loadSuggestions();
     void refreshVault()
       .then(() => loadList())
       .catch((error: unknown) => {
@@ -500,6 +560,16 @@
   <main class="panes" class:stacked={narrow} id="entry-pane">
     {#if !narrow || (mode === 'view' && !selectedId)}
       <section class="list-pane" aria-label="Entry list">
+        {#if tab === 'command'}
+          <HistorySuggestions
+            {suggestions}
+            busy={suggestionsBusy}
+            onSave={saveSuggestion}
+            onDismiss={(suggestion) => void dismissSuggestion(suggestion)}
+            onRescan={() => void loadSuggestions()}
+          />
+        {/if}
+        <div class="list-scroll">
         <EntryList
           {entries}
           {selectedId}
@@ -517,6 +587,7 @@
           onDelete={(entry) => (pendingDelete = entry)}
           actionsDisabled={mode === 'edit' && draftDirty}
         />
+        </div>
       </section>
     {/if}
 
@@ -787,8 +858,16 @@
      the same line colour the floating shell uses, and it is the only divider
      between the two panes */
   .list-pane {
+    display: flex;
+    flex-direction: column;
     border-right: var(--border-shell);
     background: var(--bg-panel);
+  }
+  /* the entry list scrolls on its own; the suggestion panel above it stays put */
+  .list-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
   .detail-pane {
     background: var(--bg);
