@@ -325,7 +325,7 @@ test('reduced motion collapses the transitions and the shipped shell stays opaqu
 
   // Material ships off: the blur token is 0px, the tint is transparent, and nothing paints a
   // backdrop blur. This is the honest claim on this host - compositor blur is UNVERIFIED, so
-  // the app must not depend on it (docs/raycast-ui-redesign.md, "Native material outcome").
+  // the app must not depend on it (docs/design/raycast-ui-redesign.md, "Native material outcome").
   const shipped = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);
     const palette = getComputedStyle(document.querySelector('.palette') as Element);

@@ -4,7 +4,7 @@
 # captures the redesigned library and palette exactly as WebKitGTK paints them over a dark and
 # a busy X11 background. Proves the opaque-shell material level on X11; true Wayland/Hyprland
 # blur and compositor translucency cannot be proven here and stay a manual checklist
-# (docs/raycast-ui-research-2026-11-02.md, section "Native material pass").
+# (docs/design/raycast-ui-research-2026-11-02.md, section "Native material pass").
 #
 #   scripts/native-capture.sh [path/to/dev-console] [output-dir]
 #

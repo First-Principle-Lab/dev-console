@@ -94,7 +94,7 @@ Everything reads local `/proc` and the compositor socket only. Nothing is persis
 | Native harness | `scripts/test-native-ipc.sh` or a new script | under Hyprland, start a known shell in a temp git repo, focus it, toggle the Finder, assert the context name. Exits 77 (UNVERIFIED) outside Hyprland |
 | Playwright | `tests/e2e/finder.spec.ts` | seeded context shows the chip and puts in-context results first; `Ctrl+P` clears it and restores the default order; no context → no chip and default order; row marker has an accessible label |
 | Playwright | `screenshots.spec.ts` | Finder with context at 680×420 |
-| Benchmark (manual) | `context.rs` `#[ignore]` test | detection runs in under 30 ms on the target machine; record the timing in `TEST_REPORT.md` |
+| Benchmark (manual) | `context.rs` `#[ignore]` test | detection runs in under 30 ms on the target machine; record the timing in `docs/project/TEST_REPORT.md` |
 
 ## How to verify it's complete
 

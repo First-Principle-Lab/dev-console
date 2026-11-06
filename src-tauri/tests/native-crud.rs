@@ -13,7 +13,7 @@
 //! plumbing is exercised by `scripts/smoke-native.sh` against the compiled release binary and
 //! by the browser suite for UI behaviour. Making the handlers themselves generic over the
 //! Tauri runtime (so `tauri::test::mock_app()` can call them directly) is the remaining step
-//! and is recorded in PROGRESS.md.
+//! and is recorded in docs/project/PROGRESS.md.
 //!
 //! Run through `scripts/test-native-ipc.sh`, which starts the provider and the display and
 //! passes `--ignored --test-threads=1` (the state paths are process-global environment

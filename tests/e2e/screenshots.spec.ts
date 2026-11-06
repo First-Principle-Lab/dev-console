@@ -12,7 +12,7 @@ import { boot } from './helpers';
  *   SHOT_SET=before           # historical pre-token set, frozen: artifacts/ui-review/before/
  *   SHOT_SET=after            # previous review set, frozen: artifacts/ui-review/after/
  *   SHOT_SET=native           # written by the native smoke session, not by this file
- *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/raycast-ui-research-2026-11-02.md)
+ *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/design/raycast-ui-research-2026-11-02.md)
  *   SHOT_SET=raycast-after    # the redesigned UI
  *
  * `before`, `after` and `native` stay on disk untouched: they are the review record for earlier
@@ -28,7 +28,7 @@ import { boot } from './helpers';
 // `before`, `after` and `native` are frozen review records for earlier work, so the default is no
 // longer `after`: a plain `bunx playwright test` (which is what `scripts/verify.sh` runs) would
 // otherwise overwrite 41 tracked PNGs with whatever this machine's font rendering produces.
-// docs/raycast-ui-research-2026-11-02.md owns the capture protocol.
+// docs/design/raycast-ui-research-2026-11-02.md owns the capture protocol.
 const SET = process.env.SHOT_SET ?? 'raycast-after';
 const OUT_DIR = path.join(import.meta.dirname, '..', '..', 'artifacts', 'ui-review', SET);
 const HTML_DIR = path.join(import.meta.dirname, '..', '..', 'test-results', 'screenshots', SET);
