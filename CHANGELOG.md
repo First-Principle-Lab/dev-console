@@ -5,6 +5,16 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+- **Project context.** When Hyprland reports a terminal as the focused window, the Finder detects
+  that terminal's project (nearest `.git` ancestor of the newest shell under the window, or the
+  folder itself when it holds a project file) and promotes its commands — matching working
+  directories or `project:<name>` tags — within each match tier. A chip names the project;
+  clicking it or `Ctrl+P` ignores the bias for the showing, in-context rows carry a marker, and
+  **Settings → Finder** turns detection off entirely. Nothing is stored; other compositors see
+  no context (v1). `scripts/test-project-context.sh` proves the live chain under Hyprland and
+  reports UNVERIFIED everywhere else.
+
 ## 0.0.8 — 2026-11-06
 
 ### Added

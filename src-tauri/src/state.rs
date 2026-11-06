@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::backup::{Archive, ArchiveSeal, BackupManager, RecoveryKey};
 use crate::clipboard::Clipboard;
+use crate::context::FinderContext;
 use crate::error::{AppError, AppResult};
 use crate::models::{CopyResult, EntryMeta, EntryRecord, Kind};
 use crate::recovery::{ApplyCrash, PendingReplacement, RecoveryReport, ReplacementJournal};
@@ -21,6 +22,28 @@ pub struct AppState {
     /// Durable state for a library replacement in flight; see [`crate::recovery`].
     pub journal: ReplacementJournal,
     pub quitting: std::sync::atomic::AtomicBool,
+    /// The project behind the focused terminal, re-detected on every Finder showing and
+    /// consulted only while ranking. Never persisted.
+    finder_context: std::sync::Mutex<Option<FinderContext>>,
+}
+
+impl AppState {
+    /// Replaces the project context. Called by the detection thread after every showing
+    /// (with `None` when detection found nothing, was disabled, or the previous context is
+    /// stale), so what ranking sees always matches the freshest answer.
+    pub fn set_finder_context(&self, context: Option<FinderContext>) {
+        *self
+            .finder_context
+            .lock()
+            .expect("finder context lock poisoned") = context;
+    }
+
+    pub fn finder_context(&self) -> Option<FinderContext> {
+        self.finder_context
+            .lock()
+            .expect("finder context lock poisoned")
+            .clone()
+    }
 }
 
 /// Clipboard owner id for a recovery-credential copy. It identifies *which* copy the app owns
@@ -55,6 +78,7 @@ impl AppState {
             recovery: RecoveryKey::load_or_create(crate::paths::recovery_key_path()?)?,
             journal: ReplacementJournal::new(crate::paths::interrupted_apply_dir()?)?,
             quitting: std::sync::atomic::AtomicBool::new(false),
+            finder_context: std::sync::Mutex::new(None),
         };
         // A replacement that was interrupted between its two writes is settled here, inside
         // bootstrap. Nothing is exposed until this returns: the caller cannot manage the state,
@@ -323,6 +347,13 @@ impl AppState {
                 entries.extend(secrets);
             }
         }
+        // Belt and braces on the "working directories are a command-only concept" rule:
+        // ranking consults the field for every entry that reaches it.
+        for entry in &mut entries {
+            if entry.kind == Kind::Secret {
+                entry.working_directory.clear();
+            }
+        }
         entries
     }
 
@@ -384,6 +415,7 @@ mod tests {
                     .expect("recovery"),
                 journal: ReplacementJournal::new(base.join("pending-replace")).expect("journal"),
                 quitting: std::sync::atomic::AtomicBool::new(false),
+                finder_context: std::sync::Mutex::new(None),
             }
         }
 

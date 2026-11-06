@@ -18,7 +18,9 @@ copy, reveal, edit, pin, run and delete, with confirmations for destructive acti
 searches commands and unlocked secrets together; first result is preselected, `Tab` completes the
 name inline, `↑`/`↓` move the selection, `Enter` copies the value, `Ctrl+O` opens the entry in the
 library, `Esc` dismisses. Everything is reachable from the keyboard, and the list keeps proper
-combobox/listbox semantics.
+combobox/listbox semantics. When Hyprland reports a terminal as the focused window, the Finder
+also detects that terminal's project and biases ranking towards its commands; a chip names the
+project and clicking it, or `Ctrl+P`, ignores the bias for that showing.
 
 **Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
 restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock
@@ -67,6 +69,7 @@ warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 | --- | --- | --- |
 | `scripts/test-keyring.sh` | the real Secret Service round trip through the app's own keyring adapter | exit 77 = UNVERIFIED |
 | `scripts/test-native-ipc.sh` | real SQLite + real age vault + real provider + real X11 selection, across a restart | exit 77 = UNVERIFIED |
+| `scripts/test-project-context.sh` | live project detection: focused terminal → shell → git root, through the real compositor socket and `/proc` | exit 77 = UNVERIFIED |
 | `scripts/test-clipboard.sh` | real X11 selection ownership, expiry retraction, exclusion reporting | exit 77 = UNVERIFIED |
 | `scripts/test-packaging.sh` | staged install, desktop file, polkit policy, exact uninstall | exit 77 = UNVERIFIED |
 | `scripts/test-arch-package.sh` | Arch package layout from `packaging/arch/PKGBUILD` | exit 77 = UNVERIFIED |
@@ -135,7 +138,7 @@ in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque s
 | --- | --- |
 | Desktop | `Super+F` Finder (configured in your compositor, see below) |
 | Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
-| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Esc` close |
+| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Ctrl+P` clear project context, `Esc` close |
 
 ## Desktop integration (Hyprland and other Wayland compositors)
 
@@ -169,6 +172,21 @@ notified of session lock on every compositor. What is guaranteed is stronger and
 key is released from memory by `dev-console vault lock` (or the tray's **Lock**) and the manual lock
 persists across restarts until polkit re-authenticates you. Add the hook above and the two lock
 states move together.
+
+**Project context.** Each time the Finder is raised, the app asks the Hyprland IPC socket which
+window is focused, walks that window's children in `/proc` for a known shell (at most three
+levels, preferring the newest — that is what tabs and splits look like) and resolves the shell's
+current directory to a project: the nearest ancestor containing `.git` (never above `$HOME`), or
+the directory itself when it holds a recognisable project file. Commands whose stored working
+directory is under that root, or that carry a `project:<name>` tag, are promoted in the results
+and marked; a chip beside the search field names the project, and clicking it or pressing
+`Ctrl+P` ignores the bias for the current showing. The check is capped at a 200 ms compositor
+round trip, runs off the UI thread, never blocks or delays the Finder, and stores nothing.
+Because it reads the *focused* window's process tree, detection is Hyprland-only for now (other
+compositors simply see no context), and shells running inside tmux remain invisible — the tmux
+server is the terminal's child, not the shell. **Settings → Finder** turns the whole behaviour
+off. `scripts/test-project-context.sh` proves the live chain end to end under Hyprland and
+exits UNVERIFIED everywhere else.
 
 ## Arch Linux install
 

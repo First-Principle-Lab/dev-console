@@ -246,3 +246,19 @@ test('an unbalanced quote blocks saving the terminal setting', async ({ page }) 
   await expect(page.getByTestId('terminal-error')).toContainText('unbalanced');
   await expect(page.getByTestId('save-settings')).toBeDisabled();
 });
+
+test('the Finder project-context setting is on by default and round-trips through save', async ({ page }) => {
+  await openSettings(page);
+  const toggle = page.getByTestId('project-context');
+  await expect(toggle).toBeChecked();
+  await toggle.setChecked(false);
+  await page.getByTestId('save-settings').click();
+  const stored = await page.evaluate(
+    () => (window as never as { __mock: { state: { settings: Record<string, unknown> } } }).__mock.state.settings
+  );
+  expect(stored['projectContextEnabled']).toBe(false);
+  // And it comes back as saved, not reset to the default of on.
+  await page.getByTestId('close-settings').click();
+  await page.getByTestId('settings').click();
+  await expect(page.getByTestId('project-context')).not.toBeChecked();
+});

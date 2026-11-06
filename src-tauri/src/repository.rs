@@ -157,7 +157,7 @@ impl Repository {
         let mut stmt = conn
             .prepare(
                 "SELECT e.id, e.revision, e.name, e.type, e.tags, e.description, e.pinned, e.updated_at,
-                        COALESCE(u.count, 0), u.last_used_at
+                        COALESCE(u.count, 0), u.last_used_at, e.working_directory
                  FROM entries e LEFT JOIN usage u ON u.id = e.id
                  WHERE e.kind = 'command' AND (?1 = '' OR e.name LIKE ?2 OR e.type LIKE ?2 OR e.description LIKE ?2 OR e.tags LIKE ?2)
                  ORDER BY e.pinned DESC, e.name COLLATE NOCASE ASC",
@@ -572,6 +572,8 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryMeta> {
         updated_at: row.get(7)?,
         usage_count: row.get(8)?,
         last_used_at: row.get(9)?,
+        // Needed to decide project membership when ranking the Finder's results.
+        working_directory: row.get(10)?,
     })
 }
 

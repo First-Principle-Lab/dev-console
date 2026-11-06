@@ -175,3 +175,63 @@ test('an empty query lists the most recently used entries first', async ({ page 
   await expect(rows.nth(0)).toContainText('git revert HEAD');
   await expect(rows.nth(1)).toContainText('docker');
 });
+
+// Project context: ranking biasing, the chip, and both dismissal paths. The browser double
+// cannot detect anything natively, so the context is seeded; the mock's in_context logic
+// mirrors the Rust one and the Rust unit tests pin the real semantics.
+const CTX_SEED = {
+  commands: [
+    { id: 'a', revision: 1, name: 'migrate db', type: 'DB', tags: [], description: '', notes: '', fields: [], pinned: false, command: 'rake db:migrate', workingDirectory: '/home/mock/projects/api/db', usageCount: 1 },
+    { id: 'b', revision: 1, name: 'deploy api', type: 'Deploy', tags: ['project:API'], description: '', notes: '', fields: [], pinned: false, command: 'bin/deploy', workingDirectory: '', usageCount: 5 },
+    { id: 'c', revision: 1, name: 'wipe disks', type: 'Danger', tags: [], description: '', notes: '', fields: [], pinned: false, command: 'shred -va 1 /*', workingDirectory: '/home/mock/projects/other', usageCount: 999 }
+  ],
+  secrets: [],
+  context: { root: '/home/mock/projects/api', name: 'api' }
+};
+
+test('project context promotes its commands, names itself in a chip and marks its rows', async ({ page }) => {
+  await boot(page, CTX_SEED, 'finder');
+  const chip = page.getByTestId('finder-context-chip');
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText('api');
+  const rows = page.getByTestId('result-row');
+  // In-context first (usage inside the group still orders b before a), then the outside winner.
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText('deploy api');
+  await expect(rows.nth(1)).toContainText('migrate db');
+  await expect(rows.nth(2)).toContainText('wipe disks');
+  const markers = page.getByTestId('row-in-context');
+  await expect(markers).toHaveCount(2);
+  await expect(markers.first()).toHaveAttribute('aria-label', 'in api');
+});
+
+test('clicking the context chip clears it for the session and restores the default order', async ({ page }) => {
+  await boot(page, CTX_SEED, 'finder');
+  await page.getByTestId('finder-context-chip').click();
+  await expect(page.getByTestId('finder-context-chip')).toHaveCount(0);
+  const rows = page.getByTestId('result-row');
+  await expect(rows.nth(0)).toContainText('wipe disks');
+  await expect(page.getByTestId('row-in-context')).toHaveCount(0);
+});
+
+test('Ctrl+P clears the project context just like clicking the chip', async ({ page }) => {
+  await boot(page, CTX_SEED, 'finder');
+  await page.getByTestId('finder-input').press('Control+p');
+  await expect(page.getByTestId('finder-context-chip')).toHaveCount(0);
+  await expect(page.getByTestId('result-row').nth(0)).toContainText('wipe disks');
+});
+
+test('without context there is no chip, and a late finder-context event re-ranks the list', async ({ page }) => {
+  await boot(page, { ...CTX_SEED, context: undefined }, 'finder');
+  await expect(page.getByTestId('finder-context-chip')).toHaveCount(0);
+  await expect(page.getByTestId('result-row').nth(0)).toContainText('wipe disks');
+  // The native side finishes detection after the first search; the Finder must re-rank.
+  // Like the real backend, the store is updated before the event fires.
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __mock: { state: { context: unknown }; emit: (e: string, p: unknown) => void } }).__mock;
+    mock.state.context = { root: '/home/mock/projects/api', name: 'api' };
+    mock.emit('finder-context', mock.state.context);
+  });
+  await expect(page.getByTestId('finder-context-chip')).toContainText('api');
+  await expect(page.getByTestId('result-row').nth(0)).toContainText('deploy api');
+});

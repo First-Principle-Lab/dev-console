@@ -84,6 +84,9 @@ pub fn show_library_with<R: Runtime>(
 }
 
 pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
+    // Any context from the previous showing describes a window that is no longer focused;
+    // drop it synchronously so a search racing the new detection cannot rank against it.
+    app.state::<Arc<AppState>>().set_finder_context(None);
     let window = ensure(app, FINDER, "index.html#view=finder")?;
     present(&window)?;
     // Tiling compositors ignore the creation size: Hyprland mapped the finder at 950x1008.
@@ -93,7 +96,47 @@ pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     window
         .emit("finder-shown", ())
         .map_err(|e| AppError::Other(e.to_string()))?;
+    spawn_context_detection(app.clone());
     Ok(())
+}
+
+/// Detects the focused project off the main path: the Finder is already visible while the
+/// compositor round-trip (bounded at 200 ms) and the `/proc` walk run, and the frontend
+/// learns the outcome through `finder-context` plus the `context` field of the next search
+/// response. The stale window between show and detection resolving ranks without context,
+/// which is exactly the pre-feature behaviour.
+pub fn spawn_context_detection<R: Runtime>(app: AppHandle<R>) {
+    let for_thread = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("finder-context".into())
+        .spawn(move || {
+            let found = detect_finder_context(&for_thread);
+            for_thread
+                .state::<Arc<AppState>>()
+                .set_finder_context(found.clone());
+            let _ = for_thread.emit("finder-context", &found);
+        });
+    if spawned.is_err() {
+        // Detection is an enhancement; a thread-starved machine simply shows no context.
+        let _ = app.emit(
+            "finder-context",
+            &Option::<crate::context::FinderContext>::None,
+        );
+    }
+}
+
+/// The detection pass proper, split out so the disabled case provably never touches /proc
+/// or the compositor socket. Reads settings from the cache: no I/O beyond detection itself.
+fn detect_finder_context<R: Runtime>(app: &AppHandle<R>) -> Option<crate::context::FinderContext> {
+    if !app
+        .state::<Arc<AppState>>()
+        .settings
+        .get()
+        .project_context_enabled
+    {
+        return None;
+    }
+    crate::context::detect()
 }
 
 pub fn hide<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {

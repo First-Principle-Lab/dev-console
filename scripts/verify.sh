@@ -103,6 +103,19 @@ else
   fi
 fi
 
+echo "== project context: live detection under a real Hyprland session =="
+if [[ "${SKIP_PROJECT_CONTEXT_TEST:-0}" == "1" ]]; then
+  echo "skipped by request (SKIP_PROJECT_CONTEXT_TEST=1)"
+else
+  code=0
+  bash scripts/test-project-context.sh || code=$?
+  if [[ "$code" == "77" ]]; then
+    echo "UNVERIFIED: this session is not Hyprland with a usable terminal"
+  elif [[ "$code" != "0" ]]; then
+    exit "$code"
+  fi
+fi
+
 echo "== release compile =="
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"

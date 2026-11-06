@@ -18,4 +18,5 @@ export type IconName =
   | 'check'
   | 'shield'
   | 'gear'
-  | 'update';
+  | 'update'
+  | 'project';

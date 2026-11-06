@@ -57,15 +57,25 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
 pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
     let state = state(&app);
     let entries = state.searchable_metadata(None);
+    // The user clearing the chip only ignores the context for their queries; detection keeps
+    // running per showing. The response echoes what `results` were ranked against so the
+    // Finder's chip can never disagree with the ordering it is showing.
+    let context = if request.ignore_context {
+        None
+    } else {
+        state.finder_context()
+    };
     let results = search::rank(
         &entries,
         &request.query,
         request.limit.unwrap_or(search::DEFAULT_LIMIT),
+        context.as_ref(),
     );
     SearchResponse {
         request_id: request.request_id,
         vault_generation: state.vault.generation(),
         results,
+        context,
     }
 }
 

@@ -19,11 +19,14 @@
     vaultUnlocked: seed.vaultUnlocked !== false,
     manualLock: !!seed.manualLock,
     generation: 1,
+    // Fake project context for the ranking tests (native detection cannot run in the browser).
+    context: seed.context || null,
     settings: seed.settings || {
       theme: 'dark',
       autostart: false,
       clipboardExpirySeconds: 30,
-      terminal: ['x-terminal-emulator', '-e']
+      terminal: ['x-terminal-emulator', '-e'],
+      projectContextEnabled: true
     },
     terminals: seed.terminals || [
       { id: 'ghostty', name: 'Ghostty', command: ['/usr/bin/ghostty', '-e'] },
@@ -58,7 +61,8 @@
       pinned: !!record.pinned,
       updatedAt: record.updatedAt || now,
       usageCount: record.usageCount || 0,
-      lastUsedAt: record.lastUsedAt || null
+      lastUsedAt: record.lastUsedAt || null,
+      workingDirectory: record.workingDirectory || ''
     };
   }
 
@@ -91,34 +95,70 @@
     return i === term.length ? 5 : -1;
   }
 
-  function rank(query) {
+  // Mirrors context::expand_working_directory / search::in_context closely enough for the
+  // browser suite; the real semantics are pinned by Rust unit tests.
+  const MOCK_HOME = '/home/mock';
+
+  function expandWorkingDirectory(raw) {
+    const value = (raw || '').trim();
+    if (value === '~') return MOCK_HOME;
+    if (value.startsWith('~/')) return MOCK_HOME + value.slice(1);
+    return value;
+  }
+
+  function isUnder(path, root) {
+    if (!path || !root) return false;
+    const cleanRoot = root.replace(/\/+$/, '');
+    return path === cleanRoot || path.startsWith(cleanRoot + '/');
+  }
+
+  function inProjectContext(entry, ctx) {
+    if (!ctx) return false;
+    const expected = 'project:' + ctx.name.toLowerCase();
+    if ((entry.tags || []).some((t) => t.toLowerCase() === expected)) return true;
+    return isUnder(expandWorkingDirectory(entry.workingDirectory), ctx.root);
+  }
+
+  function rank(query, ctx) {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const limit = 50;
     let scored = allMeta().map((entry) => {
-      if (terms.length === 0) return { entry, best: 0 };
-      let best = 0;
+      const row = { entry, best: 0, inContext: inProjectContext(entry, ctx) };
+      if (terms.length === 0) return row;
       for (const term of terms) {
         const t = tier(entry, term);
         if (t < 0) return null;
-        best = Math.max(best, t);
+        row.best = Math.max(row.best, t);
       }
-      return { entry, best };
+      return row;
     }).filter(Boolean);
     scored.sort((a, b) => {
+      // Mirrors search.rs rank(): tier (when querying), then pinned/in-context placement,
+      // then recency, usage, name and id as the final tie-breaker.
+      // (true-first needs (!a.x) - (!b.x); the previous pinned line sorted pinned last.)
       if (terms.length === 0) {
         return (
-          (!b.entry.pinned) - (!a.entry.pinned) ||
+          (!a.entry.pinned) - (!b.entry.pinned) ||
+          (!a.inContext) - (!b.inContext) ||
           (b.entry.lastUsedAt || '').localeCompare(a.entry.lastUsedAt || '') ||
           b.entry.usageCount - a.entry.usageCount ||
-          a.entry.name.localeCompare(b.entry.name)
+          a.entry.name.localeCompare(b.entry.name) ||
+          a.entry.id.localeCompare(b.entry.id)
         );
       }
-      return a.best - b.best || b.entry.usageCount - a.entry.usageCount || a.entry.name.localeCompare(b.entry.name);
+      return (
+        a.best - b.best ||
+        (!a.inContext) - (!b.inContext) ||
+        b.entry.usageCount - a.entry.usageCount ||
+        (!a.entry.pinned) - (!b.entry.pinned) ||
+        a.entry.name.localeCompare(b.entry.name) ||
+        a.entry.id.localeCompare(b.entry.id)
+      );
     });
     const trimmed = query.trim();
     // Only the fields models.rs SearchResult serializes: a field the finder reads that the real
     // backend never sends must fail here too, not just in the shipped app.
-    return scored.slice(0, limit).map(({ entry }) => ({
+    return scored.slice(0, limit).map(({ entry, inContext }) => ({
       id: entry.id,
       kind: entry.kind,
       name: entry.name,
@@ -128,6 +168,7 @@
       pinned: entry.pinned,
       usageCount: entry.usageCount,
       lastUsedAt: entry.lastUsedAt,
+      inContext,
       completion: trimmed && entry.name.toLowerCase().startsWith(trimmed.toLowerCase()) && entry.name !== trimmed ? entry.name : undefined
     }));
   }
@@ -184,7 +225,15 @@
       if (state.searchDelayMs && (!state.delayedRequestId || state.delayedRequestId === request.requestId)) {
         await new Promise((r) => setTimeout(r, state.searchDelayMs));
       }
-      return { requestId: request.requestId, vaultGeneration: state.generation, results: rank(request.query || '') };
+      // The mock cannot detect anything; tests seed `context` instead. ignoreContext mirrors
+      // the chip-dismissal path in ipc.rs (rank without the stored context).
+      const ctx = request.ignoreContext ? null : state.context;
+      return {
+        requestId: request.requestId,
+        vaultGeneration: state.generation,
+        results: rank(request.query || '', ctx),
+        context: ctx
+      };
     }
     if (command === 'list_entries') {
       if (request.kind === 'secret') requireVault();

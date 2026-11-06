@@ -428,6 +428,24 @@
             {/if}
           </p>
         </section>
+
+        <section aria-label="Finder">
+          <h4>Finder</h4>
+          <label class="row">
+            <input
+              type="checkbox"
+              bind:checked={settings.projectContextEnabled}
+              data-testid="project-context"
+            />
+            <span>Rank commands from the focused terminal's project first</span>
+          </label>
+          <p class="muted detail">
+            When the Finder opens, Dev Console looks at the window Hyprland reports as focused,
+            finds the shell underneath it, and treats that folder's project as the current one.
+            Detection is per-showing and never stored. A chip names the project; clicking it (or
+            Ctrl+P) ignores the context for the current showing.
+          </p>
+        </section>
       {:else}
         <p class="muted">Loading…</p>
       {/if}

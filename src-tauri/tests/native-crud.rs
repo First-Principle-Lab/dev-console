@@ -114,7 +114,7 @@ fn commands_and_secrets_survive_a_real_restart_through_the_real_backend() {
     );
 
     // ---- the finder sees both kinds, pinned first, exact match on top ----
-    let ranked = search::rank(&state.searchable_metadata(None), "Ship", 10);
+    let ranked = search::rank(&state.searchable_metadata(None), "Ship", 10, None);
     assert!(
         ranked.iter().any(|r| r.id == created.id),
         "command found by prefix"

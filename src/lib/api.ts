@@ -60,8 +60,13 @@ export const api = {
     call('export_archive', { path, overwrite }),
   importArchive: (path: string): Promise<BackupOutcome> => call('import_archive', { path }),
   appState: (): Promise<AppStateInfo> => call('app_state'),
-  search: (query: string, requestId: number): Promise<SearchResponse> =>
-    call('search_entries', { request: { query, requestId } }),
+  search: (
+    query: string,
+    requestId: number,
+    // True after the user dismissed the context chip: rank as if no project were focused.
+    ignoreContext = false
+  ): Promise<SearchResponse> =>
+    call('search_entries', { request: { query, requestId, ignoreContext } }),
   list: (req: ListRequest): Promise<EntryMeta[]> => call('list_entries', { request: req }),
   types: (kind: Kind): Promise<string[]> => call('types_for', { request: { kind } }),
   details: (kind: Kind, id: string): Promise<EntryDetails> =>

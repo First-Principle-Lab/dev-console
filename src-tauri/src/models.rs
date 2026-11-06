@@ -56,6 +56,10 @@ pub struct EntryMeta {
     pub usage_count: i64,
     #[serde(default)]
     pub last_used_at: Option<String>,
+    /// Commands only: the stored working directory, used to decide project membership when
+    /// ranking. Never carried by secrets. Deliberately still no value, notes or field data.
+    #[serde(default)]
+    pub working_directory: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +77,8 @@ pub struct SearchResult {
     pub pinned: bool,
     pub usage_count: i64,
     pub last_used_at: Option<String>,
+    /// True when this entry belongs to the project context the search was ranked against.
+    pub in_context: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +87,9 @@ pub struct SearchResponse {
     pub request_id: u64,
     pub vault_generation: u64,
     pub results: Vec<SearchResult>,
+    /// The context `results` were ranked against, so the Finder chip can never disagree
+    /// with the ordering it is showing. Null when disabled, cleared or undetected.
+    pub context: Option<crate::context::FinderContext>,
 }
 
 /// Full record as returned to the library. `value` is only ever populated by an explicit
@@ -138,6 +147,12 @@ impl EntryRecord {
             updated_at: self.updated_at.clone(),
             usage_count,
             last_used_at,
+            // Secrets never carry a working directory, even if a draft somehow set one.
+            working_directory: if self.kind == Kind::Command {
+                self.working_directory.clone()
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -190,6 +205,10 @@ pub struct SearchRequest {
     pub query: String,
     pub request_id: u64,
     pub limit: Option<usize>,
+    /// Set by the Finder after the user cleared the chip: rank as if there were no context
+    /// for this query without discarding the detection itself.
+    #[serde(default)]
+    pub ignore_context: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -310,6 +329,8 @@ pub struct Settings {
     pub autostart: bool,
     pub clipboard_expiry_seconds: u64,
     pub terminal: Vec<String>,
+    /// Detect the focused terminal's project when the Finder opens and promote its commands.
+    pub project_context_enabled: bool,
 }
 
 impl Default for Settings {
@@ -319,6 +340,7 @@ impl Default for Settings {
             autostart: false,
             clipboard_expiry_seconds: 30,
             terminal: vec!["x-terminal-emulator".into(), "-e".into()],
+            project_context_enabled: true,
         }
     }
 }

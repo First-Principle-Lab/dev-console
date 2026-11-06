@@ -12,7 +12,8 @@ function row(id: string, name: string, kind: 'command' | 'secret' = 'command'): 
     pinned: false,
     usageCount: 0,
     tags: [],
-    lastUsedAt: null
+    lastUsedAt: null,
+    inContext: false
   };
 }
 

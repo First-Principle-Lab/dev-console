@@ -5,7 +5,7 @@
   import { api } from '../lib/api';
   import { on } from '../lib/events';
   import { displayedQuery, nextSelection, selected, shouldCommit, tabCompletion } from '../lib/finder-state';
-  import type { Kind, SearchResult, VaultState } from '../lib/models';
+  import type { FinderContext, Kind, SearchResult, VaultState } from '../lib/models';
 
   const UNLOCK_ID = '__unlock_vault__';
 
@@ -19,6 +19,12 @@
   let status = $state<string | null>(null);
   let loading = $state(false);
   let requestId = 0;
+  // The project behind the terminal that was focused when the Finder was raised. Driven
+  // entirely by the backend (detection event + the context each search was ranked against),
+  // so the chip never claims more than the ordering actually reflects.
+  let context = $state<FinderContext | null>(null);
+  // "Clear for this session": subsequent queries ignore the context until the next showing.
+  let contextCleared = $state(false);
 
   const rows = $derived<SearchResult[]>(
     vault && !vault.unlocked
@@ -33,7 +39,8 @@
             description: '',
             pinned: false,
             usageCount: 0,
-            lastUsedAt: null
+            lastUsedAt: null,
+            inContext: false
           }
         ]
       : results
@@ -57,12 +64,13 @@
     // different query reads as a statement about the new one.
     status = null;
     try {
-      const response = await api.search(next, id);
+      const response = await api.search(next, id, contextCleared);
       // Ignore any response for a query the user has already replaced.
       if (id !== requestId) return;
       const generation = vault?.generation ?? response.vaultGeneration;
       if (response.vaultGeneration < generation && vault?.unlocked === false) return;
       results = response.results;
+      context = response.context;
       selectedId = nextSelection(results, selectedId, 0);
     } catch (problem: unknown) {
       if (id === requestId) {
@@ -78,12 +86,22 @@
   function reset(): void {
     requestId += 1;
     query = '';
+    // A new showing re-arms project context; detection re-runs from the native side.
+    context = null;
+    contextCleared = false;
     // Keep the last list on screen until the fresh one arrives: blanking it here showed
     // "Searching…" on every open.
     error = null;
     status = null;
     void runSearch('').catch(() => undefined);
     input?.focus();
+  }
+
+  function clearContextForSession(): void {
+    if (!context && !contextCleared) return;
+    contextCleared = true;
+    context = null;
+    void runSearch(query).catch(() => undefined);
   }
 
   async function scrollSelectedIntoView(): Promise<void> {
@@ -176,6 +194,10 @@
         if (event.ctrlKey && event.key.toLowerCase() === 'o') {
           event.preventDefault();
           await openDetails();
+        } else if (event.ctrlKey && event.key.toLowerCase() === 'p') {
+          // Ctrl+P clears the project context for this showing, mirroring a chip click.
+          event.preventDefault();
+          clearContextForSession();
         }
     }
   }
@@ -183,6 +205,13 @@
   onMount(() => {
     const unsubscribers = [
       on('finder-shown', () => reset()),
+      on<FinderContext | null>('finder-context', (found) => {
+        // Detection finished for this showing; re-run the query so ranking and chip agree.
+        // A context arriving after the user cleared it this session is ignored on purpose.
+        if (contextCleared) return;
+        context = found;
+        void runSearch(query).catch(() => undefined);
+      }),
       on<VaultState>('vault-state-changed', (state) => {
         const wasLocked = vault ? !vault.unlocked : false;
         vault = state;
@@ -236,6 +265,19 @@
           data-testid="finder-input"
         />
       </div>
+      {#if context}
+        <button
+          type="button"
+          class="projectchip"
+          data-testid="finder-context-chip"
+          title="Commands from {context.name} are ranked first. Click (or Ctrl+P) to ignore this session."
+          aria-label="Project context: {context.name}. Activate to ignore for this session."
+          onclick={clearContextForSession}
+        >
+          <Icon name="project" size={12} />
+          <span class="truncate">{context.name}</span>
+        </button>
+      {/if}
       {#if vault}
         <span class="vaultchip" data-tone={vault.unlocked ? 'ok' : 'warn'} data-testid="finder-vault">
           <Icon name={vault.unlocked ? 'unlock' : 'lock'} size={12} />
@@ -278,6 +320,11 @@
             {/if}
           </span>
           <span class="trail">
+            {#if row.inContext && context}
+              <span class="in-context" data-testid="row-in-context" role="img" aria-label="in {context.name}">
+                <Icon name="project" size={11} />
+              </span>
+            {/if}
             {#if row.id === selectedId}
               <span data-testid="row-action" aria-hidden="true"><Keycap keys={['Enter']} /></span>
             {/if}
@@ -409,6 +456,32 @@
     border-radius: var(--radius-pill);
     color: var(--fg-muted);
     white-space: nowrap;
+  }
+  /* The project chip shares the vault chip's pill language but is interactive: it is the
+     visible handle for "this ordering is biased towards <project>" and clears on click. */
+  .projectchip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    max-width: 180px;
+    font-size: var(--text-row-meta);
+    font-family: inherit;
+    padding: var(--gap-xs) var(--sp-2);
+    border: var(--border-hair);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .projectchip:hover {
+    color: var(--fg);
+    background: var(--hover-fill);
+  }
+  .in-context {
+    display: inline-flex;
+    align-items: center;
+    color: var(--fg-dim);
   }
   .vaultchip[data-tone='ok'] {
     color: var(--ok);

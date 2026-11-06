@@ -83,6 +83,15 @@ test('finder at the real palette size (680x420)', async ({ page }) => {
   await capture(page, '13-finder-palette-680x420', 680, 420);
 });
 
+test('finder with a project context at the real palette size (680x420)', async ({ page }) => {
+  // The context chip and the in-context row markers are new chrome; the without-context shot
+  // above is the baseline it must not disturb. Seed context matches c1's `~/src/api`
+  // working directory under the mock HOME, so "Deploy staging" carries the markers.
+  await boot(page, { ...SEED, context: { root: '/home/mock/src/api', name: 'api' } }, 'finder');
+  await expect(page.getByTestId('finder-context-chip')).toContainText('api');
+  await capture(page, '15-finder-palette-context-680x420', 680, 420);
+});
+
 test('library with a long name and long values (overflow check)', async ({ page }) => {
   await boot(page, LONG);
   await page.getByTestId('entry-row').first().click();

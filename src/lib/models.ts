@@ -48,6 +48,14 @@ export interface EntryMeta {
   updatedAt: string;
   usageCount: number;
   lastUsedAt: string | null;
+  /** Commands only: stored working directory, used for project-context membership. */
+  workingDirectory: string;
+}
+
+/** The project detected behind the focused terminal when the Finder was raised. */
+export interface FinderContext {
+  root: string;
+  name: string;
 }
 
 /** Exactly what `search_entries` returns (models.rs SearchResult): no revision or updatedAt. */
@@ -62,12 +70,15 @@ export interface SearchResult {
   pinned: boolean;
   usageCount: number;
   lastUsedAt: string | null;
+  inContext: boolean;
 }
 
 export interface SearchResponse {
   requestId: number;
   vaultGeneration: number;
   results: SearchResult[];
+  /** The context `results` were ranked against; null when off, cleared or undetected. */
+  context: FinderContext | null;
 }
 
 /** Draft as edited in the UI. `expectedRevision` is 0 for new entries. */
@@ -152,6 +163,7 @@ export interface Settings {
   autostart: boolean;
   clipboardExpirySeconds: number;
   terminal: string[];
+  projectContextEnabled: boolean;
 }
 
 export interface TerminalOption {

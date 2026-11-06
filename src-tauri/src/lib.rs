@@ -3,6 +3,7 @@ pub mod autostart;
 pub mod backup;
 pub mod cli;
 pub mod clipboard;
+pub mod context;
 pub mod control;
 pub mod desktop_icons;
 pub mod error;
