@@ -148,16 +148,28 @@
     word-break: break-word;
   }
   .value.url {
-    color: var(--accent);
+    color: var(--fg);
   }
   button.link {
+    align-self: flex-start;
+    display: inline-block;
+    min-height: 0;
+    max-width: 100%;
     background: none;
     border: 0;
     padding: 0;
     font: inherit;
     text-align: left;
+    white-space: normal;
+    word-break: break-word;
     cursor: pointer;
-    text-decoration: underline;
+    text-decoration: none;
+  }
+  button.link:hover:not(:disabled),
+  button.link:active:not(:disabled) {
+    background: none;
+    border-color: transparent;
+    color: var(--fg);
   }
   .value.multiline {
     white-space: pre-wrap;

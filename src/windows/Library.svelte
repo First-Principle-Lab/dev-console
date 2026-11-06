@@ -22,7 +22,7 @@
     EntryDraft,
     EntryMeta,
     Kind,
-    RunOutput,
+    RunResult,
     VaultState,
     WindowIntent
   } from '../lib/models';
@@ -48,7 +48,11 @@
   let status = $state<string | null>(null);
   let pendingDelete = $state<EntryMeta | null>(null);
   let pendingRun = $state<Details | null>(null);
-  let runResult = $state<{ name: string; command: string; output: RunOutput | null; error: string | null } | null>(null);
+  let runOutput = $state<{ name: string; phase: 'running' | 'done' | 'error'; result?: RunResult; error?: string } | null>(null);
+  let runSerial = 0;
+  let copyingStream = $state<'stdout' | 'stderr' | null>(null);
+  let copiedStream = $state<'stdout' | 'stderr' | null>(null);
+  let outputCopyError = $state<string | null>(null);
   let pendingClose = $state(false);
   let showSettings = $state(false);
   let narrow = $state(false);
@@ -231,22 +235,20 @@
     }
   }
 
-  async function togglePin(): Promise<void> {
-    if (!details) return;
-    const current = draftFromDetails(details, tab);
-    current.pinned = !details.meta.pinned;
+  async function togglePin(target: EntryMeta | null = meta): Promise<void> {
+    if (!target || (mode === 'edit' && draftDirty)) return;
     try {
-      await api.save(current);
+      await api.setPinned(target.kind, target.id, target.revision, !target.pinned);
       await loadList();
     } catch (error: unknown) {
       status = message(error, 'Pin failed.');
     }
   }
 
-  async function copyEntry(): Promise<void> {
-    if (!selectedId || !details) return;
+  async function copyEntry(target: EntryMeta | null = meta): Promise<void> {
+    if (!target) return;
     try {
-      const result = await api.copy(tab, selectedId, details.meta.revision);
+      const result = await api.copy(target.kind, target.id, target.revision);
       const seconds = Math.max(1, Math.round((result.expiresAtMs - Date.now()) / 1000));
       status = result.excluded
         ? `Copied for about ${seconds}s (excluded from clipboard history).`
@@ -289,27 +291,50 @@
     }
   }
 
-  async function confirmRun(inTerminal: boolean): Promise<void> {
+  async function confirmRun(): Promise<void> {
     if (!pendingRun) return;
     const target = pendingRun;
     pendingRun = null;
-    if (inTerminal) {
-      try {
-        await api.run(target.meta.id, target.meta.revision, true);
-        status = 'Launched in a terminal.';
-      } catch (error: unknown) {
-        status = message(error, 'Execution failed.');
-      }
-      return;
-    }
-    // Open the result dialog straight away so a slow command visibly "is running".
-    runResult = { name: target.meta.name, command: target.command ?? '', output: null, error: null };
+    status = null;
+    const serial = ++runSerial;
+    copiedStream = null;
+    outputCopyError = null;
+    runOutput = { name: target.meta.name, phase: 'running' };
     try {
-      const output = await api.runCaptured(target.meta.id, target.meta.revision, true);
-      if (runResult) runResult = { ...runResult, output };
-      await loadList();
+      const result = await api.run(target.meta.id, target.meta.revision, true);
+      if (serial !== runSerial) return;
+      if (result.mode === 'terminal') {
+        runOutput = null;
+        status = 'Launched in a terminal for sudo.';
+      } else {
+        runOutput = { name: target.meta.name, phase: 'done', result };
+      }
     } catch (error: unknown) {
-      if (runResult) runResult = { ...runResult, error: message(error, 'Execution failed.') };
+      if (serial === runSerial) runOutput = { name: target.meta.name, phase: 'error', error: message(error, 'Execution failed.') };
+    }
+  }
+
+  function closeRunOutput(): void {
+    runSerial += 1;
+    runOutput = null;
+    copiedStream = null;
+    outputCopyError = null;
+  }
+
+  async function copyRunStream(stream: 'stdout' | 'stderr'): Promise<void> {
+    if (runOutput?.phase !== 'done' || !runOutput.result || copyingStream) return;
+    const value = runOutput.result[stream];
+    if (!value) return;
+    const serial = runSerial;
+    copyingStream = stream;
+    outputCopyError = null;
+    try {
+      await api.copyCommandOutput(value);
+      if (serial === runSerial) copiedStream = stream;
+    } catch (error: unknown) {
+      if (serial === runSerial) outputCopyError = message(error, 'Could not copy command output.');
+    } finally {
+      copyingStream = null;
     }
   }
 
@@ -407,8 +432,6 @@
       pendingDelete = null;
     } else if (event.key === 'Escape' && pendingRun) {
       pendingRun = null;
-    } else if (event.key === 'Escape' && runResult) {
-      runResult = null;
     }
   }
 </script>
@@ -428,11 +451,8 @@
         Update to {updates.available.version}
       </Button>
     {/if}
-    <!-- The full reason lives in Settings > Updates; the header only says something went wrong. -->
     {#if updates.status === 'error'}
-      <Button variant="ghost" size="sm" icon="alert" onclick={() => (showSettings = true)} data-testid="update-failed">
-        Update check failed
-      </Button>
+      <Button variant="ghost" size="sm" icon="alert" onclick={() => (showSettings = true)} data-testid="update-failed">Update check failed</Button>
     {/if}
     {#if vault}<VaultStatus {vault} onunlock={unlock} />{/if}
     <Button variant="ghost" size="sm" icon="gear" onclick={() => (showSettings = true)} data-testid="settings"
@@ -492,10 +512,15 @@
               ? 'Add a secret and it will be encrypted with the vault key.'
               : 'Add a command and it will be searchable from the Finder.'}
           onSelect={(entry) => void select(entry)}
+          onCopy={(entry) => void copyEntry(entry)}
+          onPin={(entry) => void togglePin(entry)}
+          onDelete={(entry) => (pendingDelete = entry)}
+          actionsDisabled={mode === 'edit' && draftDirty}
         />
       </section>
     {/if}
 
+    {#if !narrow || selectedId || mode === 'edit'}
     <section class="detail-pane" aria-label="Entry details">
       {#if narrow && mode === 'view' && selectedId}
         <div class="backrow">
@@ -562,6 +587,7 @@
         <EmptyState icon="search" title="Select an entry" hint="Pick a row on the left to see it here." />
       {/if}
     </section>
+    {/if}
   </main>
 </div>
 
@@ -584,10 +610,7 @@
 
 {#if pendingRun}
   <Dialog title="Run this command?" label="Confirm run" oncancel={() => (pendingRun = null)}>
-    <p>
-      Run shows the output here. Use “Run in terminal” for commands that need a password or other
-      input.
-    </p>
+    <p>Commands using sudo open your terminal for authentication. Other commands show their output here.</p>
     <pre class="block mono">{pendingRun.command}</pre>
     {#if pendingRun.workingDirectory}
       <p>Working directory: <code>{pendingRun.workingDirectory}</code></p>
@@ -595,52 +618,45 @@
     {#snippet footer()}
       <span class="spacer"></span>
       <Button onclick={() => (pendingRun = null)}>Cancel</Button>
-      <Button icon="run" onclick={() => void confirmRun(true)} data-testid="confirm-run-terminal"
-        >Run in terminal</Button
-      >
-      <Button variant="primary" icon="run" onclick={() => void confirmRun(false)} data-testid="confirm-run"
+      <Button variant="primary" icon="run" onclick={() => void confirmRun()} data-testid="confirm-run"
         >Run</Button
       >
     {/snippet}
   </Dialog>
 {/if}
 
-{#if runResult}
-  <Dialog title={runResult.output || runResult.error ? 'Command output' : 'Running…'} label="Command output" oncancel={() => (runResult = null)}>
-    <pre class="block mono">{runResult.command}</pre>
-    {#if runResult.error}
-      <p class="run-fail" data-testid="run-error">{runResult.error}</p>
-    {:else if !runResult.output}
-      <p class="muted" data-testid="run-pending">Running “{runResult.name}”…</p>
-    {:else}
-      {@const out = runResult.output}
-      <p data-testid="run-status" class:run-fail={out.timedOut || out.exitCode !== 0}>
-        {#if out.timedOut}
-          Stopped after the time limit ({Math.round(out.durationMs / 1000)}s).
-        {:else if out.exitCode === 0}
-          Finished successfully in {out.durationMs} ms (exit code 0).
-        {:else}
-          Failed with exit code {out.exitCode ?? 'unknown'} after {out.durationMs} ms.
-        {/if}
+{#if runOutput}
+  <Dialog title={runOutput.phase === 'running' ? `Running “${runOutput.name}”…` : `Result: ${runOutput.name}`} label="Command output" wide oncancel={closeRunOutput}>
+    {#if runOutput.phase === 'running'}
+      <p role="status" data-testid="command-running">Running command. Output appears when it finishes. Closing this view does not stop it.</p>
+    {:else if runOutput.phase === 'error'}
+      <p class="error-banner" role="alert" data-testid="command-error">{runOutput.error}</p>
+    {:else if runOutput.result}
+      <p class="run-summary" class:failed={runOutput.result.timedOut || runOutput.result.exitCode !== 0} data-testid="command-exit">
+        {#if runOutput.result.timedOut}Timed out after 120 seconds.
+        {:else if runOutput.result.exitCode === null}Stopped by a signal.
+        {:else}Exit code {runOutput.result.exitCode}.{/if}
+        {#if runOutput.result.truncated} Output was shortened to 64 KiB per stream.{/if}
       </p>
-      {#if out.stdout}
-        <span class="label">Output</span>
-        <pre class="block mono run-output" data-testid="run-stdout">{out.stdout}</pre>
+      {#if runOutput.result.stdout}
+        <section class="run-stream">
+          <div class="run-stream-heading"><h4>Output</h4><Button size="sm" icon="copy" loading={copyingStream === 'stdout'} onclick={() => void copyRunStream('stdout')} data-testid="copy-command-stdout">{copiedStream === 'stdout' ? 'Copied' : 'Copy output'}</Button></div>
+          <pre data-testid="command-stdout">{runOutput.result.stdout}</pre>
+        </section>
       {/if}
-      {#if out.stderr}
-        <span class="label">Errors</span>
-        <pre class="block mono run-output" data-testid="run-stderr">{out.stderr}</pre>
+      {#if runOutput.result.stderr}
+        <section class="run-stream">
+          <div class="run-stream-heading"><h4>Errors</h4><Button size="sm" icon="copy" loading={copyingStream === 'stderr'} onclick={() => void copyRunStream('stderr')} data-testid="copy-command-stderr">{copiedStream === 'stderr' ? 'Copied' : 'Copy errors'}</Button></div>
+          <pre data-testid="command-stderr">{runOutput.result.stderr}</pre>
+        </section>
       {/if}
-      {#if !out.stdout && !out.stderr}
-        <p class="muted">The command printed nothing.</p>
-      {/if}
-      {#if out.truncated}
-        <p class="muted">Output was cut at 256 KB.</p>
+      {#if outputCopyError}<p class="error-banner" role="alert" data-testid="output-copy-error">{outputCopyError}</p>{/if}
+      {#if !runOutput.result.stdout && !runOutput.result.stderr}
+        <p class="muted">The command produced no output.</p>
       {/if}
     {/if}
     {#snippet footer()}
-      <span class="spacer"></span>
-      <Button variant="primary" onclick={() => (runResult = null)} data-testid="run-close">Close</Button>
+      <Button onclick={closeRunOutput} data-testid="close-command-output">Close</Button>
     {/snippet}
   </Dialog>
 {/if}
@@ -676,15 +692,6 @@
 {/if}
 
 <style>
-  .run-output {
-    max-height: 260px;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .run-fail {
-    color: var(--danger);
-  }
   .shell {
     display: flex;
     flex-direction: column;
@@ -798,6 +805,41 @@
      --bg-raised, so the fill behind them has to be the inset token or they disappear */
   .shortcut {
     background: var(--inset-fill);
+  }
+  .run-summary {
+    margin: 0;
+    color: var(--ok);
+  }
+  .run-summary.failed {
+    color: var(--danger);
+  }
+  .run-stream {
+    min-width: 0;
+  }
+  .run-stream-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-1);
+  }
+  .run-stream h4 {
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
+    margin: 0;
+  }
+  .run-stream pre {
+    margin: 0;
+    padding: var(--sp-3);
+    max-height: 35vh;
+    overflow: auto;
+    background: var(--bg-sunken);
+    color: var(--fg);
+    border: var(--border-hair);
+    border-radius: var(--radius);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
   }
   @media (max-width: 900px) {
     .panes {

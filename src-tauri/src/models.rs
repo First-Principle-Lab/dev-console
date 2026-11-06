@@ -225,6 +225,15 @@ pub struct DeleteRequest {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+pub struct PinRequest {
+    pub kind: Kind,
+    pub id: String,
+    pub expected_revision: i64,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct CopyRequest {
     pub kind: Kind,
     pub id: String,

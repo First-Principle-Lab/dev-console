@@ -222,6 +222,30 @@ pub fn save_entry<R: Runtime>(
     Ok(saved)
 }
 
+#[tauri::command]
+pub fn set_pinned<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: PinRequest,
+) -> AppResult<SavedEntry> {
+    require_library(&window)?;
+    let state = state(&app);
+    let saved = match request.kind {
+        Kind::Command => {
+            state
+                .repo
+                .set_command_pinned(&request.id, request.expected_revision, request.pinned)?
+        }
+        Kind::Secret => {
+            state
+                .vault
+                .set_pinned(&request.id, request.expected_revision, request.pinned)?
+        }
+    };
+    emit_entries_changed(&app, &saved, "updated");
+    Ok(saved)
+}
+
 /// Opens an http(s) link from a URL field in the user's default browser. Anything else is
 /// rejected so a stored value can never launch an arbitrary scheme or program.
 #[tauri::command]
@@ -314,14 +338,33 @@ pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppRes
     }
 }
 
-/// Shared by both run paths: ownership, revision and approval checks, then the approval record.
-fn approved_command<R: Runtime>(
-    app: &AppHandle<R>,
-    window: &WebviewWindow<R>,
-    request: &RunRequest,
-) -> AppResult<crate::models::EntryRecord> {
-    require_library(window)?;
-    let state = state(app);
+#[tauri::command]
+pub fn copy_command_output<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    text: String,
+) -> AppResult<CopyResult> {
+    require_library(&window)?;
+    if text.is_empty() || text.len() > 64 * 1024 {
+        return Err(AppError::Validation(
+            "command output is empty or too large to copy".into(),
+        ));
+    }
+    let state = state(&app);
+    let expiry = state.settings.get().clipboard_expiry_seconds;
+    state
+        .clipboard
+        .copy(Kind::Command, "command-output", &text, expiry)
+}
+
+#[tauri::command]
+pub async fn run_command<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: RunRequest,
+) -> AppResult<execution::RunResult> {
+    require_library(&window)?;
+    let state = state(&app);
     let (record, _, _) = state
         .repo
         .get_command(&request.id)?
@@ -335,39 +378,24 @@ fn approved_command<R: Runtime>(
     if !state.repo.approval_state(&record)? {
         state.repo.approve_execution(&record)?;
     }
-    Ok(record)
-}
-
-#[tauri::command]
-pub fn run_command<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    request: RunRequest,
-) -> AppResult<()> {
-    let record = approved_command(&app, &window, &request)?;
-    let state = state(&app);
-    execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
-    state.repo.record_usage(&record.id)?;
-    Ok(())
-}
-
-/// Runs the command inside the app and returns what it printed. Async so the wait (up to the
-/// capture timeout) happens on a blocking worker instead of the main thread.
-#[tauri::command]
-pub async fn run_command_captured<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    request: RunRequest,
-) -> AppResult<execution::RunOutput> {
-    let record = approved_command(&app, &window, &request)?;
-    let output = tauri::async_runtime::spawn_blocking(move || {
-        execution::capture(&record, "/bin/sh", execution::CAPTURE_TIMEOUT).map(|o| (record, o))
-    })
-    .await
-    .map_err(|e| AppError::Execution(e.to_string()))??;
-    let (record, output) = output;
-    state(&app).repo.record_usage(&record.id)?;
-    Ok(output)
+    let record_id = record.id.clone();
+    let result = if execution::needs_terminal(&record.command) {
+        execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
+        execution::RunResult {
+            mode: "terminal",
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            truncated: false,
+            timed_out: false,
+        }
+    } else {
+        tauri::async_runtime::spawn_blocking(move || execution::execute_inline(&record, "/bin/sh"))
+            .await
+            .map_err(|error| AppError::Execution(format!("command task failed: {error}")))??
+    };
+    state.repo.record_usage(&record_id)?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -455,10 +483,7 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) ->
     Ok(())
 }
 
-/// Relaunch after an update. Tauri's own restart replays the old argv, and the resident app
-/// starts with `--background`, so it came back as an invisible tray process. This starts the
-/// new binary with `--library` instead, from a detached shell that waits for this process to
-/// exit first, so the single-instance lock is free and the window actually appears.
+/// Relaunch into the library after an update, even when this process started in the background.
 #[tauri::command]
 pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
     use std::os::unix::process::CommandExt;
@@ -491,6 +516,14 @@ pub fn get_settings<R: Runtime>(
 ) -> AppResult<Settings> {
     require_library(&window)?;
     Ok(state(&app).settings.get())
+}
+
+#[tauri::command]
+pub fn list_terminals<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> AppResult<Vec<execution::TerminalOption>> {
+    require_library(&window)?;
+    Ok(execution::available_terminals())
 }
 
 #[tauri::command]

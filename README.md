@@ -29,8 +29,12 @@ claims ownership of the selection and clears it after the expiry window you conf
 30s). It reports honestly when history exclusion is unavailable instead of claiming a protection
 it cannot deliver.
 
-**Execution** — commands run in your configured terminal only after an explicit approval, and the
-approval is invalidated when the command text changes.
+**Execution** — after explicit approval, ordinary commands run with `/bin/sh` and show stdout,
+stderr and exit status inside the library. Commands containing `sudo` open the configured terminal
+for authentication. In-app output is limited to 64 KiB per stream, and commands time out after
+120 seconds. The approval is invalidated when the command text changes. Settings lists supported
+terminals found in `PATH` and keeps a custom command option. A saved `x-terminal-emulator` setting
+falls back to an installed terminal when that executable is missing.
 
 **Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
 in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
@@ -76,8 +80,8 @@ and what is still open.
 
 `.github/workflows/ci.yml` runs the frontend, Rust, harness, and native smoke checks on pushes to
 `main` and on pull requests. A harness that cannot run in CI exits 77 and is reported as
-UNVERIFIED. After a successful `main` push, `.github/workflows/release.yml` builds a signed Linux
-AppImage and publishes a GitHub release. The first release is `0.0.1`; each later successful push
+UNVERIFIED. On a `main` push, the `verify` workflow builds a signed Linux AppImage alongside the
+checks and publishes a GitHub release only after all jobs pass. The first release is `0.0.1`; each later successful push
 increments the patch version. The version is set in the release build, so no version-bump commit
 or extra CI run is created. The repository must be public so the desktop updater can download its
 release assets. The release workflow needs the `TAURI_SIGNING_PRIVATE_KEY` repository secret.
@@ -104,11 +108,19 @@ rewriting the frozen `after/` set; `SHOT_HTML=1` writes each captured DOM alongs
 synthetic secret value reaching a capture fails the run.
 
 Contrast is measured rather than asserted: `bun run check:contrast`
-(`scripts/contrast-check.mjs`) reads the palettes out of `src/styles/tokens.css`, composites every
+(`scripts/contrast-check.mjs`) reads the palettes out of `src/styles/tokens.css` and
+`src/styles/omarchy.css`, composites every
 translucent layer over the surface it is painted on and checks 76 real pairings per theme at
 4.5:1 for text and 3:1 for state indicators, printing each ratio and each deliberate exemption.
 `tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
 contrast fails the gate.
+
+Settings includes the 22 stock Omarchy themes installed on this host. Their colors are
+snapshotted in `src/styles/omarchy.css` and can be refreshed with
+`python scripts/generate-omarchy-themes.py /path/to/omarchy/themes`. The generated roles retain
+each theme's background and accent while adjusting text and state colors to meet the app's contrast
+checks. `tests/e2e/omarchy-themes.spec.ts` captures the library, secrets, editor, settings and Finder
+for each theme in `artifacts/ui-review/omarchy-themes/`.
 
 `artifacts/ui-review/native-redesign/` holds the redesign as actually painted by the compiled
 release binary under Xvfb (`scripts/native-capture.sh`): library and palette over a dark and a

@@ -11,8 +11,9 @@ import type {
   BackupInfo,
   BackupOutcome,
   RecoveryKeyInfo,
+  RunResult,
   Settings,
-  RunOutput,
+  TerminalOption,
   VaultState
 } from './models';
 
@@ -68,15 +69,16 @@ export const api = {
   reveal: (kind: Kind, id: string): Promise<EntryDetails> =>
     call('reveal_secret', { request: { kind, id } }),
   save: (draft: EntryDraft): Promise<SavedEntry> => call('save_entry', { request: { draft } }),
+  setPinned: (kind: Kind, id: string, expectedRevision: number, pinned: boolean): Promise<SavedEntry> =>
+    call('set_pinned', { request: { kind, id, expectedRevision, pinned } }),
   openUrl: (url: string): Promise<void> => call('open_url', { url }),
   restartApp: (): Promise<void> => call('restart_app'),
   remove: (kind: Kind, id: string, expectedRevision: number): Promise<void> =>
     call('delete_entry', { request: { kind, id, expectedRevision } }),
   copy: (kind: Kind, id: string, expectedRevision: number): Promise<CopyResult> =>
     call('copy_entry', { request: { kind, id, expectedRevision } }),
-  runCaptured: (id: string, expectedRevision: number, approved: boolean): Promise<RunOutput> =>
-    call('run_command_captured', { request: { id, expectedRevision, approved } }),
-  run: (id: string, expectedRevision: number, approved: boolean): Promise<void> =>
+  copyCommandOutput: (text: string): Promise<CopyResult> => call('copy_command_output', { text }),
+  run: (id: string, expectedRevision: number, approved: boolean): Promise<RunResult> =>
     call('run_command', { request: { id, expectedRevision, approved } }),
   lockVault: (): Promise<VaultState> => call('lock_vault'),
   unlockVault: (): Promise<VaultState> => call('unlock_vault'),
@@ -86,5 +88,6 @@ export const api = {
   allowClose: (): Promise<void> => call('allow_close'),
   quit: (): Promise<void> => call('quit_app'),
   settings: (): Promise<Settings> => call('get_settings'),
+  terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
   saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings })
 };

@@ -5,6 +5,20 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.8 — 2026-11-06
+
+### Added
+- 22 Omarchy themes with immediate preview in Settings and an explicit Save action.
+- A selector for installed terminals, including Ghostty and Kitty, with a custom command option.
+- Command output and errors in the app, with separate copy buttons. Commands containing `sudo` open the selected terminal.
+- Copy, pin, and delete buttons on each library row. All app icons now use Lucide.
+
+### Fixed
+- Escape closes confirmation, output, and unsaved-change dialogs even when focus moves outside them.
+- URL fields open in the browser with a click target that fits the text; long URLs wrap, and hover changes only the pointer.
+- A missing legacy `x-terminal-emulator` setting falls back to an installed terminal.
+- Narrow library windows show the list without an empty detail pane.
+
 ## 0.0.5 — 2026-11-04
 
 ### Added

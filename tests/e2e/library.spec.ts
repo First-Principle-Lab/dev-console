@@ -37,12 +37,97 @@ test('creating a command persists through the backend and refreshes the list', a
   });
 });
 
+test('a newly saved ordinary command shows stdout, stderr and its exit code in the app', async ({ page }) => {
+  const command = "printf 'files'; printf 'warning' >&2; exit 7";
+  await boot(page, { ...SEED, runResults: {
+    [command]: { stdout: 'files', stderr: 'warning', exitCode: 7 }
+  } });
+  await page.getByTestId('add-entry').click();
+  await page.getByTestId('field-name').fill('list-files');
+  await page.getByTestId('field-command').fill(command);
+  await page.getByTestId('save').click();
+  await page.getByTestId('run').click();
+  await expect(page.getByRole('dialog', { name: 'Confirm run' })).toBeVisible();
+  await page.getByTestId('confirm-run').click();
+  await expect(page.getByRole('dialog', { name: 'Command output' })).toBeVisible();
+  await expect(page.getByTestId('command-stdout')).toHaveText('files');
+  await expect(page.getByTestId('command-stderr')).toHaveText('warning');
+  await expect(page.getByTestId('command-exit')).toContainText('Exit code 7');
+  await page.getByTestId('copy-command-stdout').click();
+  await expect(page.getByTestId('copy-command-stdout')).toContainText('Copied');
+  await page.getByTestId('copy-command-stderr').click();
+  await expect(page.getByTestId('copy-command-stderr')).toContainText('Copied');
+  expect((await mockState(page)).copiedOutputs).toEqual(['files', 'warning']);
+  await page.screenshot({ path: 'artifacts/ui-review/command-result.png' });
+  await page.setViewportSize({ width: 390, height: 780 });
+  await expect(page.getByTestId('close-command-output')).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'artifacts/ui-review/command-result-narrow.png' });
+  await page.getByTestId('close-command-output').click();
+  await expect(page.getByRole('dialog', { name: 'Command output' })).toHaveCount(0);
+});
+
+test('error-only command output can be copied and clipboard failures stay visible', async ({ page }) => {
+  await boot(page, { ...SEED, runResults: { 'echo one': { stdout: '', stderr: 'permission denied', exitCode: 1 } } });
+  await page.getByTestId('entry-row').nth(1).click();
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run').click();
+  await expect(page.getByTestId('copy-command-stdout')).toHaveCount(0);
+  await expect(page.getByTestId('command-stderr')).toHaveText('permission denied');
+  await page.evaluate(() => ((window as never as { __mock: { state: { failCopyOutput: boolean } } }).__mock.state.failCopyOutput = true));
+  await page.getByTestId('copy-command-stderr').click();
+  await expect(page.getByTestId('output-copy-error')).toContainText('clipboard provider is unavailable');
+  await page.evaluate(() => ((window as never as { __mock: { state: { failCopyOutput: boolean } } }).__mock.state.failCopyOutput = false));
+  await page.getByTestId('copy-command-stderr').click();
+  await expect(page.getByTestId('copy-command-stderr')).toContainText('Copied');
+  await expect(page.getByTestId('output-copy-error')).toHaveCount(0);
+  expect((await mockState(page)).copiedOutputs).toEqual(['permission denied']);
+});
+
+test('Escape closes confirmation, output, and unsaved changes dialogs', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('run').click();
+  await expect(page.getByRole('dialog', { name: 'Confirm run' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Confirm run' })).toHaveCount(0);
+  expect((await mockState(page)).runs).toHaveLength(0);
+
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run').click();
+  await expect(page.getByRole('dialog', { name: 'Command output' })).toBeVisible();
+  await page.evaluate(() => (document.querySelector('[data-testid="run"]') as HTMLElement)?.focus());
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Command output' })).toHaveCount(0);
+
+  await page.getByTestId('delete').click();
+  await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toHaveCount(0);
+
+  await page.getByTestId('add-entry').click();
+  await page.getByTestId('field-name').fill('Keep draft');
+  await page.evaluate(() => (window as never as { __mock: { emit: (event: string, payload: unknown) => void } }).__mock.emit('close-requested', { reason: 'window' }));
+  await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toHaveCount(0);
+  await expect(page.getByTestId('field-name')).toHaveValue('Keep draft');
+});
+
+test('sudo commands use the configured terminal after confirmation', async ({ page }) => {
+  await boot(page, { ...SEED, commands: [{ ...SEED.commands[0], command: 'sudo ls' }] });
+  await page.getByTestId('run').click();
+  await page.getByTestId('confirm-run').click();
+  await expect(page.getByTestId('status')).toContainText('Launched in a terminal for sudo');
+  await expect(page.getByRole('dialog', { name: 'Command output' })).toHaveCount(0);
+  expect((await mockState(page)).runs).toHaveLength(1);
+});
+
 test('a cancelled edit leaves the saved record untouched', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('entry-row').nth(1).click();
   await expect(page.getByTestId('command-text')).toHaveText('echo one');
   await page.getByTestId('edit').click();
-  await page.getByTestId('field-name').fill('renamed-by-mistake');
+  await page.getByTestId('field-name').fill('Renamed by mistake');
   await page.getByTestId('field-command').fill('rm -rf /');
   await page.getByTestId('cancel-edit').click();
   await expect(page.getByTestId('entry-details')).toContainText('Deploy');
@@ -55,11 +140,11 @@ test('a failed write keeps the draft on screen', async ({ page }) => {
   await boot(page, SEED);
   await page.evaluate(() => ((window as never as { __mock: { state: { saveFails: boolean } } }).__mock.state.saveFails = true));
   await page.getByTestId('add-entry').click();
-  await page.getByTestId('field-name').fill('kept-draft');
+  await page.getByTestId('field-name').fill('Kept draft');
   await page.getByTestId('field-command').fill('echo keep');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-error')).toBeVisible();
-  await expect(page.getByTestId('field-name')).toHaveValue('kept-draft');
+  await expect(page.getByTestId('field-name')).toHaveValue('Kept draft');
 });
 
 test('pin, copy and delete confirmation all act on the intended record', async ({ page }) => {
@@ -81,6 +166,45 @@ test('pin, copy and delete confirmation all act on the intended record', async (
   await page.getByTestId('confirm-delete').click();
   await expect(page.getByTestId('status')).toContainText('Deleted');
   expect((await mockState(page)).commands).toHaveLength(1);
+});
+
+test('sidebar actions target their row without selecting it, including secret pinning', async ({ page }) => {
+  await boot(page, SEED);
+  await page.screenshot({ path: 'artifacts/ui-review/sidebar-actions-wide.png' });
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.getByTestId('back-to-list').click();
+  await expect(page.locator('[data-entry-id="c1"]').getByTestId('row-delete')).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: 'artifacts/ui-review/sidebar-actions-narrow.png' });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.locator('[data-entry-id="c2"]').getByTestId('select-entry').click();
+  const commandRow = page.locator('[data-entry-id="c1"]');
+  await expect(commandRow).toHaveText('Deploy');
+  const copyBox = await commandRow.getByTestId('row-copy').boundingBox();
+  expect(copyBox?.width).toBeGreaterThanOrEqual(34);
+  expect(copyBox?.height).toBeGreaterThanOrEqual(34);
+  await commandRow.getByTestId('row-copy').click();
+  expect((await mockState(page)).copied).toEqual([{ id: 'c1', kind: 'command', value: 'echo one' }]);
+  await expect(page.getByTestId('command-text')).toHaveText('docker compose up');
+
+  await commandRow.getByTestId('row-pin').click();
+  await expect(commandRow.getByTestId('row-pin')).toHaveAttribute('aria-label', 'Unpin Deploy');
+  expect((await mockState(page)).commands.find((c) => c.id === 'c1')?.pinned).toBe(true);
+  await expect(page.getByTestId('command-text')).toHaveText('docker compose up');
+
+  await commandRow.getByTestId('row-delete').click();
+  await expect(page.getByRole('dialog', { name: 'Confirm delete' })).toContainText('Deploy');
+  await page.getByTestId('confirm-delete').click();
+  await expect(commandRow).toHaveCount(0);
+  expect((await mockState(page)).commands.map((c) => c.id)).toEqual(['c2']);
+
+  await page.getByTestId('tab-secrets').click();
+  const secretRow = page.locator('[data-entry-id="s1"]');
+  await secretRow.getByTestId('row-pin').click();
+  await expect(secretRow.getByTestId('row-pin')).toHaveAttribute('aria-label', 'Unpin Registry token');
+  expect((await mockState(page)).secrets[0]).toMatchObject({ pinned: true, value: 'synthetic-value-1' });
+  await secretRow.getByTestId('row-copy').click();
+  expect((await mockState(page)).copied.at(-1)).toMatchObject({ id: 's1', value: 'synthetic-value-1' });
 });
 
 test('secrets are masked in details and only appear through an explicit reveal', async ({ page }) => {
@@ -202,25 +326,6 @@ test('backups are refused while the vault is locked', async ({ page }) => {
   await expect(page.getByTestId('backup-error')).toContainText('the vault is locked');
 });
 
-test('typing a space in a name warns right away and blocks the save', async ({ page }) => {
-  await boot(page, SEED);
-  await page.getByTestId('add-entry').click();
-  const name = page.getByTestId('field-name');
-  await name.fill('wireguard');
-  await expect(page.getByTestId('name-spaces-hint')).toHaveCount(0);
-  await name.fill('wireguard off');
-  await expect(page.getByTestId('name-spaces-hint')).toContainText("can't contain spaces");
-  await expect(name).toHaveAttribute('aria-invalid', 'true');
-  await page.getByTestId('field-command').fill('sudo wg-quick down wg0');
-  await page.getByTestId('save').click();
-  expect((await mockState(page)).commands).toHaveLength(2);
-  await name.fill('wireguard-off');
-  await expect(page.getByTestId('name-spaces-hint')).toHaveCount(0);
-  await page.getByTestId('save').click();
-  await expect(page.getByTestId('entry-details')).toContainText('sudo wg-quick down wg0');
-  expect((await mockState(page)).commands[2].name).toBe('wireguard-off');
-});
-
 test('a URL field opens through the backend and only for http(s) links', async ({ page }) => {
   await boot(page, {
     ...SEED,
@@ -235,35 +340,57 @@ test('a URL field opens through the backend and only for http(s) links', async (
   expect(await page.evaluate(() => (window as unknown as { __openedUrls: string[] }).__openedUrls)).toEqual(['https://example.test/docs']);
 });
 
-test('Run shows the command output and exit code in the app', async ({ page }) => {
-  await boot(page, SEED);
-  await page.getByTestId('entry-row').nth(1).click();
-  await page.getByTestId('run').click();
-  await page.getByTestId('confirm-run').click();
-  const dialog = page.getByRole('dialog', { name: 'Command output' });
-  await expect(dialog.getByTestId('run-status')).toContainText('Finished successfully');
-  await expect(dialog.getByTestId('run-stdout')).toContainText('mock stdout for echo one');
-  expect((await mockState(page)).runs).toEqual([{ id: 'c1', revision: 1, captured: true }]);
-  await page.getByTestId('run-close').click();
-  await expect(dialog).toHaveCount(0);
-});
-
-test('a failing command shows its error output and exit code', async ({ page }) => {
+test('URL hit and focus areas fit short text while long URLs wrap inside the field', async ({ page }) => {
+  const shortUrl = 'https://e.co';
+  const longUrl = `https://example.test/${'long-path-'.repeat(18)}`;
   await boot(page, {
     ...SEED,
-    commands: [{ ...SEED.commands[0], command: 'make fail' }]
+    commands: [{
+      ...SEED.commands[0],
+      fields: [
+        { id: 'short', label: 'Short', value: shortUrl, display: 'url' },
+        { id: 'long', label: 'Long', value: longUrl, display: 'url' }
+      ]
+    }]
   });
-  await page.getByTestId('run').click();
-  await page.getByTestId('confirm-run').click();
-  await expect(page.getByTestId('run-status')).toContainText('exit code 2');
-  await expect(page.getByTestId('run-stderr')).toContainText('it broke');
-});
+  const fields = page.getByTestId('extra-fields').locator('.field');
+  const shortButton = fields.first().getByTestId('field-url');
+  const shortBox = await shortButton.boundingBox();
+  const shortFieldBox = await fields.first().boundingBox();
+  expect(shortBox).not.toBeNull();
+  expect(shortFieldBox).not.toBeNull();
+  expect(shortBox!.width).toBeLessThan(shortFieldBox!.width - 30);
+  const idleStyle = await shortButton.evaluate((el) => {
+    const css = getComputedStyle(el);
+    return { background: css.backgroundColor, color: css.color, decoration: css.textDecorationLine, cursor: css.cursor };
+  });
+  expect(idleStyle.decoration).toBe('none');
+  expect(idleStyle.cursor).toBe('pointer');
+  await shortButton.hover();
+  const hoverStyle = await shortButton.evaluate((el) => {
+    const css = getComputedStyle(el);
+    return { background: css.backgroundColor, color: css.color, decoration: css.textDecorationLine };
+  });
+  expect(hoverStyle).toEqual({ background: idleStyle.background, color: idleStyle.color, decoration: 'none' });
+  await page.mouse.click(shortFieldBox!.x + shortFieldBox!.width - 8, shortBox!.y + shortBox!.height / 2);
+  expect(await page.evaluate(() => (window as unknown as { __openedUrls?: string[] }).__openedUrls ?? [])).toEqual([]);
 
-test('Run in terminal still launches without capturing output', async ({ page }) => {
-  await boot(page, SEED);
-  await page.getByTestId('entry-row').nth(1).click();
-  await page.getByTestId('run').click();
-  await page.getByTestId('confirm-run-terminal').click();
-  await expect(page.getByTestId('status')).toContainText('Launched in a terminal');
-  expect((await mockState(page)).runs).toEqual([{ id: 'c1', revision: 1 }]);
+  await shortButton.focus();
+  await expect(shortButton).toBeFocused();
+  expect(await shortButton.evaluate((el) => getComputedStyle(el).outlineWidth)).toBe('2px');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => (window as unknown as { __openedUrls: string[] }).__openedUrls)).toEqual([shortUrl]);
+
+  const longButton = fields.nth(1).getByTestId('field-url');
+  const longBounds = await longButton.evaluate((el) => ({ width: el.clientWidth, scrollWidth: el.scrollWidth, height: el.clientHeight }));
+  expect(longBounds.scrollWidth).toBeLessThanOrEqual(longBounds.width + 1);
+  expect(longBounds.height).toBeGreaterThan(35);
+  expect(await fields.nth(1).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: 'artifacts/ui-review/url-field-hit-areas.png' });
+  await longButton.click();
+  expect(await page.evaluate(() => (window as unknown as { __openedUrls: string[] }).__openedUrls)).toEqual([shortUrl, longUrl]);
+  await page.setViewportSize({ width: 390, height: 780 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  expect(await longButton.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: 'artifacts/ui-review/url-field-hit-areas-narrow.png' });
 });

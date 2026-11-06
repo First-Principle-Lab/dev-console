@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::error::{AppError, AppResult};
+use crate::execution;
 use crate::models::Settings;
 use crate::paths;
 
@@ -14,12 +15,16 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load(path: PathBuf) -> AppResult<Self> {
-        let settings = if path.exists() {
+        let mut settings = if path.exists() {
             let text = std::fs::read_to_string(&path)?;
             serde_json::from_str::<Settings>(&text).unwrap_or_default()
         } else {
             Settings::default()
         };
+        if settings.terminal.is_empty() || execution::legacy_default_is_missing(&settings.terminal)
+        {
+            settings.terminal = execution::recommended_terminal();
+        }
         Ok(SettingsStore {
             path,
             cached: Mutex::new(settings),
@@ -34,12 +39,37 @@ impl SettingsStore {
         let mut settings = settings;
         settings.clipboard_expiry_seconds = settings.clipboard_expiry_seconds.clamp(5, 3600);
         if settings.terminal.is_empty() {
-            settings.terminal = Settings::default().terminal;
+            settings.terminal = execution::recommended_terminal();
         }
-        if !matches!(settings.theme.as_str(), "system" | "light" | "dark") {
-            return Err(AppError::Validation(
-                "theme must be system, light or dark".into(),
-            ));
+        if !matches!(
+            settings.theme.as_str(),
+            "system"
+                | "light"
+                | "dark"
+                | "omarchy-catppuccin"
+                | "omarchy-catppuccin-latte"
+                | "omarchy-ethereal"
+                | "omarchy-everforest"
+                | "omarchy-flexoki-light"
+                | "omarchy-gruvbox"
+                | "omarchy-hackerman"
+                | "omarchy-kanagawa"
+                | "omarchy-last-horizon"
+                | "omarchy-lumon"
+                | "omarchy-lupine"
+                | "omarchy-matte-black"
+                | "omarchy-miasma"
+                | "omarchy-nord"
+                | "omarchy-osaka-jade"
+                | "omarchy-retro-82"
+                | "omarchy-ristretto"
+                | "omarchy-rose-pine"
+                | "omarchy-solitude"
+                | "omarchy-tokyo-night"
+                | "omarchy-vantablack"
+                | "omarchy-white"
+        ) {
+            return Err(AppError::Validation("unknown theme".into()));
         }
         let json = serde_json::to_string_pretty(&settings)?;
         atomic_write(&self.path, json.as_bytes())?;
@@ -85,4 +115,25 @@ fn file_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_legacy_terminal_uses_an_installed_one() {
+        let path =
+            std::env::temp_dir().join(format!("dev-console-terminal-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&Settings::default()).expect("json"),
+        )
+        .expect("write");
+        let store = SettingsStore::load(path.clone()).expect("load");
+        if execution::legacy_default_is_missing(&Settings::default().terminal) {
+            assert_eq!(store.get().terminal, execution::recommended_terminal());
+        }
+        std::fs::remove_file(path).expect("cleanup");
+    }
 }

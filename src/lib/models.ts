@@ -148,11 +148,42 @@ export interface ClipboardExclusion {
 }
 
 export interface Settings {
-  theme: 'system' | 'light' | 'dark';
+  theme: Theme;
   autostart: boolean;
   clipboardExpirySeconds: number;
   terminal: string[];
 }
+
+export interface TerminalOption {
+  id: string;
+  name: string;
+  command: string[];
+}
+
+export interface RunResult {
+  mode: 'inline' | 'terminal';
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  truncated: boolean;
+  timedOut: boolean;
+}
+
+export const OMARCHY_THEMES = [
+  ['catppuccin', 'Catppuccin'], ['catppuccin-latte', 'Catppuccin Latte'],
+  ['ethereal', 'Ethereal'], ['everforest', 'Everforest'],
+  ['flexoki-light', 'Flexoki Light'], ['gruvbox', 'Gruvbox'],
+  ['hackerman', 'Hackerman'], ['kanagawa', 'Kanagawa'],
+  ['last-horizon', 'Last Horizon'], ['lumon', 'Lumon'],
+  ['lupine', 'Lupine'], ['matte-black', 'Matte Black'],
+  ['miasma', 'Miasma'], ['nord', 'Nord'],
+  ['osaka-jade', 'Osaka Jade'], ['retro-82', 'Retro 82'],
+  ['ristretto', 'Ristretto'], ['rose-pine', 'Rose Pine'],
+  ['solitude', 'Solitude'], ['tokyo-night', 'Tokyo Night'],
+  ['vantablack', 'Vantablack'], ['white', 'White']
+] as const;
+
+export type Theme = 'system' | 'light' | 'dark' | `omarchy-${typeof OMARCHY_THEMES[number][0]}`;
 
 export interface SavedEntry {
   id: string;
