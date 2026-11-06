@@ -78,7 +78,7 @@ Known honest limitations (by design, also surfaced in-app): X11 offers no clipbo
 history-exclusion API, so the app copies ordinary text and reports `exclusion unavailable`;
 session lock is not observable without logind, so the vault stays unlocked across it unless
 you lock manually; the polkit policy is shipped but inactive until the privileged install
-step of `docs/packaging.md` runs.
+step of `docs/packaging/packaging.md` runs.
 
 ## Remaining actions, in order
 

@@ -5,7 +5,7 @@
 # This host has no Wayland session, no Hyprland and no compositor: what this proves is the
 # opaque-shell material level on X11 (window fully painted, square window corners, no
 # background bleed, frames at rest are stable) - never compositor blur. See the C9 section of
-# docs/raycast-ui-research-2026-11-02.md for the achieved material level and the manual
+# docs/design/raycast-ui-research-2026-11-02.md for the achieved material level and the manual
 # Wayland/Hyprland checklist.
 #
 # Usage: _native-capture-session.sh <binary> <workdir> <probe> <shot-dir>

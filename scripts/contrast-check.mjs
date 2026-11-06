@@ -22,7 +22,7 @@
  * Deliberate exemptions (WCAG 1.4.11 does not require these to reach 3:1):
  * separators between regions, the soft edge of a selection band whose state is
  * already carried by the solid inset marker, decorative elevation shadows, and
- * disabled components. See docs/raycast-ui-research-2026-11-02.md.
+ * disabled components. See docs/design/raycast-ui-research-2026-11-02.md.
  *
  * Usage:
  *   bun scripts/contrast-check.mjs            full table

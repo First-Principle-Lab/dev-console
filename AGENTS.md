@@ -57,6 +57,19 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 Playwright reuses a running `vite preview` on port 4173 outside CI. Run `bun run build` first, or set `CI=1`, so the tests run against your current code.
 
+## Documentation layout
+
+Markdown files other than `README.md`, `AGENTS.md` and `CHANGELOG.md` live under `docs/`, each in a subfolder. Don't add `.md` files to the repo root or directly in `docs/`, apart from `docs/README.md`, the index.
+
+| Folder | What goes there |
+| --- | --- |
+| `docs/plans/` | Implementation plans for features not built yet. |
+| `docs/design/` | UI research, design briefs and review protocols. |
+| `docs/packaging/` | Packaging, install and desktop-integration notes. |
+| `docs/project/` | Project status: plan, progress log, handoff, test report, acceptance checklist. |
+
+Create a new subfolder when none of these fits, and add it to `docs/README.md`. When you move or rename a doc, update every reference to it (README, code comments, tests, scripts) in the same commit, and grep for the old path before pushing.
+
 ## Conventions
 
 - Keep UI behaviour covered by the e2e specs in `tests/e2e/`. Add or update a spec for any user-visible change.
