@@ -103,3 +103,11 @@ integration is installed locally; counts start in new terminals, with no inferre
 backfill from cwd-less history. The full browser gate passed 180 tests and the final
 history/project layout passed 19 focused tests. Rust passed 168 library tests and
 nine integration tests. Fourteen environment-dependent tests remain ignored by default.
+
+## Settings Save
+
+Successful Settings saves now close the panel after committing the saved theme and
+notifying the library. Failed saves retain the form and show the error. Save is
+disabled while pending. The full browser suite passed 181 tests, including failure
+retention and successful-save dismissal. Svelte check, lint, 24 frontend unit tests,
+production build, Rust formatting, Clippy and the locked Rust suite also passed.
