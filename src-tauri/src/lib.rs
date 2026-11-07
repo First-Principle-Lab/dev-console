@@ -6,6 +6,7 @@ pub mod clipboard;
 pub mod context;
 pub mod control;
 pub mod desktop_icons;
+pub mod environment;
 pub mod error;
 pub mod execution;
 pub mod history;
@@ -130,6 +131,7 @@ fn build(argv: Vec<String>) {
             }
             desktop_icons::refresh_for_appimage();
             clipboard::spawn_expiry_worker(Arc::clone(&state));
+            environment::spawn_sync_worker(Arc::clone(&state));
             control::serve(app.handle(), Arc::clone(&state));
             match intent {
                 Intent::Finder => windows::show_finder(app.handle())?,
@@ -180,7 +182,11 @@ fn build(argv: Vec<String>) {
             ipc::export_archive,
             ipc::import_archive,
             ipc::scan_project,
-            ipc::import_project
+            ipc::import_project,
+            ipc::environment_projects,
+            ipc::sync_environment,
+            ipc::set_environment_sync,
+            ipc::copy_environment
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

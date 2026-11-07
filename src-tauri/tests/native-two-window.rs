@@ -227,6 +227,10 @@ impl Harness {
                 dev_console_lib::ipc::create_backup,
                 dev_console_lib::ipc::scan_project,
                 dev_console_lib::ipc::import_project,
+                dev_console_lib::ipc::environment_projects,
+                dev_console_lib::ipc::sync_environment,
+                dev_console_lib::ipc::set_environment_sync,
+                dev_console_lib::ipc::copy_environment,
             ])
             .build(mock_context(noop_assets()))
             .expect("mock app");
@@ -458,6 +462,13 @@ fn privileged_operations_are_authorised_by_the_calling_window() {
             "run_command",
             json!({ "request": { "id": id, "expectedRevision": 1, "approved": true } }),
         ),
+        ("environment_projects", json!({})),
+        ("sync_environment", json!({ "path": "/missing/project" })),
+        (
+            "set_environment_sync",
+            json!({ "root": "/missing/project", "enabled": true }),
+        ),
+        ("copy_environment", json!({ "id": "missing" })),
         ("get_settings", json!({})),
         ("create_backup", json!({})),
     ];

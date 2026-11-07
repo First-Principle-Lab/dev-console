@@ -40,3 +40,5 @@ to test it, and how to tell it is complete.
 The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9-review.md).
 
 - [`project-command-groups.md`](project/project-command-groups.md): project groups and shell tracking behavior
+
+- [`project-environments.md`](project/project-environments.md): encrypted local environment file versions and recovery

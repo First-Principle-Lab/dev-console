@@ -389,6 +389,7 @@ fn validate(archive: &Archive) -> AppResult<()> {
             "that backup uses a newer vault format".into(),
         ));
     }
+    crate::environment::validate(&archive.secrets.environments)?;
     let mut ids = std::collections::HashSet::new();
     for record in &archive.commands {
         if record.name.trim().is_empty() {
@@ -576,6 +577,7 @@ mod tests {
             created_at: now_rfc3339(),
             commands: vec![command("c1")],
             secrets: VaultFile {
+                environments: vec![],
                 version: VAULT_VERSION,
                 records: vec![record("s1", "Registry token", "UNIQUE-SECRET-marker")],
                 usage: vec![UsageRecord {
@@ -624,6 +626,34 @@ mod tests {
         assert_eq!(restored.secrets.records.len(), 1);
         assert_eq!(restored.secrets.records[0].value, "UNIQUE-SECRET-marker");
         assert_eq!(restored.secrets.usage[0].count, 3);
+        dir.erase();
+    }
+
+    #[test]
+    fn environment_versions_round_trip_in_encrypted_backups() {
+        let dir = Dir::new();
+        let (key, _) = Dir::keys();
+        let manager = dir.manager(4);
+        let mut original = archive();
+        original
+            .secrets
+            .environments
+            .push(crate::environment::EnvironmentProject {
+                root: "/projects/synthetic".into(),
+                enabled: true,
+                snapshots: vec![crate::environment::EnvironmentSnapshot {
+                    id: "env-synthetic".into(),
+                    file: ".env.local".into(),
+                    version: 1,
+                    saved_at: now_rfc3339(),
+                    content: "SYNTHETIC_ENV_BACKUP=one\n".into(),
+                }],
+            });
+        let name = manager.create(&original, &key).unwrap();
+        let bytes = std::fs::read(manager.dir().join(&name)).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("SYNTHETIC_ENV_BACKUP"));
+        let restored = manager.read_backup(&name, &key).unwrap();
+        assert_eq!(restored.secrets.environments, original.secrets.environments);
         dir.erase();
     }
 
@@ -784,6 +814,7 @@ mod tests {
 
         let nameless = Archive {
             secrets: VaultFile {
+                environments: vec![],
                 version: VAULT_VERSION,
                 records: vec![record("s9", "   ", "x")],
                 usage: Vec::new(),

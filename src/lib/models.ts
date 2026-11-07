@@ -327,3 +327,17 @@ export interface ProjectImportOutcome {
   /** Names that could not be saved, each with the reason. */
   skipped: string[];
 }
+
+export interface EnvironmentSnapshot {
+  id: string;
+  file: string;
+  version: number;
+  savedAt: string;
+  bytes: number;
+}
+
+export interface EnvironmentProject {
+  root: string;
+  enabled: boolean;
+  snapshots: EnvironmentSnapshot[];
+}

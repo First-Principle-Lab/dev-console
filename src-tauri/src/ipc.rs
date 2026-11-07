@@ -811,3 +811,67 @@ pub fn install_history_tracking<R: Runtime>(window: WebviewWindow<R>) -> AppResu
     require_library(&window)?;
     crate::project_history::install_zsh_hook()
 }
+
+#[tauri::command]
+pub fn environment_projects<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<Vec<crate::environment::ProjectMeta>> {
+    require_library(&window)?;
+    crate::environment::list(&state(&app).vault)
+}
+
+#[tauri::command]
+pub async fn sync_environment<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+) -> AppResult<crate::environment::SyncResult> {
+    require_library(&window)?;
+    let state = state(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::fs::canonicalize(&path)?.to_string_lossy().to_string();
+        crate::environment::sync(&state.vault, &root, true)?;
+        Ok(crate::environment::SyncResult {
+            root,
+            projects: crate::environment::list(&state.vault)?,
+        })
+    })
+    .await
+    .map_err(|_| AppError::Other("Environment sync could not complete.".into()))?
+}
+
+#[tauri::command]
+pub fn set_environment_sync<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    root: String,
+    enabled: bool,
+) -> AppResult<()> {
+    require_library(&window)?;
+    crate::environment::set_enabled(&state(&app).vault, &root, enabled)
+}
+
+#[tauri::command]
+pub fn copy_environment<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    id: String,
+) -> AppResult<CopyResult> {
+    require_library(&window)?;
+    let state = state(&app);
+    state.vault.read(|v| {
+        let snapshot = v
+            .environments
+            .iter()
+            .flat_map(|p| &p.snapshots)
+            .find(|s| s.id == id)
+            .ok_or(AppError::NotFound)?;
+        state.clipboard.copy(
+            Kind::Secret,
+            &snapshot.id,
+            &snapshot.content,
+            state.settings.get().clipboard_expiry_seconds,
+        )
+    })
+}

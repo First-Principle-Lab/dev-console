@@ -16,6 +16,8 @@
     onCopy,
     onPin,
     onDelete,
+    onEnvironment,
+    onProjectOpen,
     filterActive = false,
     actionsDisabled = false
   }: {
@@ -29,6 +31,8 @@
     onCopy: (entry: EntryMeta) => void;
     onPin: (entry: EntryMeta) => void;
     onDelete: (entry: EntryMeta) => void;
+    onEnvironment?: (root: string) => void;
+    onProjectOpen?: (root: string) => void;
     filterActive?: boolean;
     actionsDisabled?: boolean;
   } = $props();
@@ -80,7 +84,13 @@
           <button type="button" class="project-head" data-testid="command-project-toggle"
             title={group.root || group.name}
             aria-expanded={filterActive || expanded.has(group.key)}
-            onclick={() => expanded.has(group.key) ? expanded.delete(group.key) : expanded.add(group.key)}>
+            onclick={() => {
+              if (expanded.has(group.key)) expanded.delete(group.key);
+              else {
+                expanded.add(group.key);
+                if (group.root) onProjectOpen?.(group.root);
+              }
+            }}>
             <span class:closed={!filterActive && !expanded.has(group.key)} class="project-chevron"><Icon name="chevron" size={13} /></span>
             <Icon name="folder" size={14} />
             <span class="truncate">{group.name}</span><span class="chip">{group.entries.length}</span>
@@ -89,6 +99,11 @@
           <div class="general-head">General <span class="chip">{group.entries.length}</span></div>
         {/if}
         {#if !group.key || filterActive || expanded.has(group.key)}
+          {#if group.root && onEnvironment}
+            <button type="button" class="project-head" data-testid="project-environment" onclick={() => onEnvironment?.(group.root)}>
+              <Icon name="lock" size={14} /> Environment
+            </button>
+          {/if}
           {#each group.entries as entry (entry.id)}
       <div
         class="row-wrap"

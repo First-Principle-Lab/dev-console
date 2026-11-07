@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+- Project Environment sections keep encrypted, dated versions of local `.env` files, with automatic sync, pause/resume and copying of older versions.
+
 ## 0.0.9 — 2026-11-07
 
 ### Added

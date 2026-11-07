@@ -1,5 +1,6 @@
 import type {
   AppStateInfo,
+  EnvironmentProject,
   CopyResult,
   EntryDetails,
   EntryDraft,
@@ -52,6 +53,10 @@ export interface ListRequest {
 }
 
 export const api = {
+  environmentProjects: (): Promise<EnvironmentProject[]> => call('environment_projects'),
+  syncEnvironment: (path: string): Promise<{ root: string; projects: EnvironmentProject[] }> => call('sync_environment', { path }),
+  setEnvironmentSync: (root: string, enabled: boolean): Promise<void> => call('set_environment_sync', { root, enabled }),
+  copyEnvironment: (id: string): Promise<CopyResult> => call('copy_environment', { id }),
   createBackup: (): Promise<string> => call('create_backup'),
   listBackups: (): Promise<BackupInfo[]> => call('list_backups'),
   restoreBackup: (name: string): Promise<BackupOutcome> => call('restore_backup', { name }),

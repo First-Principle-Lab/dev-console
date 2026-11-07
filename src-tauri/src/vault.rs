@@ -28,7 +28,7 @@ use crate::repository::validate_draft;
 use crate::settings::atomic_write;
 use crate::{auth, keyring};
 
-pub const VAULT_VERSION: u32 = 1;
+pub const VAULT_VERSION: u32 = 2;
 
 /// Where the vault key comes from.
 #[derive(Debug, Clone)]
@@ -52,6 +52,8 @@ pub struct VaultFile {
     pub version: u32,
     pub records: Vec<EntryRecord>,
     pub usage: Vec<UsageRecord>,
+    #[serde(default)]
+    pub environments: Vec<crate::environment::EnvironmentProject>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,12 +202,14 @@ impl VaultService {
                     "the vault was written by a newer version of Dev Console".into(),
                 ));
             }
+            crate::environment::validate(&file.environments)?;
             file
         } else {
             let empty = VaultFile {
                 version: VAULT_VERSION,
                 records: Vec::new(),
                 usage: Vec::new(),
+                environments: Vec::new(),
             };
             self.persist(&empty)?;
             empty
@@ -288,6 +292,11 @@ impl VaultService {
     }
 
     pub fn clear_decrypted(&self) {
+        self.file
+            .lock()
+            .expect("vault file lock poisoned")
+            .environments
+            .clear();
         self.file
             .lock()
             .expect("vault file lock poisoned")
