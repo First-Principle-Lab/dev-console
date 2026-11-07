@@ -12,7 +12,7 @@ import { boot } from './helpers';
  *   SHOT_SET=before           # historical pre-token set, frozen: artifacts/ui-review/before/
  *   SHOT_SET=after            # previous review set, frozen: artifacts/ui-review/after/
  *   SHOT_SET=native           # written by the native smoke session, not by this file
- *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/raycast-ui-research-2026-11-02.md)
+ *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/design/raycast-ui-research-2026-11-02.md)
  *   SHOT_SET=raycast-after    # the redesigned UI
  *
  * `before`, `after` and `native` stay on disk untouched: they are the review record for earlier
@@ -28,7 +28,7 @@ import { boot } from './helpers';
 // `before`, `after` and `native` are frozen review records for earlier work, so the default is no
 // longer `after`: a plain `bunx playwright test` (which is what `scripts/verify.sh` runs) would
 // otherwise overwrite 41 tracked PNGs with whatever this machine's font rendering produces.
-// docs/raycast-ui-research-2026-11-02.md owns the capture protocol.
+// docs/design/raycast-ui-research-2026-11-02.md owns the capture protocol.
 const SET = process.env.SHOT_SET ?? 'raycast-after';
 const OUT_DIR = path.join(import.meta.dirname, '..', '..', 'artifacts', 'ui-review', SET);
 const HTML_DIR = path.join(import.meta.dirname, '..', '..', 'test-results', 'screenshots', SET);
@@ -83,6 +83,39 @@ test('finder at the real palette size (680x420)', async ({ page }) => {
   await capture(page, '13-finder-palette-680x420', 680, 420);
 });
 
+// The chip is muted text on a hairline border, which is exactly what a theme can wash out, so it is
+// reviewed in a dark, a light and two Omarchy palettes. Dark keeps the original file name.
+const CONTEXT_THEMES = [
+  ['dark', ''],
+  ['light', '-light'],
+  ['omarchy-tokyo-night', '-tokyo-night'],
+  ['omarchy-catppuccin-latte', '-catppuccin-latte']
+] as const;
+
+for (const [theme, suffix] of CONTEXT_THEMES) {
+  test(`finder with a detected project, at the real palette size (${theme})`, async ({ page }) => {
+    // The chip and the row markers share the search line and the row's action area with the vault
+    // chip and the Enter keycap, so this is the state where they would collide.
+    const seed = {
+      ...SEED,
+      context: { root: '/home/mock/src/api', name: 'api' },
+      settings: {
+        theme, autostart: false, clipboardExpirySeconds: 30,
+        terminal: ['x-terminal-emulator', '-e'], projectContextEnabled: true
+      }
+    };
+    await boot(page, seed, 'finder');
+    // A review PNG of the palette without its chip would be worthless, so the state is asserted
+    // rather than trusted: the chip names the project, and the one command saved inside it is marked.
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect(page.getByTestId('finder-context')).toHaveText('api');
+    await expect(page.getByTestId('row-in-project')).toHaveCount(1);
+    await expect(page.getByRole('img', { name: 'in api' })).toHaveCount(1);
+    await capture(page, `18-finder-project-context${suffix}`, 680, 420);
+    await expect(page.getByTestId('finder-context'), 'after capture').toHaveText('api');
+  });
+}
+
 test('library with a long name and long values (overflow check)', async ({ page }) => {
   await boot(page, LONG);
   await page.getByTestId('entry-row').first().click();
@@ -118,6 +151,39 @@ test('library record at the real minimum window size', async ({ page }) => {
   await page.getByTestId('entry-row').first().click();
   await page.getByTestId('entry-details').waitFor();
   await capture(page, '17-library-minimum-window', 760, 520);
+});
+
+/** Opens the project-task dialog over a scanned folder; the dialog is the surface under review. */
+async function importDialog(page: Page, large = false, theme = 'dark'): Promise<void> {
+  await boot(page, { ...EMPTY, projectLarge: large, settings: {
+    theme, autostart: false, clipboardExpirySeconds: 30, terminal: ['x-terminal-emulator', '-e']
+  } });
+  await page.getByTestId('import-project').click();
+  await page.getByTestId('project-path').fill(
+    large ? '/home/dev/projects/bigrepo' : '/home/dev/projects/webapp'
+  );
+  await page.getByTestId('project-scan').click();
+  await page.getByTestId('project-scan-summary').waitFor();
+}
+
+test('project task review at the real library size and at the minimum window size', async ({
+  page
+}) => {
+  // The review list scrolls inside the dialog, so the Import action must stay reachable at both
+  // the size the shell is usually created at and the smallest one it accepts.
+  await importDialog(page);
+  await capture(page, '18-project-import', 1040, 700);
+  await importDialog(page);
+  await capture(page, '18-project-import-minimum', 760, 520);
+  await importDialog(page);
+  await capture(page, '18-project-import-mobile', 390, 780);
+});
+
+test('project task review with far more tasks than fit on screen', async ({ page }) => {
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list', 1440, 900);
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list-minimum', 760, 520);
 });
 
 const EMPTY = { commands: [], secrets: [] };
@@ -245,5 +311,64 @@ for (const viewport of VIEWPORTS) {
     await page.getByTestId('finder-input').fill('token');
     await page.waitForTimeout(200);
     await capture(page, '12-finder-locked-row', width, height);
+  });
+}
+
+/**
+ * The shell-history suggestion panel, reviewed at the widest and the narrowest size the library is
+ * used at: a row is a three-column grid, and 390px is where it has to collapse.
+ */
+const HISTORY_SEED = {
+  ...SEED,
+  settings: {
+    theme: 'dark',
+    autostart: false,
+    clipboardExpirySeconds: 30,
+    terminal: ['x-terminal-emulator', '-e'],
+    historySuggestionsEnabled: true
+  },
+  history: [
+    { command: 'docker compose -f compose.yml up --build api worker', count: 14 },
+    { command: 'bun run test:watch', count: 9 },
+    { command: 'kubectl -n staging logs -f api-6d9f7b', count: 4 }
+  ]
+};
+
+if (SET === 'raycast-after') {
+  test('shell history suggestions @ desktop-1440 and mobile-390', async ({ page }) => {
+    // 1440 is the width the panel was designed against and 390 is where it has to give something
+    // up; both are reviewed in each palette.
+    await boot(page, HISTORY_SEED);
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions', 1440, 900);
+
+    await boot(page, {
+      ...HISTORY_SEED,
+      settings: { ...HISTORY_SEED.settings, theme: 'light' }
+    });
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions-light', 1440, 900);
+
+    // Narrow: under 900px the library shows one pane, and a row selected at the wider size would
+    // leave the list - and the panel above it - off screen.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await boot(page, HISTORY_SEED);
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions', 390, 780);
+
+    await page.getByTestId('history-suggestions-toggle').click();
+    await expect(page.getByTestId('history-suggestion-list')).toHaveCount(0);
+    await capture(page, '19-history-suggestions-collapsed', 390, 780);
+  });
+}
+
+for (const theme of ['dark', 'light', 'omarchy-catppuccin', 'omarchy-gruvbox']) {
+  test(`project import review captures in ${theme}`, async ({ page }) => {
+    for (const [width, height] of [[1440, 900], [390, 780]]) {
+      await importDialog(page, false, theme);
+      await capture(page, `20-project-import-${theme}`, width, height);
+      await importDialog(page, true, theme);
+      await capture(page, `21-project-import-long-${theme}`, width, height);
+    }
   });
 }

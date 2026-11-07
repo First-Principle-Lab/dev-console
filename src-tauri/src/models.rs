@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::context::FinderContext;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -39,6 +41,11 @@ pub struct ExtraField {
 }
 
 /// Search/browse metadata. Deliberately has no value, notes, or custom-field contents.
+///
+/// `working_directory` is the one stored-command field that travels with metadata, because
+/// ranking the project you were just working in cannot be done without it. It is a path the user
+/// typed, not secret material, and secrets always carry an empty string here so the field can
+/// never be a side channel for anything vault-held.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryMeta {
@@ -56,6 +63,10 @@ pub struct EntryMeta {
     pub usage_count: i64,
     #[serde(default)]
     pub last_used_at: Option<String>,
+    #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
+    pub project: Option<FinderContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +84,9 @@ pub struct SearchResult {
     pub pinned: bool,
     pub usage_count: i64,
     pub last_used_at: Option<String>,
+    /// True when the entry belongs to the project the finder was opened from, so the palette can
+    /// say which rows it moved up. `false` whenever there is no context at all.
+    pub in_context: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +152,17 @@ impl EntryRecord {
             updated_at: self.updated_at.clone(),
             usage_count,
             last_used_at,
+            project: if self.kind == Kind::Command {
+                crate::project_history::project_for_directory(&self.working_directory)
+            } else {
+                None
+            },
+            // Secrets never carry one, so the field cannot leak anything the vault holds.
+            working_directory: if self.kind == Kind::Command {
+                self.working_directory.clone()
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -255,6 +280,23 @@ pub struct SaveRequest {
     pub draft: EntryDraft,
 }
 
+/// Which folder to read tasks from.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScanProjectRequest {
+    pub path: String,
+}
+
+/// Which of a scan's candidates to save. `all` imports every one of them, which is what `--all`
+/// means on the command line.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ImportProjectRequest {
+    pub path: String,
+    pub names: Vec<String>,
+    pub all: bool,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OpenLibraryRequest {
@@ -301,6 +343,9 @@ pub struct AppStateInfo {
     pub authenticated_unlock_available: bool,
     pub clipboard_exclusion: ClipboardExclusion,
     pub backup_dir: String,
+    /// The project the finder was opened from, if any. Sent to every window so a palette created
+    /// after the detection thread answered can still show what it ranked by.
+    pub finder_context: Option<FinderContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,6 +355,12 @@ pub struct Settings {
     pub autostart: bool,
     pub clipboard_expiry_seconds: u64,
     pub terminal: Vec<String>,
+    /// Rank the project the terminal was in first. Off means no detection at all: `/proc` and the
+    /// compositor are left completely alone, not just their result ignored.
+    pub project_context_enabled: bool,
+    /// Offer commands taken from the shell's own history as starting points for new entries.
+    /// Off, the history files are never opened.
+    pub history_suggestions_enabled: bool,
 }
 
 impl Default for Settings {
@@ -319,6 +370,8 @@ impl Default for Settings {
             autostart: false,
             clipboard_expiry_seconds: 30,
             terminal: vec!["x-terminal-emulator".into(), "-e".into()],
+            project_context_enabled: true,
+            history_suggestions_enabled: true,
         }
     }
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The contrast promise in docs/raycast-ui-redesign.md ("normal text >= 4.5:1,
+ * The contrast promise in docs/design/raycast-ui-redesign.md ("normal text >= 4.5:1,
  * large text and meaningful control boundaries >= 3:1 in both themes") is proved
  * by scripts/contrast-check.mjs, which reads the palettes out of tokens.css,
  * composites the translucent layers over the surface they are painted on and

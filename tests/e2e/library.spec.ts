@@ -269,7 +269,7 @@ test('editing the short form preserves older entry metadata', async ({ page }) =
   await boot(page, SEED);
   await page.getByTestId('entry-row').nth(0).click();
   await page.getByTestId('edit').click();
-  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(4);
   await page.getByRole('textbox', { name: 'Notes' }).fill('Still uses /tmp.');
   await page.getByTestId('save').click();
   const state = await mockState(page);

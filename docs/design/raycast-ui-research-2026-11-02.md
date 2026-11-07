@@ -1,6 +1,6 @@
 # Raycast research note - 2026-11-02
 
-Dated companion to `docs/raycast-ui-redesign.md` (step 1 of that brief's implementation order).
+Dated companion to `docs/design/raycast-ui-redesign.md` (step 1 of that brief's implementation order).
 It records what was actually looked at, what was taken from it, and the exact Dev Console token
 that each decision turns into. Reference images are linked, not committed: the Raycast artwork is
 copyrighted and this product must not ship a copy of it.
@@ -67,7 +67,7 @@ Library at 1440 x 900:
 - Any claim of pixel or token identity with Raycast, and any claim that Dev Console has native
   "glass" on Linux: compositor blur needs a Wayland/X11 compositor plus transparent window and
   WebView support, which this environment cannot prove. See the material level recorded in
-  `docs/raycast-ui-redesign.md` and the handoff checklist.
+  `docs/design/raycast-ui-redesign.md` and the handoff checklist.
 
 ## Capture protocol used for this redesign
 

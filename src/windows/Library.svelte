@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import EntryList from '../components/EntryList.svelte';
+  import HistorySuggestions from '../components/HistorySuggestions.svelte';
   import EntryDetails from '../components/EntryDetails.svelte';
   import EntryEditor from '../components/EntryEditor.svelte';
   import VaultStatus from '../components/VaultStatus.svelte';
@@ -8,6 +9,7 @@
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import EmptyState from '../components/EmptyState.svelte';
+  import ProjectImport from '../components/ProjectImport.svelte';
   import Icon from '../components/Icon.svelte';
   import Keycap from '../components/Keycap.svelte';
   import StatusLine from '../components/StatusLine.svelte';
@@ -21,6 +23,7 @@
     EntryDetails as Details,
     EntryDraft,
     EntryMeta,
+    HistorySuggestion,
     Kind,
     RunResult,
     VaultState,
@@ -39,6 +42,11 @@
   let revealed = $state(false);
   let loading = $state(true);
   let listError = $state<string | null>(null);
+  // Commands from the shell's own history, offered as starting points for a new entry. The
+  // backend is the authority on whether they are read at all (the setting is checked there).
+  let suggestions = $state<HistorySuggestion[]>([]);
+  let suggestionsBusy = $state(false);
+  let historyEnabled = $state(false);
   let mode = $state<'view' | 'edit'>('view');
   let draft = $state<EntryDraft>(EMPTY_DRAFT('command'));
   let baseline = $state('');
@@ -55,6 +63,9 @@
   let outputCopyError = $state<string | null>(null);
   let pendingClose = $state(false);
   let showSettings = $state(false);
+  /** The project-script import dialog; `null` closes it. */
+  let importingProject = $state(false);
+
   let narrow = $state(false);
   let authenticating = $state(false);
   let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
@@ -174,11 +185,78 @@
     await loadDetails(entry.id);
   }
 
-  function startNew(): void {
+  async function loadSuggestions(): Promise<void> {
+    suggestionsBusy = true;
+    try {
+      historyEnabled = (await api.settings()).historySuggestionsEnabled;
+      suggestions = historyEnabled ? await api.historySuggestions() : [];
+    } catch {
+      // A missing or unreadable history file is not a failure the user needs to hear about:
+      // there is simply nothing to offer.
+      suggestions = [];
+    } finally {
+      suggestionsBusy = false;
+    }
+  }
+
+  /** Opens the normal editor with the suggestion prefilled; nothing is saved until it is saved. */
+  function saveSuggestion(suggestion: HistorySuggestion): void {
+    if (mode === 'edit' && draftDirty) {
+      status = 'Save or discard the open edit first.';
+      return;
+    }
+    tab = 'command';
     mode = 'edit';
     selectedId = null;
     details = null;
-    draft = EMPTY_DRAFT(tab);
+    draft = {
+      ...EMPTY_DRAFT('command'),
+      name: suggestion.suggestedName || suggestion.command.slice(0, 60),
+      command: suggestion.command,
+      workingDirectory: suggestion.workingDirectory ?? '',
+      tags: suggestion.project ? [`project:${suggestion.project.toLowerCase().replace(/\s+/g, '-').slice(0, 32)}`] : []
+    };
+    baseline = JSON.stringify(draft);
+    saveError = null;
+    status = null;
+  }
+
+  async function dismissSuggestion(suggestion: HistorySuggestion): Promise<void> {
+    // Gone immediately; the backend only ever learns the digest.
+    suggestions = suggestions.filter((other) => other.key !== suggestion.key);
+    try {
+      await api.dismissSuggestion(suggestion.key);
+      status = 'Dismissed - only its hash is remembered.';
+    } catch (error: unknown) {
+      status = message(error, 'Could not dismiss that suggestion.');
+      void loadSuggestions();
+    }
+  }
+
+  /** The dialog only ever creates commands, so it opens on the tab that shows them. */
+  function startProjectImport(): void {
+    tab = 'command';
+    importingProject = true;
+  }
+
+  /**
+   * Close the import dialog and refresh the command list. The backend already wrote the rows, so
+   * this only re-reads them; `imported` is 0 when the dialog was cancelled.
+   */
+  function finishProjectImport(imported: number): void {
+    importingProject = false;
+    if (imported > 0) {
+      status = `Imported ${imported} ${imported === 1 ? 'task' : 'tasks'}.`;
+      void loadList().catch(() => undefined);
+    }
+  }
+
+  function startNew(): void {
+    const projectDirectory = tab === 'command' ? meta?.project?.root || meta?.workingDirectory || '' : '';
+    mode = 'edit';
+    selectedId = null;
+    details = null;
+    draft = { ...EMPTY_DRAFT(tab), workingDirectory: projectDirectory };
     baseline = JSON.stringify(draft);
     saveError = null;
   }
@@ -227,6 +305,8 @@
       selectedId = saved.id;
       status = 'Saved.';
       await loadList();
+      // A command that is now in the library must stop being offered.
+      void loadSuggestions();
     } catch (error: unknown) {
       // The draft is intentionally preserved so nothing typed is lost on a failed write.
       saveError = message(error, 'Save failed. Your changes were kept.');
@@ -394,12 +474,22 @@
           void loadDetails(intent.entryId).catch(() => undefined);
         }
       }),
+      on<{ historySuggestionsEnabled: boolean }>('settings-saved', (saved) => {
+        // Switching the setting off must hide the panel without a reload; switching it back on
+        // re-reads, because the file is never opened while the setting is off.
+        historyEnabled = saved.historySuggestionsEnabled;
+        suggestions = saved.historySuggestionsEnabled ? suggestions : [];
+        if (saved.historySuggestionsEnabled) void loadSuggestions();
+      }),
+      // Settings forgot every dismissal: those commands are candidates again.
+      on('suggestions-restored', () => void loadSuggestions()),
       on<{ reason: string }>('close-requested', () => {
         if (mode === 'edit' && draftDirty) pendingClose = true;
         else void allowClose().catch(() => undefined);
       })
     ];
 
+    void loadSuggestions();
     void refreshVault()
       .then(() => loadList())
       .catch((error: unknown) => {
@@ -488,6 +578,15 @@
         />
       </div>
       <Button variant="primary" icon="plus" onclick={startNew} data-testid="add-entry">New</Button>
+      <!-- Reading a project's own task definitions is the only way a repository's build steps
+           become library entries, so it sits beside New rather than hidden in Settings. -->
+      <Button
+        icon="folder"
+        onclick={startProjectImport}
+        title="Import the tasks a project folder defines as commands"
+        data-testid="import-project"
+        >Import from project</Button
+      >
     </div>
   </div>
 
@@ -500,8 +599,19 @@
   <main class="panes" class:stacked={narrow} id="entry-pane">
     {#if !narrow || (mode === 'view' && !selectedId)}
       <section class="list-pane" aria-label="Entry list">
+        {#if tab === 'command' && historyEnabled}
+          <HistorySuggestions
+            {suggestions}
+            busy={suggestionsBusy}
+            onSave={saveSuggestion}
+            onDismiss={(suggestion) => void dismissSuggestion(suggestion)}
+            onRescan={() => void loadSuggestions()}
+          />
+        {/if}
+        <div class="list-scroll">
         <EntryList
           {entries}
+          filterActive={query.trim().length > 0}
           {selectedId}
           {loading}
           kind={tab}
@@ -517,6 +627,7 @@
           onDelete={(entry) => (pendingDelete = entry)}
           actionsDisabled={mode === 'edit' && draftDirty}
         />
+        </div>
       </section>
     {/if}
 
@@ -687,6 +798,10 @@
   </Dialog>
 {/if}
 
+{#if importingProject}
+  <ProjectImport ondone={finishProjectImport} />
+{/if}
+
 {#if showSettings}
   <SettingsPanel onClose={() => (showSettings = false)} />
 {/if}
@@ -787,8 +902,16 @@
      the same line colour the floating shell uses, and it is the only divider
      between the two panes */
   .list-pane {
+    display: flex;
+    flex-direction: column;
     border-right: var(--border-shell);
     background: var(--bg-panel);
+  }
+  /* the entry list scrolls on its own; the suggestion panel above it stays put */
+  .list-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
   .detail-pane {
     background: var(--bg);

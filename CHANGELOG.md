@@ -5,6 +5,26 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.9 — 2026-11-07
+
+### Added
+
+- Collapsible project groups for saved commands. Assign or move a command with the editor's project-folder picker.
+- History recommendations for the five busiest recorded projects, with up to five commands each and separate counts per working folder.
+- Local zsh tracking through **Enable project tracking for zsh**. Open a new terminal after setup. Existing history is not backfilled.
+- Import selected package.json, Make, just and Docker Compose tasks through **Import from project** and its native folder picker.
+- Finder ranks commands for the focused terminal's project. Its project chip and `Ctrl+P` let you ignore that context.
+- A documentation index and organised `docs/` subfolders.
+
+### Fixed
+
+- Finder stays painted when hovered on Hyprland by using an opaque native surface.
+- Settings closes after a successful save. Failed saves retain your changes and show the error.
+- Project history uses a history icon and a quiet heading hover, with visible keyboard focus.
+- Imported task names are quoted safely, and generated command names use dashes for spaces.
+- Import dialogs keep keyboard focus and their confirmation buttons visible at small window sizes.
+- Keyring verification runs its own provider test without requiring unrelated optional tools.
+
 ## 0.0.8 — 2026-11-06
 
 ### Added

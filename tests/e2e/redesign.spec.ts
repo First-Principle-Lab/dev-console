@@ -146,12 +146,12 @@ test('minimal list rows show names and actions without overflowing', async ({ pa
   expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
-test('a fresh editor asks only for name and command before saving', async ({ page }) => {
+test('a fresh editor offers an optional project folder before saving', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
   await expect(page.getByTestId('validation-hint')).toHaveCount(0);
   await expect(page.getByTestId('save-error')).toHaveCount(0);
-  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(4);
   await page.getByTestId('field-name').fill('Deploy');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-error')).toContainText('Command text is required.');
@@ -325,7 +325,7 @@ test('reduced motion collapses the transitions and the shipped shell stays opaqu
 
   // Material ships off: the blur token is 0px, the tint is transparent, and nothing paints a
   // backdrop blur. This is the honest claim on this host - compositor blur is UNVERIFIED, so
-  // the app must not depend on it (docs/raycast-ui-redesign.md, "Native material outcome").
+  // the app must not depend on it (docs/design/raycast-ui-redesign.md, "Native material outcome").
   const shipped = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);
     const palette = getComputedStyle(document.querySelector('.palette') as Element);
@@ -479,7 +479,7 @@ test('settings, the delete dialog and the palette draw one shared shell frame', 
 
   await page.getByTestId('entry-row').first().click();
   await page.getByTestId('delete').click();
-  const dialog = await frameOf('[role="dialog"].surface-shell');
+  const dialog = await frameOf('dialog.surface-shell');
   expect(dialog.radius, 'a confirmation is the same object as settings').toBe(settings.radius);
   expect(dialog.border, 'one hairline edge, not a stack of frames').toBe('1px solid');
   expect(dialog.shadow).not.toBe('none');

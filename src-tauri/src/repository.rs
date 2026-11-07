@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +12,7 @@ use crate::models::{
     EntryDraft, EntryMeta, EntryRecord, ExtraField, FieldDisplay, Kind, SavedEntry,
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 pub const MAX_NAME: usize = 200;
 pub const MAX_TYPE: usize = 80;
@@ -141,6 +142,17 @@ impl Repository {
             )
             .map_err(AppError::storage)?;
         }
+        if version < 3 {
+            // Suggestions the user dismissed. Keyed by the SHA-256 of the normalised command line,
+            // so a dismissal is remembered without ever storing the command itself.
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS dismissed_suggestions (
+                    key TEXT PRIMARY KEY,
+                    dismissed_at TEXT NOT NULL
+                 );",
+            )
+            .map_err(AppError::storage)?;
+        }
         tx.execute(
             "INSERT INTO schema_meta (key, value) VALUES ('version', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -157,7 +169,7 @@ impl Repository {
         let mut stmt = conn
             .prepare(
                 "SELECT e.id, e.revision, e.name, e.type, e.tags, e.description, e.pinned, e.updated_at,
-                        COALESCE(u.count, 0), u.last_used_at
+                        COALESCE(u.count, 0), u.last_used_at, e.working_directory
                  FROM entries e LEFT JOIN usage u ON u.id = e.id
                  WHERE e.kind = 'command' AND (?1 = '' OR e.name LIKE ?2 OR e.type LIKE ?2 OR e.description LIKE ?2 OR e.tags LIKE ?2)
                  ORDER BY e.pinned DESC, e.name COLLATE NOCASE ASC",
@@ -528,6 +540,48 @@ impl Repository {
         Ok(())
     }
 
+    /// Every suggestion the user dismissed, as lowercase SHA-256 hex.
+    pub fn dismissed_suggestion_keys(&self) -> AppResult<HashSet<String>> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        let mut stmt = conn
+            .prepare("SELECT key FROM dismissed_suggestions")
+            .map_err(AppError::storage)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(AppError::storage)?;
+        let mut keys = HashSet::new();
+        for row in rows {
+            keys.insert(row.map_err(AppError::storage)?);
+        }
+        Ok(keys)
+    }
+
+    /// Remembers that the user does not want this suggestion again. Only the hash crosses this
+    /// boundary - never the command line it came from - and dismissing twice is harmless.
+    pub fn dismiss_suggestion(&self, key: &str) -> AppResult<()> {
+        let normalised = key.trim().to_ascii_lowercase();
+        if normalised.len() != 64 || !normalised.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(AppError::Validation(
+                "the suggestion key is not a 64-character digest".into(),
+            ));
+        }
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute(
+            "INSERT INTO dismissed_suggestions (key, dismissed_at) VALUES (?1, ?2)
+             ON CONFLICT(key) DO NOTHING",
+            params![normalised, now_rfc3339()],
+        )
+        .map_err(AppError::storage)?;
+        Ok(())
+    }
+
+    /// Forgets every dismissal. Returns how many were removed.
+    pub fn clear_dismissed_suggestions(&self) -> AppResult<usize> {
+        let conn = self.conn.lock().expect("db lock poisoned");
+        conn.execute("DELETE FROM dismissed_suggestions", [])
+            .map_err(AppError::storage)
+    }
+
     #[cfg(test)]
     pub fn exec_for_test(&self, sql: &str) -> AppResult<()> {
         let conn = self.conn.lock().expect("db lock poisoned");
@@ -572,6 +626,9 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryMeta> {
         updated_at: row.get(7)?,
         usage_count: row.get(8)?,
         last_used_at: row.get(9)?,
+        // 11th column of list_commands; project ranking needs it and it is never secret material.
+        working_directory: row.get(10)?,
+        project: crate::project_history::project_for_directory(&row.get::<_, String>(10)?),
     })
 }
 
@@ -896,5 +953,83 @@ mod tests {
             error.to_string().contains("newer"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn upgrading_to_the_dismissal_schema_keeps_every_command_row() {
+        let key = "a".repeat(64);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("commands.sqlite3");
+        let saved = {
+            let repo = Repository::open(&file).expect("open");
+            let mut created = draft("Keep me");
+            created.command = "make ship".to_string();
+            repo.save_command(&mut created).expect("save")
+        };
+        {
+            // A library written before the dismissal table existed, as an upgrade must handle.
+            let repo = Repository::open(&file).expect("reopen");
+            repo.exec_for_test(
+                "DROP TABLE dismissed_suggestions;
+                 UPDATE schema_meta SET value = 2 WHERE key = 'version';",
+            )
+            .expect("simulate the previous schema");
+            assert!(
+                repo.dismissed_suggestion_keys().is_err(),
+                "the dismissal table is gone until the migration runs"
+            );
+        }
+
+        let repo = Repository::open(&file).expect("upgrade on open");
+        let (record, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert_eq!(
+            record.command, "make ship",
+            "the upgrade must not touch rows"
+        );
+        assert!(repo
+            .dismissed_suggestion_keys()
+            .expect("dismissed")
+            .is_empty());
+
+        repo.dismiss_suggestion(&key).expect("dismiss");
+        repo.dismiss_suggestion(&key)
+            .expect("dismissing twice is harmless");
+        let keys = repo.dismissed_suggestion_keys().expect("dismissed");
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&key));
+
+        assert_eq!(repo.clear_dismissed_suggestions().expect("clear"), 1);
+        assert!(
+            repo.dismissed_suggestion_keys()
+                .expect("dismissed")
+                .is_empty(),
+            "clearing brings every dismissed suggestion back"
+        );
+        let (record, _, _) = repo.get_command(&saved.id).expect("query").expect("row");
+        assert_eq!(
+            record.command, "make ship",
+            "clearing dismissals touches no command"
+        );
+    }
+
+    #[test]
+    fn a_dismissal_key_is_stored_lowercase_and_anything_else_is_refused() {
+        let repo = Repository::in_memory().expect("repo");
+        repo.dismiss_suggestion(&"AB".repeat(32))
+            .expect("upper case is the same digest");
+        let keys = repo.dismissed_suggestion_keys().expect("dismissed");
+        assert_eq!(
+            keys.iter().collect::<Vec<_>>(),
+            vec![&"ab".repeat(32)],
+            "the key is stored lowercased"
+        );
+
+        for bad in ["", "deadbeef", &"z".repeat(64), &"a".repeat(63)] {
+            assert!(
+                matches!(repo.dismiss_suggestion(bad), Err(AppError::Validation(_))),
+                "a malformed key must be refused: {bad:?}"
+            );
+        }
+        assert_eq!(repo.all_command_records().expect("commands").len(), 0);
     }
 }

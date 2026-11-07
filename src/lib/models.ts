@@ -48,6 +48,9 @@ export interface EntryMeta {
   updatedAt: string;
   usageCount: number;
   lastUsedAt: string | null;
+  /** Saved working directory. Empty for every secret, so it can never hint at vault contents. */
+  workingDirectory: string;
+  project?: FinderContext | null;
 }
 
 /** Exactly what `search_entries` returns (models.rs SearchResult): no revision or updatedAt. */
@@ -62,6 +65,17 @@ export interface SearchResult {
   pinned: boolean;
   usageCount: number;
   lastUsedAt: string | null;
+  /** Ranks above the rest of its tier: this entry belongs to `finderContext`. */
+  inContext: boolean;
+}
+
+/**
+ * The project the terminal the finder was opened from belongs to. Worked out on every open,
+ * held in memory for that open only, and never written down.
+ */
+export interface FinderContext {
+  root: string;
+  name: string;
 }
 
 export interface SearchResponse {
@@ -126,6 +140,8 @@ export interface AppStateInfo {
   authenticatedUnlockAvailable: boolean;
   clipboardExclusion: ClipboardExclusion;
   backupDir: string;
+  /** What the finder is currently ranking by, if anything. */
+  finderContext: FinderContext | null;
 }
 
 export interface ArchiveSummary {
@@ -152,6 +168,26 @@ export interface Settings {
   autostart: boolean;
   clipboardExpirySeconds: number;
   terminal: string[];
+  /** Rank the project the terminal was in first. Off, nothing is detected at all. */
+  projectContextEnabled: boolean;
+  /** Offer frequently used commands from the shell's own history as new entries. */
+  historySuggestionsEnabled: boolean;
+}
+
+/**
+ * One command from the shell's history worth offering as a new entry. `key` is a SHA-256 digest
+ * of the normalised command - it is what a dismissal refers to, so dismissing never writes the
+ * command itself anywhere.
+ */
+export interface HistorySuggestion {
+  key: string;
+  command: string;
+  count: number;
+  suggestedName: string;
+  project?: string;
+  projectRoot?: string;
+  workingDirectory?: string;
+  projectCount?: number;
 }
 
 export interface TerminalOption {
@@ -258,4 +294,36 @@ export interface BackupOutcome {
   source: string;
   commands: number;
   secrets: number;
+}
+
+/** Where a task came from, and the four shapes the scanner knows. */
+export type ProjectSource = 'npm' | 'make' | 'just' | 'compose';
+
+/** One task a project folder defines, as the backend read it. */
+export interface ProjectCandidate {
+  source: ProjectSource;
+  /** `<project>·<task>`: the name the command is saved under. */
+  name: string;
+  /** Exact text that will be run; the review list shows it verbatim. */
+  command: string;
+  description: string;
+  /** Tool the task belongs to (`bun`, `npm`, `make`, `just`, `compose`). */
+  entryType: string;
+  /** A saved command already runs this text in this folder. */
+  alreadyImported: boolean;
+}
+
+export interface ProjectScan {
+  /** Repository name: the folder holding `.git`, else the scanned folder. */
+  project: string;
+  /** Canonical absolute path every imported command runs in. */
+  dir: string;
+  candidates: ProjectCandidate[];
+}
+
+export interface ProjectImportOutcome {
+  imported: number;
+  duplicates: number;
+  /** Names that could not be saved, each with the reason. */
+  skipped: string[];
 }

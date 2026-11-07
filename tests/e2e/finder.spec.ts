@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { boot, mockState } from './helpers';
 
 const SEED = {
@@ -174,4 +174,160 @@ test('an empty query lists the most recently used entries first', async ({ page 
   await expect(rows).toHaveCount(4);
   await expect(rows.nth(0)).toContainText('git revert HEAD');
   await expect(rows.nth(1)).toContainText('docker');
+});
+
+const PROJECT = { root: '/home/dev/projects/dev-console', name: 'dev-console' };
+
+const command = (
+  id: string,
+  name: string,
+  workingDirectory: string,
+  extra: Record<string, unknown> = {}
+) => ({
+  id, revision: 1, name, type: 'Shell', tags: [], description: '', notes: '', fields: [],
+  pinned: false, command: `echo `, workingDirectory, usageCount: 0, ...extra
+});
+
+/**
+ * One command per way an entry can belong to the project the palette was opened from, plus the
+ * near misses that must not count: a folder whose name merely starts the same (`sibling`), and
+ * another project's tag (`other-tag`). `~` is expanded by the double against the seeded `home`.
+ */
+const contextSeed = (detected: boolean) => ({
+  home: '/home/dev',
+  context: detected ? PROJECT : undefined,
+  commands: [
+    command('here', 'just test', PROJECT.root),
+    command('nested', 'build release', PROJECT.root + '/src'),
+    command('tilde', 'fmt everything', '~/projects/dev-console/docs'),
+    command('tagged', 'import scripts', '', { tags: ['project:dev-console'] }),
+    command('sibling', 'dev-console-lite notes', '/home/dev/projects/dev-console-lite'),
+    command('other-tag', 'unrelated', '', { tags: ['project:other'] }),
+    // The most recently used command of all, from somewhere else entirely: project membership is
+    // what moves the others past it, nothing else.
+    command('elsewhere', 'cargo bench', '/home/dev/scratch', { usageCount: 99, lastUsedAt: '2026-11-05T09:00:00Z' })
+  ],
+  secrets: []
+});
+
+const rowNames = (page: Page) =>
+  page.getByTestId('result-row').evaluateAll((rows) =>
+    rows.map((row) => row.querySelector('.name')?.textContent?.trim() ?? '')
+  );
+
+test('the palette says which project it was opened from, and ranks it first', async ({ page }) => {
+  await boot(page, contextSeed(true), 'finder');
+  await expect(page.getByTestId('finder-context')).toContainText('dev-console');
+  // In the project first (each other by name, none by usage), then everything else with its old
+  // most-recent-first ordering.
+  expect(await rowNames(page)).toEqual([
+    'build release', 'fmt everything', 'import scripts', 'just test',
+    'cargo bench', 'dev-console-lite notes', 'unrelated'
+  ]);
+});
+
+test('a row from the current project is labelled for assistive tech', async ({ page }) => {
+  await boot(page, contextSeed(true), 'finder');
+  await expect(page.getByTestId('row-in-project')).toHaveCount(4);
+  await expect(page.getByRole('img', { name: 'in dev-console' })).toHaveCount(4);
+  // The two near misses are not marked, so the marker means "this project" and not "similar".
+  await expect(page.getByRole('option', { name: /dev-console-lite notes/ }).getByTestId('row-in-project')).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /^unrelated/ }).getByTestId('row-in-project')).toHaveCount(0);
+});
+
+test('clicking the project chip ranks everything again, without closing the palette', async ({ page }) => {
+  await boot(page, contextSeed(true), 'finder');
+  await page.getByTestId('finder-context').click();
+  await expect(page.getByTestId('finder-context')).toHaveCount(0);
+  await expect(page.getByTestId('row-in-project')).toHaveCount(0);
+  expect(await rowNames(page)).toEqual([
+    'cargo bench', 'build release', 'dev-console-lite notes', 'fmt everything',
+    'import scripts', 'just test', 'unrelated'
+  ]);
+  expect((await mockState(page)).context).toBeNull();
+  expect((await mockState(page)).hidden).toHaveLength(0);
+});
+
+test('Ctrl+P ignores the project from the keyboard', async ({ page }) => {
+  await boot(page, contextSeed(true), 'finder');
+  await page.keyboard.press('Control+p');
+  await expect(page.getByTestId('finder-context')).toHaveCount(0);
+  await expect(page.getByTestId('result-row')).toHaveCount(7);
+  expect((await mockState(page)).context).toBeNull();
+});
+
+test('with no detected project, the palette looks and orders exactly as it used to', async ({ page }) => {
+  await boot(page, contextSeed(false), 'finder');
+  await expect(page.getByTestId('finder-context')).toHaveCount(0);
+  await expect(page.getByTestId('row-in-project')).toHaveCount(0);
+  expect(await rowNames(page)).toEqual([
+    'cargo bench', 'build release', 'dev-console-lite notes', 'fmt everything',
+    'import scripts', 'just test', 'unrelated'
+  ]);
+});
+
+test('typing narrows the list without dropping the project marker', async ({ page }) => {
+  await boot(page, contextSeed(true), 'finder');
+  await page.getByTestId('finder-input').fill('just');
+  await expect(page.getByTestId('result-row')).toHaveCount(1);
+  await expect(page.getByTestId('row-in-project')).toHaveCount(1);
+});
+
+test('with project ranking switched off, a detected project changes nothing', async ({ page }) => {
+  // The backend never detects while the switch is off; this also covers a project detected just
+  // before it was switched off, which neither the chip nor the ranking may still use.
+  await boot(page, {
+    ...contextSeed(true),
+    settings: {
+      theme: 'dark', autostart: false, clipboardExpirySeconds: 30,
+      terminal: ['x-terminal-emulator', '-e'], projectContextEnabled: false
+    }
+  }, 'finder');
+  await expect(page.getByTestId('result-row')).toHaveCount(7);
+  await expect(page.getByTestId('finder-context')).toHaveCount(0);
+  await expect(page.getByTestId('row-in-project')).toHaveCount(0);
+  expect(await rowNames(page)).toEqual([
+    'cargo bench', 'build release', 'dev-console-lite notes', 'fmt everything',
+    'import scripts', 'just test', 'unrelated'
+  ]);
+});
+
+test('a secret tagged for the project is not moved up or marked', async ({ page }) => {
+  await boot(page, {
+    ...contextSeed(true),
+    secrets: [
+      { id: 's-here', revision: 1, name: 'deploy token', type: 'API key', tags: ['project:dev-console'], description: '', notes: '', fields: [], pinned: false, value: 'synthetic-secret-value' }
+    ]
+  }, 'finder');
+  await expect(page.getByTestId('finder-context')).toContainText('dev-console');
+  await expect(page.getByTestId('row-in-project')).toHaveCount(4);
+  await expect(page.getByRole('option', { name: /deploy token/ }).getByTestId('row-in-project')).toHaveCount(0);
+});
+
+test('a pinned command still leads the empty query, ahead of the project', async ({ page }) => {
+  const seed = contextSeed(true);
+  seed.commands.push(command('pinned', 'zz pinned elsewhere', '/home/dev/scratch', { pinned: true }));
+  await boot(page, seed, 'finder');
+  expect((await rowNames(page)).slice(0, 2)).toEqual(['zz pinned elsewhere', 'build release']);
+});
+
+test('a project detected after the first search moves the selection to its first command', async ({ page }) => {
+  // The real backend answers beside the palette, so the first search runs with no project and
+  // selects the most recently used command; the project then arrives as an event.
+  await boot(page, contextSeed(false), 'finder');
+  const input = page.getByTestId('finder-input');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-elsewhere');
+  await page.evaluate((project) => {
+    const mock = (window as never as {
+      __mock: { state: { context: unknown }; emit: (e: string, p: unknown) => void };
+    }).__mock;
+    mock.state.context = project;
+    mock.emit('finder-context', project);
+  }, PROJECT);
+  await expect(page.getByTestId('finder-context')).toContainText('dev-console');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-nested');
+  // Ignoring the project starts from the top of the restored order, too.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Control+p');
+  await expect(input).toHaveAttribute('aria-activedescendant', 'row-elsewhere');
 });

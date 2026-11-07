@@ -11,6 +11,7 @@ export type IconName =
   | 'pin'
   | 'run'
   | 'trash'
+  | 'folder'
   | 'search'
   | 'plus'
   | 'back'
@@ -18,4 +19,8 @@ export type IconName =
   | 'check'
   | 'shield'
   | 'gear'
-  | 'update';
+  | 'update'
+  | 'project'
+  | 'history'
+  | 'close'
+  | 'chevron';

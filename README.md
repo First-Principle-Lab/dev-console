@@ -20,6 +20,19 @@ name inline, `↑`/`↓` move the selection, `Enter` copies the value, `Ctrl+O` 
 library, `Esc` dismisses. Everything is reachable from the keyboard, and the list keeps proper
 combobox/listbox semantics.
 
+**Project context** — when the Finder opens, Dev Console asks the compositor which window had
+focus (before the palette takes it), follows that window to the shell it started, and reads the
+folder that shell is sitting in. Commands saved with a working directory inside that project — or
+tagged `project:<name>` — are listed first and marked with a folder icon, and the palette names the
+project it is ranking by. `Ctrl+P`, or clicking that name, ignores it for this open; Settings →
+Finder turns it off entirely, and then neither the compositor nor `/proc` is read. Nothing is
+written to disk. On a desktop other than Hyprland (where focus is unreadable without a compositor
+API) the palette is exactly what it has always been: no chip, no marks, the old ordering.
+
+Which shell counts: when one terminal has several tabs or windows, the one whose folder the window
+title shows, else the newest. Any focused app with a shell under it counts, so an editor's built-in
+terminal does too. Under tmux, the folder is the one tmux was started from, not the pane's.
+
 **Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
 restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock
 never clears the lock unless the vault actually decrypted.
@@ -35,6 +48,41 @@ for authentication. In-app output is limited to 64 KiB per stream, and commands 
 120 seconds. The approval is invalidated when the command text changes. Settings lists supported
 terminals found in `PATH` and keeps a custom command option. A saved `x-terminal-emulator` setting
 falls back to an installed terminal when that executable is missing.
+
+**Project history** records useful shell commands with their actual project and working folder.
+The library recommends up to five commands for each of your five busiest projects, ranked by
+recorded runs. Counts, saved-command matching and dismissals are separate per project and folder.
+Routine launchers such as `code`, `open`, `cd` and `ls`, plus commands flagged by the credential
+filter, are discarded before storage. Saving opens the normal editor with the original working
+folder; it does not run or save the command until you confirm.
+
+Enable tracking with the history panel's **Enable project tracking for zsh** action, or run
+`dev-console history setup`, then open a new terminal. The installer backs up `.zshrc` before
+adding one source line. It is idempotent. The hook sends the command over stdin to a local helper
+and then the app's private Unix socket. Command text is never put in process arguments or logs.
+Dev Console must be running; turning off history suggestions in Settings stops collection and
+suggestions. Existing global shell history has no folder information and is not backfilled.
+Automatic shell integration currently supports zsh. Filtered aggregate counts live in private
+`project-history.sqlite3`, separate from saved commands and exports, with at most 10,000
+command/folder pairs. Dismissals store only a project-specific digest.
+
+**Project groups** keep saved commands under collapsible project headings. The backend resolves
+the repository root from the saved working folder, so tasks in subfolders share one project.
+Imported project tags group commands whose folder is no longer available. Commands with no
+project remain in General. Search opens matching groups; Finder still searches across projects.
+Choose a project folder in the command editor to assign or move a command.
+
+**Project tasks** — the library can read the runnable tasks a project folder already defines instead
+of making you retype them: `package.json` scripts (run through whichever package manager the
+folder's lockfile names — bun, pnpm, yarn or npm), Makefile targets, `justfile` recipes and Docker
+Compose services. Scanning lists them grouped by source, ticks the new ones, and marks anything the
+library already has as "Already saved". Importing writes the ticked ones as ordinary commands whose
+working directory is that folder and whose tag is `project:<repo>`. Reading and importing execute
+nothing in the folder — the commands are only written down, and running one still goes through the
+approval above. Browse opens the native folder picker and scans the selected folder. The folder field also accepts absolute paths and `~/` paths. Makefile discovery
+uses GNU Make's file precedence and ignores `define` blocks. Compose files are validated as YAML.
+The optional read-only `just --dump` process has a three-second deadline covering output and exit.
+If selected tasks disappear before import, the review reports them alongside the saved tasks.
 
 **Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
 in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
@@ -60,8 +108,9 @@ bash scripts/verify.sh
 
 That is the whole gate: Bun install, `svelte-check`, ESLint, unit tests (which include the token
 contrast audit below), production build,
-Playwright (library + Finder + redesign + visual review captures), `cargo fmt --check`, clippy with
-warnings denied, the Rust test suite, plus the environment-dependent harnesses:
+Playwright (library + Finder + project-task import + redesign + visual review captures),
+`cargo fmt --check`, clippy with warnings denied, the Rust test suite, plus the
+environment-dependent harnesses:
 
 | Script | What it proves | Without the environment |
 | --- | --- | --- |
@@ -73,7 +122,7 @@ warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 | `scripts/smoke-native.sh <binary>` | the compiled app: control socket, single instance, lock survives restart, private files | exit 77 = UNVERIFIED |
 
 Each harness exits **77** when its environment is missing; that is reported as UNVERIFIED and never
-silently converted into a pass. `TEST_REPORT.md` records which acceptance criteria are proven, where,
+silently converted into a pass. `docs/project/TEST_REPORT.md` records which acceptance criteria are proven, where,
 and what is still open.
 
 ## Continuous integration
@@ -99,7 +148,7 @@ These are **UI-shell** checks: the browser preview cannot reach native IPC, so t
 documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
 
 `raycast-baseline/` and `raycast-after/` are the before/after pair for the Raycast-inspired pass
-(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); the baseline set is 41
+(`docs/design/raycast-ui-redesign.md`, `docs/design/raycast-ui-research-2026-11-02.md`); the baseline set is 41
 PNGs and the redesign set 42 - the extra one, `17-library-minimum-window`, is the state the visual
 pass needed and the old grid did not have (the smallest real library window, one pane, action area
 on screen). Every other filename is shared, so `diff` between the two directory listings names the
@@ -127,7 +176,7 @@ release binary under Xvfb (`scripts/native-capture.sh`): library and palette ove
 busy X11 background, in both themes, with pixel probes proving the opaque shell never bleeds the
 background through, keeps square window corners, maps without a flash frame and does not repaint
 at rest. Wayland/Hyprland compositor blur cannot be exercised here and stays a manual checklist
-in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
+in `docs/design/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
 
 ## Keyboard
 
@@ -135,7 +184,7 @@ in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque s
 | --- | --- |
 | Desktop | `Super+F` Finder (configured in your compositor, see below) |
 | Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
-| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Esc` close |
+| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Ctrl+P` ignore the detected project, `Esc` close |
 
 ## Desktop integration (Hyprland and other Wayland compositors)
 
@@ -182,26 +231,28 @@ makepkg -si                     # in packaging/arch (builds from the tagged sour
 For AUR use the same PKGBUILD with `source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")`.
 On other distributions `sudo PREFIX=/usr/local bash packaging/install.sh` installs the same
 file set (and writes an uninstall manifest, so `sudo PREFIX=/usr/local bash packaging/install.sh uninstall` removes
-exactly what it placed). See `docs/packaging.md`.
+exactly what it placed). See `docs/packaging/packaging.md`.
 
 ## Layout
 
 ```
 src/                 Svelte 5 frontend (tokens.css is the only source of colour/spacing)
   components/        Button, Badge, Dialog, EmptyState, EntryDetails, EntryEditor, EntryList,
-                     ExtraFields, Icon, Keycap, SettingsPanel, StatusLine, Tabs, VaultStatus
+                     ExtraFields, Icon, Keycap, ProjectImport, SettingsPanel, StatusLine, Tabs,
+                     VaultStatus
   windows/           Library.svelte, Finder.svelte
 src-tauri/src/       Rust: repository (SQLite), vault (age), keyring, auth (polkit), backup,
-                     clipboard, control (Unix socket), execution, ipc, search, settings, tray
+                     clipboard, control (Unix socket), execution, ipc, projects (task scan), search,
+                     settings, tray
 src-tauri/tests/     native backend integration tests (no test doubles)
 scripts/             verification harnesses (each exits 77 when the environment is missing)
 packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD
-docs/                packaging and desktop-integration notes
+docs/                every other Markdown file, in subfolders (see docs/README.md)
 artifacts/ui-review/ before/after screenshot grid
 ```
 
 ## Status
 
-`TEST_REPORT.md` is the authoritative verdict per acceptance criterion: what is proven by an
+`docs/project/TEST_REPORT.md` is the authoritative verdict per acceptance criterion: what is proven by an
 executed test, what is only UI-shell covered, and what remains unverified in a headless container.
 Items are never marked passed without a run behind them.

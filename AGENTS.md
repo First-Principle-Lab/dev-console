@@ -57,9 +57,53 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 Playwright reuses a running `vite preview` on port 4173 outside CI. Run `bun run build` first, or set `CI=1`, so the tests run against your current code.
 
+## Documentation layout
+
+Markdown files other than `README.md`, `AGENTS.md` and `CHANGELOG.md` live under `docs/`, each in a subfolder. Don't add `.md` files to the repo root or directly in `docs/`, apart from `docs/README.md`, the index.
+
+| Folder | What goes there |
+| --- | --- |
+| `docs/plans/` | Implementation plans for features not built yet. |
+| `docs/design/` | UI research, design briefs and review protocols. |
+| `docs/packaging/` | Packaging, install and desktop-integration notes. |
+| `docs/project/` | Project status: plan, progress log, handoff, test report, acceptance checklist. |
+
+Create a new subfolder when none of these fits, and add it to `docs/README.md`. When you move or rename a doc, update every reference to it (README, code comments, tests, scripts) in the same commit, and grep for the old path before pushing.
+
 ## Conventions
 
 - Keep UI behaviour covered by the e2e specs in `tests/e2e/`. Add or update a spec for any user-visible change.
 - Buttons inside forms need an explicit `type="button"` unless they are meant to submit.
 - Use the design tokens in `src/styles/tokens.css`. Don't hard-code colours.
 - Never log, print or screenshot real secret values. Tests use synthetic values only.
+
+## Finder on Hyprland
+
+This app is tested on the owner's real Hyprland desktop, including NVIDIA and
+WebKitGTK 2.54. Browser tests and Xvfb cannot prove Wayland rendering works.
+
+- Keep the native Finder window **opaque** in `src-tauri/src/windows.rs`.
+  `transparent(true)` makes the palette disappear or corrupt when the pointer
+  enters it on this setup, even though Hyprland still reports a mapped, visible,
+  floating 680×420 window. Reproduced and fixed on 2026-11-07 by switching the
+  same build to `transparent(false)`. Do not restore transparency to fix corners.
+- Keep the Finder page background opaque and matched to `--shell-bg` in
+  `src/styles/tokens.css`. Hyprland rounds the native window.
+- Preserve its exact `dev-console-finder` title, 680×420 logical size,
+  borderless window, and the size request after mapping. The local Hyprland
+  rule matches this title and sets float, size and centering. Check both title
+  and class with `hyprctl -j clients` before changing any compositor rule.
+  The library must remain tiled; never float every `dev-console` window.
+- Preserve the existing `WEBKIT_DISABLE_DMABUF_RENDERER=1` default in `main.rs`
+  unless the user explicitly overrides it. It avoids a separate WebKitGTK
+  missing-acquire-timeline Wayland protocol error. This alone does not fix the
+  transparent-window hover bug.
+- When changing Finder rendering or startup, test the native app on Hyprland:
+  open/dismiss repeatedly, move the mouse across rows and outside/back inside,
+  type a query, check keyboard selection and Escape, and check that the library
+  and surrounding tiled windows keep their layout. Confirm Finder remains
+  floating at 680×420. Do not declare this covered by Playwright screenshots.
+- For compositor changes, read the Omarchy skill and the current official
+  Hyprland docs. The owner's current configuration is Lua, not the legacy
+  `.conf` syntax. Back up edits and validate with `hyprctl reload` followed by
+  `hyprctl configerrors`.

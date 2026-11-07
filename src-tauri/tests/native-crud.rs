@@ -13,7 +13,7 @@
 //! plumbing is exercised by `scripts/smoke-native.sh` against the compiled release binary and
 //! by the browser suite for UI behaviour. Making the handlers themselves generic over the
 //! Tauri runtime (so `tauri::test::mock_app()` can call them directly) is the remaining step
-//! and is recorded in PROGRESS.md.
+//! and is recorded in docs/project/PROGRESS.md.
 //!
 //! Run through `scripts/test-native-ipc.sh`, which starts the provider and the display and
 //! passes `--ignored --test-threads=1` (the state paths are process-global environment
@@ -22,6 +22,7 @@
 //! than report a failure that is really a missing environment, and the harness reports a
 //! missing provider as exit 77 (UNVERIFIED) instead.
 
+use dev_console_lib::history;
 use dev_console_lib::models::{EntryDraft, ExtraField, FieldDisplay, Kind};
 use dev_console_lib::search;
 use dev_console_lib::state::AppState;
@@ -52,6 +53,14 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> EntryDraft {
         working_directory: String::new(),
         value: value.to_string(),
     }
+}
+
+/// The `history_suggestions` handler's own code path (`AppState::history_suggestions`), minus the
+/// window check, with the history located inside `home` - never the developer's real one, which
+/// would both change the result and put real commands into a failure message.
+fn scan(state: &AppState, home: &std::path::Path, limit: usize) -> Vec<history::Suggestion> {
+    let _ = home;
+    state.history_suggestions(limit).expect("suggestions")
 }
 
 /// A disposable profile per test, so a bare `cargo test` can never open (or create) the
@@ -285,4 +294,110 @@ fn the_command_store_refuses_a_stale_writer_and_keeps_the_winner() {
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600, "the command database stays private");
+}
+
+#[test]
+#[ignore = "needs a real Secret Service provider, started by scripts/test-native-ipc.sh"]
+fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backend() {
+    let _profile = Profile::new("native-crud-history");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let home = temp.path();
+    std::fs::create_dir(home.join(".git")).unwrap();
+    let store = dev_console_lib::project_history::ProjectHistory::open(
+        &dev_console_lib::project_history::database_path().unwrap(),
+    )
+    .unwrap();
+    for line in [
+        "make ship",
+        "make ship",
+        "helm upgrade api ./chart",
+        "  make coffee",
+        "export GITHUB_TOKEN=ghp_syntheticvalue0123456789",
+    ] {
+        store.record(home.to_str().unwrap(), line).unwrap();
+    }
+    let state = bootstrap();
+    let first = scan(&state, home, 5);
+    assert_eq!(
+        first
+            .iter()
+            .map(|suggestion| suggestion.command.as_str())
+            .collect::<Vec<_>>(),
+        vec!["make ship", "helm upgrade api ./chart"],
+        "the ignored-space line and the token are filtered, the frequent one ranks first"
+    );
+    assert_eq!(first[0].count, 2);
+    assert_eq!(first[1].suggested_name, "helm-upgrade-api");
+
+    // Saving the command takes it out of the panel, even with different spacing to the library's.
+    let mut draft = draft(Kind::Command, "Ship it", "make ship", "");
+    draft.working_directory = home.to_string_lossy().into_owned();
+    state.repo.save_command(&mut draft).expect("save command");
+    let after_save = scan(&state, home, 5);
+    assert_eq!(
+        after_save
+            .iter()
+            .map(|suggestion| suggestion.command.as_str())
+            .collect::<Vec<_>>(),
+        vec!["helm upgrade api ./chart"],
+        "a command that is in the library stops being offered"
+    );
+
+    // A dismissal is remembered as a digest, and survives a restart.
+    let key = after_save[0].key.clone();
+    assert_eq!(
+        key,
+        history::key_for(&format!(
+            "{}\0{}\0helm upgrade api ./chart",
+            home.display(),
+            home.display()
+        )),
+        "the key is the digest of the normalised line"
+    );
+    state.repo.dismiss_suggestion(&key).expect("dismiss");
+    drop(state);
+
+    let restarted = bootstrap();
+    assert!(
+        restarted
+            .repo
+            .dismissed_suggestion_keys()
+            .expect("keys")
+            .contains(&key),
+        "the dismissal is stored, by digest only"
+    );
+    assert!(
+        scan(&restarted, home, 5).is_empty(),
+        "a dismissed suggestion stays gone after a restart"
+    );
+}
+
+#[test]
+fn project_scan_import_and_rescan_use_real_persistent_records() {
+    let folder = tempfile::tempdir().unwrap();
+    let db = folder.path().join("commands.sqlite3");
+    let project = folder.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        include_str!("fixtures/projects/package.json"),
+    )
+    .unwrap();
+    let path = project.to_str().unwrap();
+    let repo = dev_console_lib::repository::Repository::open(&db).unwrap();
+    let scan = dev_console_lib::projects::scan(path, &repo).unwrap();
+    assert_eq!(scan.candidates.len(), 2);
+    let names: Vec<_> = scan.candidates.iter().map(|c| c.name.clone()).collect();
+    assert_eq!(
+        dev_console_lib::projects::import(path, &names, false, &repo)
+            .unwrap()
+            .imported,
+        2
+    );
+    drop(repo);
+    let repo = dev_console_lib::repository::Repository::open(&db).unwrap();
+    let rescan = dev_console_lib::projects::scan(path, &repo).unwrap();
+    assert!(rescan.candidates.iter().all(|c| c.already_imported));
+    let again = dev_console_lib::projects::import(path, &[], true, &repo).unwrap();
+    assert_eq!((again.imported, again.duplicates), (0, 2));
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
-  import { on } from '../lib/events';
+  import { emitLocal, on } from '../lib/events';
   import type {
     ArchiveSummary,
     BackupInfo,
@@ -21,13 +21,15 @@
   let { onClose }: { onClose: () => void } = $props();
 
   let settings = $state<Settings | null>(null);
+  /** Suggestions the user dismissed; the Settings row below brings them back. */
+  let dismissedSuggestions = $state(0);
   let exclusion = $state<ClipboardExclusion | null>(null);
   let backupDir = $state('');
   let currentCommands = $state(0);
   // null means "not readable": a locked vault reports no secret count at all rather than 0.
   let currentSecrets = $state<number | null>(null);
   let error = $state<string | null>(null);
-  let saved = $state(false);
+  let saving = $state(false);
   let savedTheme: Theme | null = null;
 
   let backups = $state<BackupInfo[]>([]);
@@ -215,7 +217,6 @@
     terminalChoice = id;
     const terminal = terminals.find((option) => option.id === id);
     if (terminal) setTerminal(formatArgv(terminal.command));
-    saved = false;
   }
 
   function matchesTerminal(command: string[], option: TerminalOption): boolean {
@@ -253,6 +254,19 @@
       terminalChoice = foundTerminals.find((option) => matchesTerminal(loaded.terminal, option))?.id ?? 'custom';
       await refreshBackups();
       await refreshCounts();
+      // Not worth failing the whole tab over: without the count the row simply stays hidden.
+      dismissedSuggestions = await api.dismissedSuggestionCount().catch(() => 0);
+    } catch (problem: unknown) {
+      error = String(problem);
+    }
+  }
+
+  /** Dismissing is the only way a suggestion goes away for good, so it needs a way back. */
+  async function bringBackSuggestions(): Promise<void> {
+    try {
+      await api.clearDismissedSuggestions();
+      dismissedSuggestions = 0;
+      emitLocal('suggestions-restored', null);
     } catch (problem: unknown) {
       error = String(problem);
     }
@@ -282,19 +296,23 @@
     if (!settings) return;
     settings.theme = theme;
     applyTheme(theme);
-    saved = false;
   }
 
   async function save(): Promise<void> {
-    if (!settings || terminalError) return;
+    if (!settings || terminalError || saving) return;
     error = null;
+    saving = true;
     try {
       settings = await api.saveSettings(settings);
       savedTheme = settings.theme;
       applyTheme(settings.theme);
-      saved = true;
+      // The library reacts to what was switched: suggestion panel, and nothing else it caches.
+      emitLocal('settings-saved', settings);
+      onClose();
     } catch (problem: unknown) {
       error = String(problem);
+    } finally {
+      saving = false;
     }
   }
 
@@ -390,6 +408,26 @@
             <input type="checkbox" bind:checked={settings.autostart} data-testid="autostart" />
             <span>Start at login (hidden in the tray)</span>
           </label>
+          <label class="row">
+            <input
+              type="checkbox"
+              bind:checked={settings.historySuggestionsEnabled}
+              data-testid="history-suggestions-setting"
+            />
+            <span>Suggest commands from my shell history</span>
+          </label>
+          <p class="muted detail">
+            Counts useful commands by their actual project and folder while Dev Console is running.
+            Enable the zsh integration in the history panel, then open a new terminal. No old
+            history is assigned to a project. Turning this off stops collection and suggestions.
+          </p>
+          {#if dismissedSuggestions > 0}
+            <div>
+              <button type="button" onclick={() => void bringBackSuggestions()} data-testid="history-suggestions-restore">
+                Bring back {dismissedSuggestions} dismissed {dismissedSuggestions === 1 ? 'suggestion' : 'suggestions'}
+              </button>
+            </div>
+          {/if}
           <div class="field">
             <label class="label-text" for="terminal-choice">Terminal</label>
             <select id="terminal-choice" value={terminalChoice} onchange={(event) => chooseTerminal(event.currentTarget.value)} data-testid="terminal-choice">
@@ -426,6 +464,23 @@
             {:else}
               Checking clipboard history support…
             {/if}
+          </p>
+        </section>
+
+        <section aria-label="Finder">
+          <h4>Finder</h4>
+          <label class="row">
+            <input
+              type="checkbox"
+              bind:checked={settings.projectContextEnabled}
+              data-testid="project-context"
+            />
+            <span>Rank the project I was just working in first</span>
+          </label>
+          <p class="muted detail" data-testid="project-context-detail">
+            From the focused terminal window, Dev Console works out which repository the shell is in
+            and lists its commands first, marked with a folder. Off, it never asks the compositor
+            what is focused and never reads <code class="mono">/proc</code> at all.
           </p>
         </section>
       {:else}
@@ -593,13 +648,12 @@
       {#if backupMessage}<p class="muted" role="status" data-testid="backup-message">{backupMessage}</p>{/if}
       {#if backupError}<p class="error-banner" role="alert" data-testid="backup-error">{backupError}</p>{/if}
       {#if error}<p class="error-banner" role="alert">{error}</p>{/if}
-      {#if saved}<p class="muted" role="status">Saved.</p>{/if}
     </div>
 
     <footer class="foot">
       <span class="spacer"></span>
-      <button onclick={() => void save()} data-variant="primary" data-testid="save-settings" disabled={Boolean(terminalError)}>
-        Save
+      <button onclick={() => void save()} data-variant="primary" data-testid="save-settings" disabled={saving || Boolean(terminalError)} aria-busy={saving}>
+        {saving ? 'Saving…' : 'Save'}
       </button>
     </footer>
   </div>

@@ -6,7 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::*;
 use crate::repository::validate_draft;
 use crate::state::AppState;
-use crate::{execution, search, tray, windows};
+use crate::{execution, history, search, tray, windows};
 
 /// Frontend windows are untrusted. Every privileged operation is re-checked here against the
 /// calling window label, so the restriction does not depend on hidden buttons or on the
@@ -50,6 +50,9 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
         authenticated_unlock_available: crate::auth::mechanism_available(),
         clipboard_exclusion: crate::clipboard::exclusion_status(),
         backup_dir: state(&app).backups.dir().to_string_lossy().to_string(),
+        // Also sent to the library, which ignores it: it is the answer to "what is this palette
+        // ranking by?", and a window created after the detection thread answered still needs it.
+        finder_context: state(&app).active_finder_context(),
     }
 }
 
@@ -57,16 +60,27 @@ pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
 pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
     let state = state(&app);
     let entries = state.searchable_metadata(None);
-    let results = search::rank(
+    let context = state.active_finder_context();
+    let results = search::rank_in_context(
         &entries,
         &request.query,
         request.limit.unwrap_or(search::DEFAULT_LIMIT),
+        context.as_ref(),
     );
     SearchResponse {
         request_id: request.request_id,
         vault_generation: state.vault.generation(),
         results,
     }
+}
+
+/// Drops the detected project for as long as the palette stays open (`Ctrl+P`, or clicking the
+/// chip). A detection still in flight is invalidated too, so the chip cannot reappear a moment
+/// after the user got rid of it; the next open looks again.
+#[tauri::command]
+pub fn clear_finder_context<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
+    state(&app).cancel_finder_detection();
+    Ok(())
 }
 
 #[tauri::command]
@@ -518,6 +532,59 @@ pub fn get_settings<R: Runtime>(
     Ok(state(&app).settings.get())
 }
 
+/// Read project-specific aggregate counts from the private local store, on a blocking worker.
+/// The enabled setting gates both this read and collection through the shell socket.
+#[tauri::command]
+pub async fn history_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    limit: Option<usize>,
+) -> AppResult<Vec<history::Suggestion>> {
+    require_library(&window)?;
+    let state = state(&app);
+    if !state.settings.get().history_suggestions_enabled {
+        return Ok(Vec::new());
+    }
+    let limit = limit
+        .unwrap_or(history::DEFAULT_LIMIT)
+        .clamp(1, history::MAX_LIMIT);
+    tauri::async_runtime::spawn_blocking(move || state.history_suggestions(limit))
+        .await
+        .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
+}
+
+/// Marks one suggestion as never to be offered again. Only its digest is stored, so a dismissal
+/// cannot put a history line into the database either.
+#[tauri::command]
+pub fn dismiss_suggestion<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    key: String,
+) -> AppResult<()> {
+    require_library(&window)?;
+    state(&app).repo.dismiss_suggestion(&key)
+}
+
+/// Forgets every dismissal, so those commands can be suggested again. Returns how many there were.
+#[tauri::command]
+pub fn clear_dismissed_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<usize> {
+    require_library(&window)?;
+    state(&app).repo.clear_dismissed_suggestions()
+}
+
+/// How many suggestions are dismissed, for the Settings row that brings them back.
+#[tauri::command]
+pub fn dismissed_suggestion_count<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<usize> {
+    require_library(&window)?;
+    Ok(state(&app).repo.dismissed_suggestion_keys()?.len())
+}
+
 #[tauri::command]
 pub fn list_terminals<R: Runtime>(
     window: WebviewWindow<R>,
@@ -708,4 +775,39 @@ pub fn import_archive<R: Runtime>(
         commands,
         secrets,
     })
+}
+
+/// Read a project folder without saving anything from it.
+#[tauri::command]
+pub fn scan_project<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: ScanProjectRequest,
+) -> AppResult<crate::projects::ProjectScan> {
+    require_library(&window)?;
+    crate::projects::scan(&request.path, &state(&app).repo)
+}
+
+/// Save the chosen tasks of a project folder as commands. The folder is read again here, so a
+/// scan result can never be replaced by command text supplied by the window.
+#[tauri::command]
+pub fn import_project<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    request: ImportProjectRequest,
+) -> AppResult<crate::projects::ImportOutcome> {
+    require_library(&window)?;
+    let state = state(&app);
+    let outcome = crate::projects::import(&request.path, &request.names, request.all, &state.repo)?;
+    if outcome.imported > 0 {
+        emit_reload_all(&app);
+    }
+    Ok(outcome)
+}
+
+/// Install the local shell integration only from the library's explicit action.
+#[tauri::command]
+pub fn install_history_tracking<R: Runtime>(window: WebviewWindow<R>) -> AppResult<String> {
+    require_library(&window)?;
+    crate::project_history::install_zsh_hook()
 }

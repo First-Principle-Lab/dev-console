@@ -4,12 +4,15 @@ import type {
   EntryDetails,
   EntryDraft,
   EntryMeta,
+  HistorySuggestion,
   Kind,
   SavedEntry,
   SearchResponse,
   ArchiveSummary,
   BackupInfo,
   BackupOutcome,
+  ProjectImportOutcome,
+  ProjectScan,
   RecoveryKeyInfo,
   RunResult,
   Settings,
@@ -62,6 +65,8 @@ export const api = {
   appState: (): Promise<AppStateInfo> => call('app_state'),
   search: (query: string, requestId: number): Promise<SearchResponse> =>
     call('search_entries', { request: { query, requestId } }),
+  /** Forgets the detected project for as long as this finder stays open. */
+  clearFinderContext: (): Promise<void> => call('clear_finder_context'),
   list: (req: ListRequest): Promise<EntryMeta[]> => call('list_entries', { request: req }),
   types: (kind: Kind): Promise<string[]> => call('types_for', { request: { kind } }),
   details: (kind: Kind, id: string): Promise<EntryDetails> =>
@@ -89,5 +94,29 @@ export const api = {
   quit: (): Promise<void> => call('quit_app'),
   settings: (): Promise<Settings> => call('get_settings'),
   terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
-  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings })
+  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings }),
+  /** Ranked suggestions from the shell's history. The backend reads the file per call. */
+  installHistoryTracking: (): Promise<string> => call('install_history_tracking'),
+  historySuggestions: (limit?: number): Promise<HistorySuggestion[]> =>
+    call('history_suggestions', { limit: limit ?? null }),
+  dismissSuggestion: (key: string): Promise<void> => call('dismiss_suggestion', { key }),
+  /** How many suggestions are dismissed, for the Settings row that brings them back. */
+  dismissedSuggestionCount: (): Promise<number> => call('dismissed_suggestion_count'),
+  /** Forgets every dismissal; returns how many there were. */
+  clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions'),
+  pickProjectFolder: async (defaultPath?: string): Promise<string | null> => {
+    if (typeof window !== 'undefined' && window.__devConsoleIpc) {
+      return call('pick_project_folder', { defaultPath });
+    }
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    return open({
+      title: 'Choose a project folder',
+      directory: true,
+      multiple: false,
+      defaultPath: defaultPath?.startsWith('/') ? defaultPath : undefined
+    });
+  },
+  scanProject: (path: string): Promise<ProjectScan> => call('scan_project', { request: { path } }),
+  importProject: (path: string, names: string[]): Promise<ProjectImportOutcome> =>
+    call('import_project', { request: { path, names } })
 };

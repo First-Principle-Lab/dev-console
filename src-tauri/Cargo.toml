@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Already in the build through `age`; used directly for the dismissal keys in `history`.
+sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 age = { version = "0.12", default-features = false, features = ["armor"] }
 keyring = "4"
@@ -30,6 +32,8 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 libc = "0.2"
 tauri-plugin-updater = "2.14.1"
 tauri-plugin-process = "2.4.0"
+serde_norway = "0.9.42"
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 tempfile = "3"

@@ -9,8 +9,8 @@
 //! request/acknowledge pair the CLI needs with no dependency on a bus daemon, no well-known
 //! name to collide with, a hard timeout, and access control that is simply the filesystem —
 //! the socket lives in a 0700 directory with 0600 permissions, so only this user can connect.
-//! Nothing but commands and non-sensitive vault state crosses it; secret values, secret
-//! metadata and the vault key never do.
+//! Nothing but commands, non-sensitive vault state and the finder's detected project folder
+//! crosses it; secret values, secret metadata and the vault key never do.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -19,11 +19,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::cli::VaultCommand;
 use crate::error::{AppError, AppResult};
-use crate::models::VaultState;
+use crate::models::{EntriesChanged, VaultState};
 use crate::state::AppState;
 use crate::{tray, windows};
 
@@ -33,15 +33,27 @@ pub const EXIT_LOCKED: i32 = 10;
 pub const EXIT_UNAVAILABLE: i32 = 20;
 pub const EXIT_NOT_RUNNING: i32 = 30;
 
-const MAX_REQUEST_BYTES: usize = 4096;
+const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_line: Option<String>,
+    /// Candidate names for `project.import`; ignored by every other command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    /// Save every task a folder defines, rather than the named ones.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub all: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +99,7 @@ fn code_for(state: &VaultState) -> i32 {
 
 /// Starts the accept loop. A failure to listen must never stop the app from running: the
 /// GUI keeps working and the CLI falls back to its offline behaviour.
-pub fn serve(app: &AppHandle, state: Arc<AppState>) {
+pub fn serve<R: Runtime>(app: &AppHandle<R>, state: Arc<AppState>) {
     let path = socket_path();
     if let Some(parent) = path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
@@ -134,7 +146,11 @@ pub fn remove_socket() {
     std::fs::remove_file(socket_path()).ok();
 }
 
-fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>) -> AppResult<()> {
+fn handle_connection<R: Runtime>(
+    stream: UnixStream,
+    app: &AppHandle<R>,
+    state: &Arc<AppState>,
+) -> AppResult<()> {
     stream.set_read_timeout(Some(REQUEST_TIMEOUT)).ok();
     stream.set_write_timeout(Some(REQUEST_TIMEOUT)).ok();
     let mut reader = BufReader::new(
@@ -153,7 +169,7 @@ fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>)
     }
     let request: Request = serde_json::from_str(line.trim())
         .map_err(|_| AppError::Validation("control request was not valid JSON".into()))?;
-    let reply = dispatch(&request.command, request.path.as_deref(), app, state);
+    let reply = dispatch(&request, app, state);
     let mut stream = stream;
     stream
         .write_all(serde_json::to_vec(&reply)?.as_slice())
@@ -164,13 +180,35 @@ fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<AppState>)
 }
 
 /// The authoritative implementation, shared by the socket server and the in-process paths.
-pub fn dispatch(
-    command: &str,
-    path: Option<&str>,
-    app: &AppHandle,
-    state: &Arc<AppState>,
-) -> Reply {
+///
+/// The whole request travels in, because `project.import` needs the selected task names as well
+/// as the folder.
+pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<AppState>) -> Reply {
+    let command = request.command.as_str();
+    let path = request.path.as_deref();
     match command {
+        "history.record" => {
+            let result = if state.settings.get().history_suggestions_enabled {
+                crate::project_history::database_path()
+                    .and_then(|path| crate::project_history::ProjectHistory::open(&path))
+                    .and_then(|store| {
+                        store.record(
+                            path.unwrap_or(""),
+                            request.shell_line.as_deref().unwrap_or(""),
+                        )
+                    })
+            } else {
+                Ok(false)
+            };
+            // Never echo command text or storage errors back to the shell hook.
+            Reply {
+                ok: result.is_ok(),
+                code: if result.is_ok() { EXIT_OK } else { EXIT_ERROR },
+                message: String::new(),
+                vault: None,
+            }
+        }
+
         "import.bitwarden" => {
             let result = match path {
                 Some(path) => crate::import::bitwarden(state, path),
@@ -184,6 +222,75 @@ pub fn dispatch(
                     let mut message = format!(
                         "imported {} secrets, renamed {}, {} already existed",
                         outcome.imported, outcome.renamed, outcome.duplicates
+                    );
+                    for skipped in &outcome.skipped {
+                        message.push_str(&format!("\nskipped: {skipped}"));
+                    }
+                    Reply {
+                        ok: true,
+                        code: EXIT_OK,
+                        message,
+                        vault: None,
+                    }
+                }
+                Err(error) => Reply {
+                    ok: false,
+                    code: EXIT_ERROR,
+                    message: error.to_string(),
+                    vault: Some(state.vault.state()),
+                },
+            }
+        }
+        "project.scan" => match path {
+            Some(path) => match crate::projects::scan(path, &state.repo) {
+                Ok(found) => Reply {
+                    ok: true,
+                    code: EXIT_OK,
+                    message: describe_scan(&found),
+                    vault: None,
+                },
+                Err(error) => Reply {
+                    ok: false,
+                    code: EXIT_ERROR,
+                    message: error.to_string(),
+                    vault: Some(state.vault.state()),
+                },
+            },
+            None => Reply {
+                ok: false,
+                code: EXIT_ERROR,
+                message: "a project folder is required".into(),
+                vault: None,
+            },
+        },
+        "project.import" => {
+            let result = match path {
+                Some(path) => {
+                    crate::projects::import(path, &request.names, request.all, &state.repo)
+                }
+                None => Err(crate::error::AppError::Validation(
+                    "a project folder is required".into(),
+                )),
+            };
+            match result {
+                Ok(outcome) => {
+                    if outcome.imported > 0 {
+                        // The library window reloads its command list; nothing about the folder
+                        // itself is logged.
+                        let _ = app.emit(
+                            "entries-changed",
+                            EntriesChanged {
+                                kind: crate::models::Kind::Command,
+                                id: String::new(),
+                                revision: 0,
+                                operation: "reloaded",
+                                vault_generation: state.vault.generation(),
+                            },
+                        );
+                    }
+                    let mut message = format!(
+                        "imported {} commands, {} already saved",
+                        outcome.imported, outcome.duplicates
                     );
                     for skipped in &outcome.skipped {
                         message.push_str(&format!("\nskipped: {skipped}"));
@@ -265,6 +372,19 @@ pub fn dispatch(
             message: "finder toggled".into(),
             vault: None,
         },
+        // For the live-session harness (`scripts/test-project-context.sh`): what the palette is
+        // ranking by right now. A folder name and path the user is sitting in, never entry data.
+        "finder.context" => Reply {
+            ok: true,
+            code: EXIT_OK,
+            message: serde_json::json!({
+                "enabled": state.settings.get().project_context_enabled,
+                "visible": windows::finder_visible(app),
+                "context": state.active_finder_context(),
+            })
+            .to_string(),
+            vault: None,
+        },
         "window.library" => Reply {
             ok: windows::show_library(app).is_ok(),
             code: EXIT_OK,
@@ -320,7 +440,7 @@ fn send(request: &Request) -> Option<Reply> {
 pub fn instance_running() -> bool {
     send(&Request {
         command: "vault.status".into(),
-        path: None,
+        ..Request::default()
     })
     .is_some()
 }
@@ -334,7 +454,7 @@ pub fn run(command: VaultCommand) -> AppResult<i32> {
     };
     if let Some(reply) = send(&Request {
         command: name.into(),
-        path: None,
+        ..Request::default()
     }) {
         if reply.ok {
             println!("{}", reply.message);
@@ -409,8 +529,73 @@ pub fn run_import(file: &str) -> AppResult<i32> {
     let Some(reply) = send(&Request {
         command: "import.bitwarden".into(),
         path: Some(path.to_string_lossy().into_owned()),
+        ..Request::default()
     }) else {
         eprintln!("dev-console: no running instance; start Dev Console and unlock the vault first");
+        return Ok(EXIT_NOT_RUNNING);
+    };
+    if reply.ok {
+        println!("{}", reply.message);
+        Ok(EXIT_OK)
+    } else {
+        eprintln!("dev-console: {}", reply.message);
+        Ok(reply.code.max(EXIT_ERROR))
+    }
+}
+
+/// The CLI's `import project <dir>` listing: one line per task, nothing imported.
+fn describe_scan(scan: &crate::projects::ProjectScan) -> String {
+    if scan.candidates.is_empty() {
+        return format!(
+            "{} defines no tasks Dev Console can import (looked for package.json, Makefile, \
+             justfile and compose.yaml)",
+            scan.dir
+        );
+    }
+    let mut lines = vec![format!(
+        "{} tasks in {} - nothing was imported:",
+        scan.candidates.len(),
+        scan.dir
+    )];
+    for candidate in &scan.candidates {
+        lines.push(format!(
+            "  {:<48} {}{}",
+            candidate.name,
+            candidate.command,
+            if candidate.already_imported {
+                "  [already saved]"
+            } else {
+                ""
+            }
+        ));
+    }
+    lines.push(format!(
+        "import them all with: dev-console import project {} --all",
+        scan.dir
+    ));
+    lines.join("\n")
+}
+
+/// CLI entry point for `import project <dir>` and `import project <dir> --all`. Like the
+/// Bitwarden import it needs the resident app, which owns the database the "already saved"
+/// comparison is made against.
+pub fn run_project(dir: &str, all: bool) -> AppResult<i32> {
+    let path = std::fs::canonicalize(dir)
+        .map_err(|e| AppError::Validation(format!("cannot open {dir}: {e}")))?;
+    let Some(reply) = send(&Request {
+        command: if all {
+            "project.import".into()
+        } else {
+            "project.scan".into()
+        },
+        path: Some(path.to_string_lossy().into_owned()),
+        all,
+        ..Request::default()
+    }) else {
+        eprintln!(
+            "dev-console: no running instance; the folder is read against the library, so start \
+             Dev Console first"
+        );
         return Ok(EXIT_NOT_RUNNING);
     };
     if reply.ok {

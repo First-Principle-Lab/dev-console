@@ -3,15 +3,19 @@ pub mod autostart;
 pub mod backup;
 pub mod cli;
 pub mod clipboard;
+pub mod context;
 pub mod control;
 pub mod desktop_icons;
 pub mod error;
 pub mod execution;
+pub mod history;
 pub mod import;
 pub mod ipc;
 pub mod keyring;
 pub mod models;
 pub mod paths;
+pub mod project_history;
+pub mod projects;
 pub mod recovery;
 pub mod repository;
 pub mod search;
@@ -31,6 +35,13 @@ use crate::state::AppState;
 pub fn run() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match cli::parse(argv.iter()) {
+        Intent::HistorySetup => match project_history::install_zsh_hook() {
+            Ok(message) => println!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
         Intent::Help => {
             print!("{}", cli::USAGE);
             std::process::exit(0);
@@ -47,6 +58,20 @@ pub fn run() {
             }
         },
         Intent::ImportBitwarden(file) => match control::run_import(&file) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ScanProject { dir } => match control::run_project(&dir, false) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ImportProject { dir } => match control::run_project(&dir, true) {
             Ok(code) => std::process::exit(code),
             Err(error) => {
                 eprintln!("dev-console: {error}");
@@ -79,6 +104,7 @@ fn build(argv: Vec<String>) {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             dispatch_second_launch(app, &args);
         }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(move |app| {
@@ -115,6 +141,7 @@ fn build(argv: Vec<String>) {
         .invoke_handler(tauri::generate_handler![
             ipc::app_state,
             ipc::search_entries,
+            ipc::clear_finder_context,
             ipc::list_entries,
             ipc::types_for,
             ipc::get_entry,
@@ -135,6 +162,11 @@ fn build(argv: Vec<String>) {
             ipc::quit_app,
             ipc::restart_app,
             ipc::get_settings,
+            ipc::history_suggestions,
+            ipc::install_history_tracking,
+            ipc::dismiss_suggestion,
+            ipc::clear_dismissed_suggestions,
+            ipc::dismissed_suggestion_count,
             ipc::list_terminals,
             ipc::save_settings,
             ipc::open_settings,
@@ -146,7 +178,9 @@ fn build(argv: Vec<String>) {
             ipc::recovery_key,
             ipc::copy_recovery_key,
             ipc::export_archive,
-            ipc::import_archive
+            ipc::import_archive,
+            ipc::scan_project,
+            ipc::import_project
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

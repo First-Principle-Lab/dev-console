@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet, SvelteMap } from 'svelte/reactivity';
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
   import { Copy, Pin, PinOff, Trash2 } from '@lucide/svelte';
@@ -15,6 +16,7 @@
     onCopy,
     onPin,
     onDelete,
+    filterActive = false,
     actionsDisabled = false
   }: {
     entries: EntryMeta[];
@@ -27,9 +29,33 @@
     onCopy: (entry: EntryMeta) => void;
     onPin: (entry: EntryMeta) => void;
     onDelete: (entry: EntryMeta) => void;
+    filterActive?: boolean;
     actionsDisabled?: boolean;
   } = $props();
 
+  const expanded = new SvelteSet<string>();
+  const groups = $derived.by(() => {
+    const grouped = new SvelteMap<string, { key: string; name: string; root: string; entries: EntryMeta[] }>();
+    const known = new SvelteMap<string, { root: string; name: string } | null>();
+    const slug = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
+    for (const entry of entries) {
+      if (!entry.project) continue;
+      const key = slug(entry.project.name);
+      const previous = known.get(key);
+      known.set(key, previous === undefined || previous?.root === entry.project.root ? entry.project : null);
+    }
+    for (const entry of entries) {
+      const tag = entry.tags.find((tag) => tag.startsWith('project:'))?.slice(8);
+      const matched = tag ? known.get(slug(tag)) : null;
+      const root = entry.project?.root || matched?.root || '';
+      const key = kind === 'secret' ? '' : root || (tag ? `tag:${tag.toLowerCase()}` : '');
+      const name = entry.project?.name || matched?.name || tag || root.replace(/\/$/, '').split('/').pop() || 'General';
+      const group = grouped.get(key) ?? { key, name, root, entries: [] };
+      group.entries.push(entry);
+      grouped.set(key, group);
+    }
+    return [...grouped.values()].sort((a, b) => a.key === '' ? 1 : b.key === '' ? -1 : a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+  });
 </script>
 
 <div class="list" id="entry-list" role="listbox" aria-label="{kind === 'secret' ? 'Secrets' : 'Commands'}" aria-busy={loading}
@@ -48,7 +74,22 @@
   {:else if entries.length === 0}
     <EmptyState icon="inbox" title="Nothing here yet" hint={emptyText} />
   {:else}
-    {#each entries as entry (entry.id)}
+    {#each groups as group (group.key)}
+      <div role="group" aria-label={group.name} class="project-group" data-testid="command-project-group">
+        {#if kind === 'command' && group.key}
+          <button type="button" class="project-head" data-testid="command-project-toggle"
+            title={group.root || group.name}
+            aria-expanded={filterActive || expanded.has(group.key)}
+            onclick={() => expanded.has(group.key) ? expanded.delete(group.key) : expanded.add(group.key)}>
+            <span class:closed={!filterActive && !expanded.has(group.key)} class="project-chevron"><Icon name="chevron" size={13} /></span>
+            <Icon name="folder" size={14} />
+            <span class="truncate">{group.name}</span><span class="chip">{group.entries.length}</span>
+          </button>
+        {:else if kind === 'command' && groups.length > 1}
+          <div class="general-head">General <span class="chip">{group.entries.length}</span></div>
+        {/if}
+        {#if !group.key || filterActive || expanded.has(group.key)}
+          {#each group.entries as entry (entry.id)}
       <div
         class="row-wrap"
         role="presentation"
@@ -72,11 +113,21 @@
             disabled={actionsDisabled} onclick={() => onDelete(entry)} data-testid="row-delete"><Trash2 size={14} strokeWidth={1.75} /></button>
         </div>
       </div>
+          {/each}
+        {/if}
+      </div>
     {/each}
   {/if}
 </div>
 
 <style>
+  .project-group { display: flex; flex-direction: column; gap: var(--gap-xs); }
+  .project-head, .general-head { display: flex; align-items: center; gap: var(--gap-sm); padding: var(--sp-2); width: 100%; color: var(--fg-muted); }
+  .project-head { background: transparent; border: 0; text-align: left; font-weight: 600; }
+  .project-head .truncate { flex: 1; min-width: 0; }
+  .project-chevron { display: grid; place-items: center; }
+  .project-chevron.closed { transform: rotate(-90deg); }
+
   .list {
     height: 100%;
     overflow: auto;
