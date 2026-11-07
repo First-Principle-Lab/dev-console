@@ -114,6 +114,7 @@ pub struct VaultService {
     lock_flag: PathBuf,
     credential: Credential,
     file: Mutex<VaultFile>,
+    pub(crate) environment_sync: Mutex<()>,
     status: Mutex<Status>,
     manual_lock: AtomicBool,
     generation: AtomicU64,
@@ -127,6 +128,7 @@ impl VaultService {
             lock_flag,
             credential,
             file: Mutex::new(VaultFile::default()),
+            environment_sync: Mutex::new(()),
             status: Mutex::new(Status::Locked { manual }),
             manual_lock: AtomicBool::new(manual),
             generation: AtomicU64::new(1),
@@ -264,6 +266,7 @@ impl VaultService {
     {
         self.authorise()?;
         let file = self.file.lock().expect("vault file lock poisoned");
+        self.authorise()?;
         f(&file)
     }
 
@@ -275,6 +278,7 @@ impl VaultService {
     {
         self.authorise()?;
         let mut guard = self.file.lock().expect("vault file lock poisoned");
+        self.authorise()?;
         let mut candidate = guard.clone();
         let result = f(&mut candidate)?;
         self.persist(&candidate)?;
@@ -733,6 +737,42 @@ mod tests {
             command: String::new(),
             working_directory: String::new(),
             value: value.into(),
+        }
+    }
+
+    #[test]
+    fn queued_reads_and_writes_recheck_a_manual_lock_before_accessing_the_file() {
+        for writing in [false, true] {
+            let h = Harness::new();
+            let vault = std::sync::Arc::new(h.unlocked());
+            let guard = vault.file.lock().unwrap();
+            let (done, received) = std::sync::mpsc::channel();
+            let worker = {
+                let vault = std::sync::Arc::clone(&vault);
+                std::thread::spawn(move || {
+                    let result = if writing {
+                        vault.write(|_| Ok(()))
+                    } else {
+                        vault.read(|_| Ok(()))
+                    };
+                    done.send(result).unwrap();
+                })
+            };
+            assert!(matches!(
+                received.recv_timeout(std::time::Duration::from_millis(100)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ));
+            // The real lock sets this before waiting to clear decrypted records.
+            vault.manual_lock.store(true, Ordering::SeqCst);
+            drop(guard);
+            assert!(matches!(
+                received
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap(),
+                Err(AppError::Locked)
+            ));
+            worker.join().unwrap();
+            h.erase();
         }
     }
 

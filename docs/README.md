@@ -42,3 +42,5 @@ The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9
 - [`project-command-groups.md`](project/project-command-groups.md): project groups and shell tracking behavior
 
 - [`project-environments.md`](project/project-environments.md): encrypted local environment file versions and recovery
+
+- [`release-0.0.10-review.md`](project/release-0.0.10-review.md): environment sync review and release validation

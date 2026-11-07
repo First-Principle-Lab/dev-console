@@ -166,6 +166,12 @@ pub fn visit(vault: &VaultService, path: &str) -> AppResult<()> {
 }
 
 fn sync_impl(vault: &VaultService, path: &str, register: bool, force: bool) -> AppResult<()> {
+    // Serialize filesystem reads as well as commits. Otherwise a slow terminal scan can
+    // commit an old file after a newer manual/background scan has already saved it.
+    let _sync = vault
+        .environment_sync
+        .lock()
+        .expect("environment sync lock poisoned");
     vault.authorise()?;
     let root = std::fs::canonicalize(path)?;
     if !root.is_dir() {
@@ -416,6 +422,38 @@ mod tests {
         assert_eq!(v.snapshot().unwrap().environments.len(), 3);
         v.lock().unwrap();
         assert!(visit(&v, plain.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn queued_scans_read_the_file_after_acquiring_the_sync_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join(".env"), "SYNTHETIC=old").unwrap();
+        let v = Arc::new(vault(dir.path()));
+        let guard = v.environment_sync.lock().unwrap();
+        let (done, received) = std::sync::mpsc::channel();
+        let worker = {
+            let v = Arc::clone(&v);
+            let root = root.clone();
+            std::thread::spawn(move || {
+                done.send(sync(&v, root.to_str().unwrap(), true)).unwrap();
+            })
+        };
+        assert!(matches!(
+            received.recv_timeout(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        std::fs::write(root.join(".env"), "SYNTHETIC=new").unwrap();
+        drop(guard);
+        received
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        let saved = v.snapshot().unwrap();
+        assert_eq!(saved.environments[0].snapshots.len(), 1);
+        assert_eq!(saved.environments[0].snapshots[0].content, "SYNTHETIC=new");
     }
 
     #[test]
