@@ -22,9 +22,10 @@ Finder's startup theme request also incorrectly used the Library-only full Setti
 API. Both windows now use a theme-only read command, with saved-theme events and a
 refresh on Finder reopen. Native IPC tests preserve the full-settings restriction;
 the browser mock now enforces it too. Native Hyprland validation confirmed the saved
-Kanagawa palette, six open/dismiss cycles, 24 hover paint checks, query entry,
-clearing, arrow navigation and Escape. Finder stayed floating at 680×420 and Library
-stayed tiled. No further release blockers were found.
+Kanagawa palette, six open/dismiss cycles and 24 hover paint checks. Finder stayed
+floating at 680×420 and Library stayed tiled. The native keyboard automation probe
+was inconclusive; keyboard behavior is covered by browser tests. No further release
+blockers were found.
 
 ## Validation
 
