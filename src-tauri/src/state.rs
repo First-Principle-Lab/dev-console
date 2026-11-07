@@ -383,17 +383,13 @@ impl AppState {
         }
     }
 
-    /// Ranked shell-history suggestions from `sources`, minus what the library already holds and
-    /// what the user dismissed. The one implementation behind the `history_suggestions` handler and
-    /// the native test, which hands in a temporary history instead of the real one. The setting is
-    /// the caller's to check: off, `sources` must never have been located.
-    pub fn history_suggestions(
-        &self,
-        sources: &[crate::history::HistorySource],
-        limit: usize,
-    ) -> AppResult<Vec<crate::history::Suggestion>> {
-        let lines = crate::history::collect(sources);
-        if lines.is_empty() {
+    /// Suggestions use recorded working directories, never guesses from global history.
+    pub fn history_suggestions(&self, limit: usize) -> AppResult<Vec<crate::history::Suggestion>> {
+        if !self.settings.get().history_suggestions_enabled {
+            return Ok(Vec::new());
+        }
+        let path = crate::project_history::database_path()?;
+        if !path.exists() {
             return Ok(Vec::new());
         }
         let saved: Vec<EntryRecord> = self
@@ -402,8 +398,11 @@ impl AppState {
             .into_iter()
             .map(|(record, _, _)| record)
             .collect();
-        let dismissed = self.repo.dismissed_suggestion_keys()?;
-        Ok(crate::history::suggest(&lines, &saved, &dismissed, limit))
+        crate::project_history::ProjectHistory::open(&path)?.suggest(
+            &saved,
+            &self.repo.dismissed_suggestion_keys()?,
+            limit,
+        )
     }
 
     /// Metadata only. Secret metadata is included solely while the vault is unlocked, and a

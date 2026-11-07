@@ -1,11 +1,6 @@
-//! Suggestions taken from the user's own shell history.
-//!
-//! The whole module is read-only: history lines are parsed in memory, ranked, and handed to the
-//! library window as candidates. Nothing here writes, logs or transmits a history line, and a scan
-//! runs only when the panel opens or the user presses **Rescan** - the file is never watched. The
-//! one thing that outlives a request is the hash of a command the user explicitly dismissed
-//! ([`crate::repository::Repository::dismiss_suggestion`]), so a dismissal cannot leak the command
-//! text either.
+//! Shell command credential filtering and suggestion names, plus legacy history parsers.
+//! Project-aware collection and ranking live in `project_history`; legacy global history has
+//! no cwd and is never assigned to a project by the application.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -117,6 +112,13 @@ pub struct Suggestion {
     pub command: String,
     pub count: usize,
     pub suggested_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    pub project_count: usize,
 }
 
 impl HistorySource {
@@ -805,6 +807,10 @@ pub fn suggest(
                     command: candidate.command.clone(),
                     count: candidate.count,
                     suggested_name: suggested_name(&candidate.command),
+                    project: None,
+                    project_root: None,
+                    working_directory: None,
+                    project_count: 0,
                 },
             )
         })

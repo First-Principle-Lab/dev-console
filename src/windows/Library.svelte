@@ -46,6 +46,7 @@
   // backend is the authority on whether they are read at all (the setting is checked there).
   let suggestions = $state<HistorySuggestion[]>([]);
   let suggestionsBusy = $state(false);
+  let historyEnabled = $state(false);
   let mode = $state<'view' | 'edit'>('view');
   let draft = $state<EntryDraft>(EMPTY_DRAFT('command'));
   let baseline = $state('');
@@ -187,7 +188,8 @@
   async function loadSuggestions(): Promise<void> {
     suggestionsBusy = true;
     try {
-      suggestions = await api.historySuggestions();
+      historyEnabled = (await api.settings()).historySuggestionsEnabled;
+      suggestions = historyEnabled ? await api.historySuggestions() : [];
     } catch {
       // A missing or unreadable history file is not a failure the user needs to hear about:
       // there is simply nothing to offer.
@@ -210,7 +212,9 @@
     draft = {
       ...EMPTY_DRAFT('command'),
       name: suggestion.suggestedName || suggestion.command.slice(0, 60),
-      command: suggestion.command
+      command: suggestion.command,
+      workingDirectory: suggestion.workingDirectory ?? '',
+      tags: suggestion.project ? [`project:${suggestion.project.toLowerCase().replace(/\s+/g, '-').slice(0, 32)}`] : []
     };
     baseline = JSON.stringify(draft);
     saveError = null;
@@ -248,10 +252,11 @@
   }
 
   function startNew(): void {
+    const projectDirectory = tab === 'command' ? meta?.project?.root || meta?.workingDirectory || '' : '';
     mode = 'edit';
     selectedId = null;
     details = null;
-    draft = EMPTY_DRAFT(tab);
+    draft = { ...EMPTY_DRAFT(tab), workingDirectory: projectDirectory };
     baseline = JSON.stringify(draft);
     saveError = null;
   }
@@ -472,6 +477,7 @@
       on<{ historySuggestionsEnabled: boolean }>('settings-saved', (saved) => {
         // Switching the setting off must hide the panel without a reload; switching it back on
         // re-reads, because the file is never opened while the setting is off.
+        historyEnabled = saved.historySuggestionsEnabled;
         suggestions = saved.historySuggestionsEnabled ? suggestions : [];
         if (saved.historySuggestionsEnabled) void loadSuggestions();
       }),
@@ -593,7 +599,7 @@
   <main class="panes" class:stacked={narrow} id="entry-pane">
     {#if !narrow || (mode === 'view' && !selectedId)}
       <section class="list-pane" aria-label="Entry list">
-        {#if tab === 'command'}
+        {#if tab === 'command' && historyEnabled}
           <HistorySuggestions
             {suggestions}
             busy={suggestionsBusy}
@@ -605,6 +611,7 @@
         <div class="list-scroll">
         <EntryList
           {entries}
+          filterActive={query.trim().length > 0}
           {selectedId}
           {loading}
           kind={tab}

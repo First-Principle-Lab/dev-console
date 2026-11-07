@@ -50,6 +50,7 @@ export interface EntryMeta {
   lastUsedAt: string | null;
   /** Saved working directory. Empty for every secret, so it can never hint at vault contents. */
   workingDirectory: string;
+  project?: FinderContext | null;
 }
 
 /** Exactly what `search_entries` returns (models.rs SearchResult): no revision or updatedAt. */
@@ -183,6 +184,10 @@ export interface HistorySuggestion {
   command: string;
   count: number;
   suggestedName: string;
+  project?: string;
+  projectRoot?: string;
+  workingDirectory?: string;
+  projectCount?: number;
 }
 
 export interface TerminalOption {

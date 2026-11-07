@@ -1040,3 +1040,71 @@ fn project_cli_round_trips_over_a_real_control_socket() {
         std::env::remove_var("DEV_CONSOLE_RUNTIME_DIR");
     }
 }
+
+#[test]
+fn project_history_client_counts_real_socket_requests_and_respects_disabled_setting() {
+    use dev_console_lib::control;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let h = Harness::new("project-history-socket");
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().join("api");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let runtime = folder.path().join("runtime");
+    let old = std::env::var_os("DEV_CONSOLE_RUNTIME_DIR");
+    std::env::set_var("DEV_CONSOLE_RUNTIME_DIR", &runtime);
+    control::serve(h.app.handle(), Arc::clone(&h.state));
+    let client = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("scripts/history-client.py");
+    let send = |line: &str| {
+        let mut child = Command::new("python3")
+            .arg("-I")
+            .arg(&client)
+            .arg(&root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(line.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+    };
+    send("bun run dev");
+    send("bun run dev");
+    send("code .");
+    send("export API_TOKEN=synthetic-do-not-store");
+    let rows = h.state.history_suggestions(5).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].count, 2);
+    assert_eq!(rows[0].project.as_deref(), Some("api"));
+    assert_eq!(rows[0].working_directory.as_deref(), root.to_str());
+    assert!(
+        h.state.repo.all_command_records().unwrap().is_empty(),
+        "recording must not save commands to the library"
+    );
+    let mut settings = h.state.settings.get();
+    settings.history_suggestions_enabled = false;
+    h.state.settings.save(settings).unwrap();
+    send("bun run dev");
+    assert!(h.state.history_suggestions(5).unwrap().is_empty());
+    let mut settings = h.state.settings.get();
+    settings.history_suggestions_enabled = true;
+    h.state.settings.save(settings).unwrap();
+    assert_eq!(h.state.history_suggestions(5).unwrap()[0].count, 2);
+    control::remove_socket();
+    if let Some(old) = old {
+        std::env::set_var("DEV_CONSOLE_RUNTIME_DIR", old);
+    } else {
+        std::env::remove_var("DEV_CONSOLE_RUNTIME_DIR");
+    }
+}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { api } from '../lib/api';
   import type { EntryDraft } from '../lib/models';
   import { NAME_SPACES_MESSAGE, nameHasSpaces, validateDraft } from '../lib/validation';
   import Button from './Button.svelte';
@@ -22,6 +23,20 @@
   } = $props();
 
   let valueVisible = $state(false);
+  let pickingProject = $state(false);
+  let projectError = $state('');
+  function changeProject(folder: string): void {
+    draft.workingDirectory = folder;
+    draft.tags = draft.tags.filter((tag) => !tag.startsWith('project:'));
+  }
+  async function browseProject(): Promise<void> {
+    pickingProject = true; projectError = '';
+    try {
+      const folder = await api.pickProjectFolder(draft.workingDirectory);
+      if (folder) changeProject(folder);
+    } catch (error) { projectError = typeof error === 'string' ? error : 'Could not open the folder picker.'; }
+    finally { pickingProject = false; }
+  }
   let attempted = $state(false);
   const isCommand = $derived(draft.kind === 'command');
   const problem = $derived(validateDraft(draft));
@@ -85,6 +100,16 @@
       {/if}
     </label>
     {#if isCommand}
+      <div class="field">
+        <label class="label" for="command-project-folder">Project folder</label>
+        <div class="project-folder-row">
+          <input id="command-project-folder" class="mono" value={draft.workingDirectory}
+            oninput={(event) => changeProject(event.currentTarget.value)}
+            placeholder="General, or choose a project folder" data-testid="field-working-directory" />
+          <Button type="button" icon="folder" loading={pickingProject} onclick={() => void browseProject()} data-testid="editor-project-browse">Browse…</Button>
+        </div>
+        {#if projectError}<p class="hint warn" role="alert">{projectError}</p>{/if}
+      </div>
       <label class="field">
         <span class="label">Command</span>
         <textarea
@@ -130,6 +155,8 @@
 </form>
 
 <style>
+  .project-folder-row { display: flex; gap: var(--gap-sm); flex-wrap: wrap; }
+  .project-folder-row input { flex: 1 1 180px; min-width: 0; }
   .editor {
     display: flex;
     flex-direction: column;

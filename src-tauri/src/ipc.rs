@@ -532,12 +532,8 @@ pub fn get_settings<R: Runtime>(
     Ok(state(&app).settings.get())
 }
 
-/// Ranked suggestions taken from the user's own shell history.
-///
-/// The history files are located and parsed here, on request, and only for the library window;
-/// nothing is written to a log and nothing is persisted. With the setting off, the files are never
-/// opened at all. Reading and parsing up to a few megabytes of history runs on a blocking worker,
-/// not on the main thread, so the library stays responsive while it does.
+/// Read project-specific aggregate counts from the private local store, on a blocking worker.
+/// The enabled setting gates both this read and collection through the shell socket.
 #[tauri::command]
 pub async fn history_suggestions<R: Runtime>(
     app: AppHandle<R>,
@@ -552,11 +548,9 @@ pub async fn history_suggestions<R: Runtime>(
     let limit = limit
         .unwrap_or(history::DEFAULT_LIMIT)
         .clamp(1, history::MAX_LIMIT);
-    tauri::async_runtime::spawn_blocking(move || {
-        state.history_suggestions(&history::locate(), limit)
-    })
-    .await
-    .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
+    tauri::async_runtime::spawn_blocking(move || state.history_suggestions(limit))
+        .await
+        .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
 }
 
 /// Marks one suggestion as never to be offered again. Only its digest is stored, so a dismissal
@@ -809,4 +803,11 @@ pub fn import_project<R: Runtime>(
         emit_reload_all(&app);
     }
     Ok(outcome)
+}
+
+/// Install the local shell integration only from the library's explicit action.
+#[tauri::command]
+pub fn install_history_tracking<R: Runtime>(window: WebviewWindow<R>) -> AppResult<String> {
+    require_library(&window)?;
+    crate::project_history::install_zsh_hook()
 }

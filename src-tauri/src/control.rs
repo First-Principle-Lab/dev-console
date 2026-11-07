@@ -33,7 +33,7 @@ pub const EXIT_LOCKED: i32 = 10;
 pub const EXIT_UNAVAILABLE: i32 = 20;
 pub const EXIT_NOT_RUNNING: i32 = 30;
 
-const MAX_REQUEST_BYTES: usize = 4096;
+const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -42,6 +42,8 @@ pub struct Request {
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_line: Option<String>,
     /// Candidate names for `project.import`; ignored by every other command.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub names: Vec<String>,
@@ -185,6 +187,28 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
     let command = request.command.as_str();
     let path = request.path.as_deref();
     match command {
+        "history.record" => {
+            let result = if state.settings.get().history_suggestions_enabled {
+                crate::project_history::database_path()
+                    .and_then(|path| crate::project_history::ProjectHistory::open(&path))
+                    .and_then(|store| {
+                        store.record(
+                            path.unwrap_or(""),
+                            request.shell_line.as_deref().unwrap_or(""),
+                        )
+                    })
+            } else {
+                Ok(false)
+            };
+            // Never echo command text or storage errors back to the shell hook.
+            Reply {
+                ok: result.is_ok(),
+                code: if result.is_ok() { EXIT_OK } else { EXIT_ERROR },
+                message: String::new(),
+                vault: None,
+            }
+        }
+
         "import.bitwarden" => {
             let result = match path {
                 Some(path) => crate::import::bitwarden(state, path),

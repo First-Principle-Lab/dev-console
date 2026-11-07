@@ -191,6 +191,7 @@ test('imports the selection as commands that run in the folder, and shows them i
 
   // And they are in the list the library just re-read: the tag rides along, and the record shows
   // the folder it will run in.
+  await page.getByTestId('command-project-toggle').click();
   const rows = page.getByTestId('entry-row');
   await expect(rows).toHaveCount(6);
   await rows.filter({ hasText: 'webapp·assets' }).click();

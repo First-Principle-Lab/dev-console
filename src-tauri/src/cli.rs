@@ -24,6 +24,7 @@ pub enum Intent {
     ImportProject {
         dir: String,
     },
+    HistorySetup,
     Help,
     Version,
 }
@@ -46,6 +47,7 @@ Usage:
                                Makefile, justfile, compose.yaml) and import nothing
   dev-console import project <dir> --all
                                import every task that folder defines
+  dev-console history setup    enable project-aware tracking for new zsh terminals
   dev-console --version
   dev-console --help
 ";
@@ -66,6 +68,7 @@ where
         "--library" => Intent::Library,
         "--background" => Intent::Background,
         "--finder" | "-f" => Intent::Finder,
+        "history" if iter.next().is_some_and(|s| s.as_ref() == "setup") => Intent::HistorySetup,
         "vault" => {
             let second = iter
                 .next()

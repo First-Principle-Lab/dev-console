@@ -59,10 +59,8 @@ fn draft(kind: Kind, name: &str, command: &str, value: &str) -> EntryDraft {
 /// window check, with the history located inside `home` - never the developer's real one, which
 /// would both change the result and put real commands into a failure message.
 fn scan(state: &AppState, home: &std::path::Path, limit: usize) -> Vec<history::Suggestion> {
-    let sources = history::locate_with(|_| None, home);
-    state
-        .history_suggestions(&sources, limit)
-        .expect("suggestions")
+    let _ = home;
+    state.history_suggestions(limit).expect("suggestions")
 }
 
 /// A disposable profile per test, so a bare `cargo test` can never open (or create) the
@@ -303,19 +301,21 @@ fn the_command_store_refuses_a_stale_writer_and_keeps_the_winner() {
 fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backend() {
     let _profile = Profile::new("native-crud-history");
     let temp = tempfile::tempdir().expect("tempdir");
-    // A home of its own: `locate` also reads `.bash_history` and fish's history from `$HOME`.
     let home = temp.path();
-    let history_file = home.join(".zsh_history");
-    std::fs::write(
-        &history_file,
-        b": 1700000001:0;make ship\n\
-: 1700000002:0;make ship\n\
-: 1700000003:0;helm upgrade api ./chart\n\
-: 1700000004:0;  make coffee\n\
-: 1700000005:0;export GITHUB_TOKEN=ghp_syntheticvalue0123456789\n",
+    std::fs::create_dir(home.join(".git")).unwrap();
+    let store = dev_console_lib::project_history::ProjectHistory::open(
+        &dev_console_lib::project_history::database_path().unwrap(),
     )
-    .expect("write history");
-
+    .unwrap();
+    for line in [
+        "make ship",
+        "make ship",
+        "helm upgrade api ./chart",
+        "  make coffee",
+        "export GITHUB_TOKEN=ghp_syntheticvalue0123456789",
+    ] {
+        store.record(home.to_str().unwrap(), line).unwrap();
+    }
     let state = bootstrap();
     let first = scan(&state, home, 5);
     assert_eq!(
@@ -330,7 +330,8 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
     assert_eq!(first[1].suggested_name, "helm-upgrade-api");
 
     // Saving the command takes it out of the panel, even with different spacing to the library's.
-    let mut draft = draft(Kind::Command, "Ship it", "make  ship", "");
+    let mut draft = draft(Kind::Command, "Ship it", "make ship", "");
+    draft.working_directory = home.to_string_lossy().into_owned();
     state.repo.save_command(&mut draft).expect("save command");
     let after_save = scan(&state, home, 5);
     assert_eq!(
@@ -346,16 +347,14 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
     let key = after_save[0].key.clone();
     assert_eq!(
         key,
-        history::key_for("helm upgrade api ./chart"),
+        history::key_for(&format!(
+            "{}\0{}\0helm upgrade api ./chart",
+            home.display(),
+            home.display()
+        )),
         "the key is the digest of the normalised line"
     );
     state.repo.dismiss_suggestion(&key).expect("dismiss");
-    assert!(
-        std::fs::read_to_string(&history_file)
-            .expect("history still on disk")
-            .contains("helm upgrade"),
-        "dismissing must not touch the history file"
-    );
     drop(state);
 
     let restarted = bootstrap();

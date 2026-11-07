@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How long the compositor is given to answer over its socket. This read happens before the
 /// palette is shown, so it is the one part of detection the user can wait on; Hyprland answers in
@@ -61,7 +61,7 @@ const PROJECT_FILES: [&str; 5] = [
 ];
 
 /// The project the finder was opened from. `root` is absolute because it comes from a `cwd`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinderContext {
     pub root: PathBuf,

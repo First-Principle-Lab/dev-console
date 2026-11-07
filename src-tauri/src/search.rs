@@ -304,6 +304,7 @@ mod tests {
             usage_count: 0,
             last_used_at: None,
             working_directory: String::new(),
+            project: None,
         }
     }
 
@@ -458,6 +459,7 @@ mod tests {
                 updated_at: String::new(),
                 usage_count: i % 30,
                 last_used_at: Some(format!("2026-11-0{}T09:00:00Z", 1 + i % 9)),
+                project: None,
                 working_directory: if i % 3 == 0 {
                     format!("/home/dev/projects/api/src/{i}")
                 } else {

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SvelteMap } from 'svelte/reactivity';
+  import { api } from '../lib/api';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
   import type { HistorySuggestion } from '../lib/models';
@@ -23,6 +25,26 @@
   } = $props();
 
   let open = $state(true);
+  let trackingMessage = $state('');
+  let installing = $state(false);
+  const projects = $derived.by(() => {
+    const groups = new SvelteMap<string, { name: string; root: string; count: number; suggestions: HistorySuggestion[] }>();
+    for (const suggestion of suggestions) {
+      const root = suggestion.projectRoot ?? '';
+      const group = groups.get(root) ?? { name: suggestion.project ?? 'Project', root,
+        count: suggestion.projectCount ?? 0, suggestions: [] };
+      group.suggestions.push(suggestion);
+      groups.set(root, group);
+    }
+    return [...groups.values()];
+  });
+  async function installTracking(): Promise<void> {
+    installing = true;
+    try { trackingMessage = await api.installHistoryTracking(); }
+    catch (error) { trackingMessage = typeof error === 'string' ? error : 'Could not install project tracking.'; }
+    finally { installing = false; }
+  }
+
 
   function onRowKeydown(event: KeyboardEvent, suggestion: HistorySuggestion): void {
     if (event.key === 'Enter') {
@@ -35,7 +57,6 @@
   }
 </script>
 
-{#if suggestions.length > 0}
   <section
     class="suggest"
     aria-labelledby="history-suggestions-title"
@@ -51,15 +72,24 @@
       onclick={() => (open = !open)}
     >
       <span class="head-glyph" aria-hidden="true"><Icon name="sparkle" size={13} /></span>
-      <span class="head-title" id="history-suggestions-title">From your shell history</span>
-      <span class="chip count">{suggestions.length}</span>
+      <span class="head-title" id="history-suggestions-title">Project history</span>
+      {#if projects.length > 0}<span class="chip count">{projects.length} projects</span>{/if}
       <span class="spacer"></span>
       <span class="chevron" class:closed={!open} aria-hidden="true"><Icon name="chevron" size={13} /></span>
     </button>
 
     {#if open}
-      <ul class="rows" id="history-suggestion-list" data-testid="history-suggestion-list">
-        {#each suggestions as suggestion (suggestion.key)}
+      <div id="history-suggestion-list" data-testid="history-suggestion-list">
+      {#if suggestions.length === 0}
+        <p class="hint muted">Suggestions appear here as you use projects. Set up tracking, then open a new terminal.</p>
+        <Button type="button" size="sm" loading={installing} onclick={() => void installTracking()} data-testid="history-tracking-setup">Enable project tracking for zsh</Button>
+        {#if trackingMessage}<p class="hint" role="status">{trackingMessage}</p>{/if}
+      {/if}
+      {#each projects as project (project.root)}
+        <details open={projects.length === 1} class="history-project" data-testid="history-project">
+          <summary title={project.root}><span class="history-chevron"><Icon name="chevron" size={13} /></span><span class="head-title">{project.name}</span><span class="chip">{project.count} runs</span></summary>
+          <ul class="rows">
+        {#each project.suggestions as suggestion (suggestion.key)}
           <li class="suggestion" data-testid="history-suggestion-row">
             <!--
               The command itself is the keyboard target: Enter runs the same action as **Save**,
@@ -105,13 +135,16 @@
             </div>
           </li>
         {/each}
-      </ul>
+          </ul>
+        </details>
+      {/each}
+      </div>
 
       <div class="foot">
         <span class="hint muted">
           {busy
-            ? 'Reading your history…'
-            : 'Read on this machine only. Enter saves, Delete dismisses; a dismissal is remembered as a hash.'}
+            ? 'Reading project counts…'
+            : suggestions.length ? 'Top five projects by recorded runs. Counts stay separate per project and folder.' : ''}
         </span>
         <Button
           size="sm"
@@ -126,9 +159,15 @@
       </div>
     {/if}
   </section>
-{/if}
 
 <style>
+  .history-chevron { display: grid; place-items: center; }
+  .history-project:not([open]) .history-chevron { transform: rotate(-90deg); }
+  .history-project { margin-top: var(--sp-2); }
+  .history-project summary { display: flex; align-items: center; gap: var(--gap-sm); padding: var(--sp-1) 0; cursor: pointer; }
+  .history-project summary .head-title { flex: 1; }
+  .suggest { max-height: 45vh; overflow-y: auto; flex-shrink: 0; }
+
   .suggest {
     display: flex;
     flex-direction: column;

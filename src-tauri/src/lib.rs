@@ -14,6 +14,7 @@ pub mod ipc;
 pub mod keyring;
 pub mod models;
 pub mod paths;
+pub mod project_history;
 pub mod projects;
 pub mod recovery;
 pub mod repository;
@@ -34,6 +35,13 @@ use crate::state::AppState;
 pub fn run() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match cli::parse(argv.iter()) {
+        Intent::HistorySetup => match project_history::install_zsh_hook() {
+            Ok(message) => println!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
         Intent::Help => {
             print!("{}", cli::USAGE);
             std::process::exit(0);
@@ -155,6 +163,7 @@ fn build(argv: Vec<String>) {
             ipc::restart_app,
             ipc::get_settings,
             ipc::history_suggestions,
+            ipc::install_history_tracking,
             ipc::dismiss_suggestion,
             ipc::clear_dismissed_suggestions,
             ipc::dismissed_suggestion_count,

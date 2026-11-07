@@ -93,10 +93,6 @@
     return hash.toString(16).padStart(8, '0').repeat(8);
   }
 
-  function normaliseCommand(command) {
-    return command.trim().replace(/\s+/g, ' ');
-  }
-
   /// Mirrors `history::is_word_like`: short, and only characters that read well in a label.
   function isWordLike(token) {
     return token.length > 0 && token.length <= 20 && /^[A-Za-z0-9_:@#-]+$/.test(token);
@@ -132,21 +128,26 @@
   }
 
   function readHistory(limit) {
-    const saved = new Set(
-      state.commands.map((record) => normaliseCommand(record.command || '')).filter(Boolean)
-    );
-    return state.history
-      .filter((entry) => entry.command.trim().length > 0)
-      .map((entry) => ({
-        key: stubDigest(normaliseCommand(entry.command)),
-        command: entry.command,
-        count: entry.count ?? 1,
-        suggestedName: entry.suggestedName ?? suggestName(entry.command)
-      }))
-      .filter((suggestion) => !saved.has(normaliseCommand(suggestion.command)))
+    const groups = new Map();
+    for (const entry of state.history) {
+      if (entry.projectRoot === null || !entry.command.trim() || /^(code|open|xdg-open|cd|ls|pwd|clear)(\s|$)/.test(entry.command)) continue;
+      const root = entry.projectRoot ?? '/home/dev/projects/demo';
+      const cwd = entry.workingDirectory ?? root;
+      const group = groups.get(root) ?? { total: 0, rows: [] };
+      group.total += entry.count ?? 1;
+      group.rows.push({
+        key: stubDigest(`${root}\0${cwd}\0${entry.command.trim()}`),
+        command: entry.command, count: entry.count ?? 1,
+        suggestedName: entry.suggestedName ?? suggestName(entry.command),
+        project: entry.project ?? root.split('/').pop(), projectRoot: root, workingDirectory: cwd
+      });
+      groups.set(root, group);
+    }
+    return [...groups.values()].sort((a,b) => b.total - a.total).slice(0,5).flatMap((group) => group.rows
+      .filter((suggestion) => !state.commands.some((record) => (record.workingDirectory || '') === suggestion.workingDirectory && (record.command || '').trim() === suggestion.command.trim()))
       .filter((suggestion) => !dismissedKeys().includes(suggestion.key))
-      .sort((left, right) => right.count - left.count || left.command.localeCompare(right.command))
-      .slice(0, limit);
+      .sort((a,b) => b.count - a.count || a.command.localeCompare(b.command))
+      .slice(0,Math.min(limit,5)).map((row) => ({...row, projectCount: group.total})));
   }
 
 
@@ -270,6 +271,18 @@
   /** One-shot: answers the first scan of a run as if the library had changed since. */
   let staleScanAnswered = false;
 
+  function projectForRecord(record) {
+    if (record.project) return record.project;
+    const directory = record.workingDirectory || '';
+    const history = state.history.find((entry) => (entry.workingDirectory ?? entry.projectRoot ?? '/home/dev/projects/demo') === directory);
+    if (history) {
+      const root = history.projectRoot ?? '/home/dev/projects/demo';
+      return { root, name: history.project ?? root.split('/').pop() };
+    }
+    if (directory && directory === seed.projectFolder) return { root: directory, name: directory.split('/').pop() };
+    return null;
+  }
+
   function meta(record, kind) {
     return {
       id: record.id,
@@ -284,7 +297,8 @@
       usageCount: record.usageCount || 0,
       lastUsedAt: record.lastUsedAt || null,
       // Secrets never carry one, exactly as the backend has them always empty.
-      workingDirectory: kind === 'command' ? record.workingDirectory || '' : ''
+      workingDirectory: kind === 'command' ? record.workingDirectory || '' : '',
+      project: kind === 'command' ? projectForRecord(record) : null
     };
   }
 
@@ -508,6 +522,7 @@
       emit('entries-changed', { kind: draft.kind, id, revision: 1, operation: 'created', vaultGeneration: state.generation });
       return { id, revision: 1, kind: draft.kind };
     }
+    if (command === 'install_history_tracking') return 'Project tracking is installed. Open a new terminal to start counting commands by project.';
     if (command === 'history_suggestions') {
       // Off means "never read the file at all", which is what the Rust handler guarantees too.
       if (!state.settings.historySuggestionsEnabled) return [];
@@ -518,7 +533,7 @@
     if (command === 'dismiss_suggestion') {
       const key = String((payload && payload.key) || '');
       const known = state.history.some(
-        (entry) => stubDigest(normaliseCommand(entry.command)) === key
+        (entry) => stubDigest(`${entry.projectRoot ?? '/home/dev/projects/demo'}\0${entry.workingDirectory ?? entry.projectRoot ?? '/home/dev/projects/demo'}\0${entry.command.trim()}`) === key
       );
       if (!known) throw new Error('unknown suggestion');
       const remembered = dismissedKeys();

@@ -49,20 +49,28 @@ for authentication. In-app output is limited to 64 KiB per stream, and commands 
 terminals found in `PATH` and keeps a custom command option. A saved `x-terminal-emulator` setting
 falls back to an installed terminal when that executable is missing.
 
-**Suggestions from shell history** — the Commands tab offers the most-used commands from your
-zsh, bash or fish history as starting points for a new entry, ranked by count weighted by recency.
-The file is parsed in Rust on request (when the library opens, on **Rescan**), never watched, never
-written to, and never opened at all while the setting is off (Settings → General). Lines that look
-like they carry a credential are dropped before anything reaches the screen: an exported
-`*_TOKEN`, `-p<password>` or `sshpass -p …`/`docker login -p …`, `--password`/`--token`/`--api-key`
-and their kin, `Authorization:` and other credential headers (`X-Api-Key:`, `Cookie:`), a
-`user:pass@host` URL or a token as the user part of an `https://` URL, a setting such as
-`aws_secret_access_key …`, and a long hex or base64 blob (except a full commit id where git expects
-a revision). **Save** only prefills the normal editor; nothing is written until you confirm. A
-**Dismissal** is stored as the SHA-256 of the command, never the command itself, and Settings →
-General can bring every dismissed suggestion back. Each suggestion is a keyboard stop as well:
-`Tab` to the command, `Enter` saves it, `Delete` dismisses it. When several history files exist,
-the one written most recently counts as the most recent.
+**Project history** records useful shell commands with their actual project and working folder.
+The library recommends up to five commands for each of your five busiest projects, ranked by
+recorded runs. Counts, saved-command matching and dismissals are separate per project and folder.
+Routine launchers such as `code`, `open`, `cd` and `ls`, plus commands flagged by the credential
+filter, are discarded before storage. Saving opens the normal editor with the original working
+folder; it does not run or save the command until you confirm.
+
+Enable tracking with the history panel's **Enable project tracking for zsh** action, or run
+`dev-console history setup`, then open a new terminal. The installer backs up `.zshrc` before
+adding one source line. It is idempotent. The hook sends the command over stdin to a local helper
+and then the app's private Unix socket. Command text is never put in process arguments or logs.
+Dev Console must be running; turning off history suggestions in Settings stops collection and
+suggestions. Existing global shell history has no folder information and is not backfilled.
+Automatic shell integration currently supports zsh. Filtered aggregate counts live in private
+`project-history.sqlite3`, separate from saved commands and exports, with at most 10,000
+command/folder pairs. Dismissals store only a project-specific digest.
+
+**Project groups** keep saved commands under collapsible project headings. The backend resolves
+the repository root from the saved working folder, so tasks in subfolders share one project.
+Imported project tags group commands whose folder is no longer available. Commands with no
+project remain in General. Search opens matching groups; Finder still searches across projects.
+Choose a project folder in the command editor to assign or move a command.
 
 **Project tasks** — the library can read the runnable tasks a project folder already defines instead
 of making you retype them: `package.json` scripts (run through whichever package manager the

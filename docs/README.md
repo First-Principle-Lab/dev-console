@@ -38,3 +38,5 @@ to test it, and how to tell it is complete.
 - [`project-import-fixes.md`](reviews/project-import-fixes.md): project import review evidence
 
 The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9-review.md).
+
+- [`project-command-groups.md`](project/project-command-groups.md): project groups and shell tracking behavior

@@ -628,6 +628,7 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryMeta> {
         last_used_at: row.get(9)?,
         // 11th column of list_commands; project ranking needs it and it is never secret material.
         working_directory: row.get(10)?,
+        project: crate::project_history::project_for_directory(&row.get::<_, String>(10)?),
     })
 }
 

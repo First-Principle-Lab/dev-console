@@ -65,6 +65,8 @@ pub struct EntryMeta {
     pub last_used_at: Option<String>,
     #[serde(default)]
     pub working_directory: String,
+    #[serde(default)]
+    pub project: Option<FinderContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +152,11 @@ impl EntryRecord {
             updated_at: self.updated_at.clone(),
             usage_count,
             last_used_at,
+            project: if self.kind == Kind::Command {
+                crate::project_history::project_for_directory(&self.working_directory)
+            } else {
+                None
+            },
             // Secrets never carry one, so the field cannot leak anything the vault holds.
             working_directory: if self.kind == Kind::Command {
                 self.working_directory.clone()

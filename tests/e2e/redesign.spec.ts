@@ -146,12 +146,12 @@ test('minimal list rows show names and actions without overflowing', async ({ pa
   expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });
 
-test('a fresh editor asks only for name and command before saving', async ({ page }) => {
+test('a fresh editor offers an optional project folder before saving', async ({ page }) => {
   await boot(page, SEED);
   await page.getByTestId('add-entry').click();
   await expect(page.getByTestId('validation-hint')).toHaveCount(0);
   await expect(page.getByTestId('save-error')).toHaveCount(0);
-  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(3);
+  await expect(page.getByTestId('entry-editor').locator('input, textarea')).toHaveCount(4);
   await page.getByTestId('field-name').fill('Deploy');
   await page.getByTestId('save').click();
   await expect(page.getByTestId('save-error')).toContainText('Command text is required.');

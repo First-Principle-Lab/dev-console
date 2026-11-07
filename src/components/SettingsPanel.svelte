@@ -416,8 +416,9 @@
             <span>Suggest commands from my shell history</span>
           </label>
           <p class="muted detail">
-            Reads your zsh, bash or fish history on this machine when the library opens. Nothing is
-            uploaded, and a command you dismiss is remembered only as a hash.
+            Counts useful commands by their actual project and folder while Dev Console is running.
+            Enable the zsh integration in the history panel, then open a new terminal. No old
+            history is assigned to a project. Turning this off stops collection and suggestions.
           </p>
           {#if dismissedSuggestions > 0}
             <div>

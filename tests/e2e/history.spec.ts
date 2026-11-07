@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { boot, mockState } from './helpers';
 
@@ -13,6 +13,12 @@ type HistoryEntry = { command: string; count: number };
 
 const history = (entries: HistoryEntry[]): Record<string, unknown> => ({ history: entries });
 
+async function expandProjects(page: Page): Promise<void> {
+  for (const toggle of await page.getByTestId('command-project-toggle').all()) {
+    if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  }
+}
+
 const SETTINGS_OFF = {
   theme: 'dark',
   autostart: false,
@@ -26,7 +32,7 @@ const SEED = {
     {
       id: 'c1', revision: 1, name: 'Deploy staging', type: 'Shell', tags: [],
       description: '', notes: '', fields: [], pinned: false,
-      command: 'make deploy staging', workingDirectory: '', usageCount: 2
+      command: 'make deploy staging', workingDirectory: '/home/dev/projects/demo', project: { root: '/home/dev/projects/demo', name: 'demo' }, usageCount: 2
     }
   ],
   secrets: []
@@ -54,6 +60,8 @@ test('offers the ranked history above the commands, minus what is already saved'
   // The library already holds that exact command, so it is not offered back.
   await expect(page.getByTestId('history-suggestion-list')).not.toContainText('make deploy');
   // The commands themselves are untouched by any of this.
+  await page.getByTestId('command-project-toggle').filter({hasText:'demo'}).click();
+  await expandProjects(page);
   await expect(page.getByTestId('entry-row')).toHaveCount(1);
 
   // Each keyboard target names the command, the count and both actions.
@@ -84,6 +92,7 @@ test('saving opens the editor prefilled and writes nothing until it is confirmed
   expect(state.commands).toHaveLength(1);
 
   await page.getByTestId('save').click();
+  await page.getByTestId('command-project-toggle').filter({hasText:'demo'}).click();
   await expect(page.getByTestId('entry-row')).toHaveCount(2);
   const saved = await page.evaluate(() =>
     (
@@ -136,6 +145,7 @@ test('the panel is absent entirely when the setting is off', async ({ page }) =>
     settings: SETTINGS_OFF
   });
   await expect(page.getByTestId('history-suggestions')).toHaveCount(0);
+  await expandProjects(page);
   await expect(page.getByTestId('entry-row')).toHaveCount(1);
 
   const scans = await page.evaluate(
@@ -214,17 +224,19 @@ test('the panel folds away without touching the list underneath it', async ({ pa
   await toggle.click();
   await expect(page.getByTestId('history-suggestion-list')).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expandProjects(page);
   await expect(page.getByTestId('entry-row')).toHaveCount(1);
 
   await toggle.click();
   await expect(page.getByTestId('history-suggestion-row')).toHaveCount(1);
 });
 
-test('an unreadable history is silent: no panel, no error, list intact', async ({ page }) => {
+test('without project activity the panel explains how to enable tracking', async ({ page }) => {
   await boot(page, SEED);
-  await expect(page.getByTestId('history-suggestions')).toHaveCount(0);
-  await expect(page.getByTestId('entry-row')).toHaveCount(1);
-  await expect(page.getByTestId('status-line')).toHaveCount(0);
+  await expect(page.getByTestId('history-suggestions')).toBeVisible();
+  await page.getByTestId('history-tracking-setup').click();
+  await expect(page.getByRole('status')).toContainText('Open a new terminal');
+  await expect(page.getByTestId('command-project-toggle')).toHaveCount(1);
 });
 
 test('Settings brings every dismissed suggestion back, and the panel offers it again', async ({ page }) => {
