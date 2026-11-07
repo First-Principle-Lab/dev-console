@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+
+- Finder keeps an opaque native surface on Hyprland so moving the mouse over it no longer makes the palette disappear.
+
 ## 0.0.9 — 2026-11-07
 
 ### Added

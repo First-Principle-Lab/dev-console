@@ -34,9 +34,10 @@ fn ensure<R: Runtime>(app: &AppHandle<R>, label: &str, url: &str) -> AppResult<W
             .inner_size(FINDER_SIZE.0, FINDER_SIZE.1)
             .resizable(false)
             .decorations(false)
-            // The palette paints its own rounded shell; whatever a compositor adds around it
-            // stays see-through instead of showing as a dark slab.
-            .transparent(true)
+            // Keep the native surface opaque. On WebKitGTK 2.54 + Hyprland/NVIDIA,
+            // transparent windows can lose their entire paint on pointer hover while staying
+            // mapped and focused. Hyprland supplies the rounded window corners; see AGENTS.md.
+            .transparent(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)

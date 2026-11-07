@@ -357,10 +357,10 @@ body {
   overflow: hidden;
 }
 
-/* The finder window is transparent so only the palette shell is visible, even when the
-   compositor makes the window larger than the palette. */
+/* Match the opaque native Finder surface. Transparent native windows lose paint on
+   Hyprland/WebKitGTK during hover. The compositor rounds the actual window corners. */
 html[data-view='finder'] body {
-  background: transparent;
+  background: var(--shell-bg);
 }
 
 h1,

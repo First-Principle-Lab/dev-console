@@ -76,3 +76,34 @@ Create a new subfolder when none of these fits, and add it to `docs/README.md`. 
 - Buttons inside forms need an explicit `type="button"` unless they are meant to submit.
 - Use the design tokens in `src/styles/tokens.css`. Don't hard-code colours.
 - Never log, print or screenshot real secret values. Tests use synthetic values only.
+
+## Finder on Hyprland
+
+This app is tested on the owner's real Hyprland desktop, including NVIDIA and
+WebKitGTK 2.54. Browser tests and Xvfb cannot prove Wayland rendering works.
+
+- Keep the native Finder window **opaque** in `src-tauri/src/windows.rs`.
+  `transparent(true)` makes the palette disappear or corrupt when the pointer
+  enters it on this setup, even though Hyprland still reports a mapped, visible,
+  floating 680×420 window. Reproduced and fixed on 2026-11-07 by switching the
+  same build to `transparent(false)`. Do not restore transparency to fix corners.
+- Keep the Finder page background opaque and matched to `--shell-bg` in
+  `src/styles/tokens.css`. Hyprland rounds the native window.
+- Preserve its exact `dev-console-finder` title, 680×420 logical size,
+  borderless window, and the size request after mapping. The local Hyprland
+  rule matches this title and sets float, size and centering. Check both title
+  and class with `hyprctl -j clients` before changing any compositor rule.
+  The library must remain tiled; never float every `dev-console` window.
+- Preserve the existing `WEBKIT_DISABLE_DMABUF_RENDERER=1` default in `main.rs`
+  unless the user explicitly overrides it. It avoids a separate WebKitGTK
+  missing-acquire-timeline Wayland protocol error. This alone does not fix the
+  transparent-window hover bug.
+- When changing Finder rendering or startup, test the native app on Hyprland:
+  open/dismiss repeatedly, move the mouse across rows and outside/back inside,
+  type a query, check keyboard selection and Escape, and check that the library
+  and surrounding tiled windows keep their layout. Confirm Finder remains
+  floating at 680×420. Do not declare this covered by Playwright screenshots.
+- For compositor changes, read the Omarchy skill and the current official
+  Hyprland docs. The owner's current configuration is Lua, not the legacy
+  `.conf` syntax. Back up edits and validate with `hyprctl reload` followed by
+  `hyprctl configerrors`.
