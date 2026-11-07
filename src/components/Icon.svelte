@@ -1,8 +1,8 @@
 <script lang="ts">
   import {
-    ArrowLeft, Check, ChevronDown, Copy, Eye, FolderGit2, FolderOpen, Inbox, KeyRound, List, LockKeyhole,
+    ArrowLeft, Check, ChevronDown, Copy, Eye, FolderGit2, FolderOpen, History, Inbox, KeyRound, List, LockKeyhole,
     LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search, Settings, Shield,
-    Sparkles, Terminal, Trash2, TriangleAlert, X
+    Terminal, Trash2, TriangleAlert, X
   } from '@lucide/svelte';
   import type { IconName } from '../lib/icons';
 
@@ -30,7 +30,7 @@
     gear: Settings,
     update: RefreshCw,
     project: FolderGit2,
-    sparkle: Sparkles,
+    history: History,
     close: X,
     chevron: ChevronDown
   } satisfies Record<IconName, typeof Terminal>;

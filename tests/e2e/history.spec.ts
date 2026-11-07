@@ -302,3 +302,25 @@ test('every row keeps its name, count and buttons on one line, under the command
     expect(Math.abs(name!.x - command!.x), `row ${index} name aligned`).toBeLessThan(2);
   }
 });
+
+
+test('project history has an unboxed pointer state and a visible keyboard focus ring', async ({ page }) => {
+  await boot(page, { ...SEED, history: [{ command: 'bun run test', count: 7 }] });
+  const toggle = page.getByTestId('history-suggestions-toggle');
+  await expect(toggle.locator('svg.lucide-history')).toHaveCount(1);
+  await toggle.hover();
+  await expect(toggle).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await page.mouse.down();
+  await expect(toggle).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await page.mouse.up();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('tab-search').focus();
+  await page.keyboard.press('Tab'); // New
+  await page.keyboard.press('Tab'); // Import from project
+  await page.keyboard.press('Tab'); // Project history
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS('outline-style', 'solid');
+  await expect(toggle).toHaveCSS('outline-width', '2px');
+  await page.keyboard.press('Enter');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+});

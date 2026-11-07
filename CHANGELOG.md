@@ -28,6 +28,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ### Fixed
 
+- Project history uses a history icon and keeps its heading unboxed on hover and press. Keyboard focus remains visible.
+
 - Settings closes after a successful Save; failed saves preserve the form and show the error.
 
 - Finder keeps an opaque native surface on Hyprland so moving the mouse over it no longer makes the palette disappear.

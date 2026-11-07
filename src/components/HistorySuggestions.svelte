@@ -71,7 +71,7 @@
       data-testid="history-suggestions-toggle"
       onclick={() => (open = !open)}
     >
-      <span class="head-glyph" aria-hidden="true"><Icon name="sparkle" size={13} /></span>
+      <span class="head-glyph" aria-hidden="true"><Icon name="history" size={13} /></span>
       <span class="head-title" id="history-suggestions-title">Project history</span>
       {#if projects.length > 0}<span class="chip count">{projects.length} projects</span>{/if}
       <span class="spacer"></span>
@@ -193,10 +193,17 @@
     font-size: var(--text-sm);
     text-align: left;
   }
+  /* This is a section disclosure, not an action button. Keep pointer states unboxed;
+     the shared :focus-visible ring still marks keyboard focus. */
+  .head:hover:not(:disabled),
+  .head:active:not(:disabled) {
+    background: transparent;
+    border-color: transparent;
+  }
   .head-glyph {
     display: grid;
     place-items: center;
-    color: var(--accent);
+    color: var(--fg-muted);
   }
   .head-title {
     font-weight: 600;

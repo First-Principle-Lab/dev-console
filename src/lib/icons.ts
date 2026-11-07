@@ -21,6 +21,6 @@ export type IconName =
   | 'gear'
   | 'update'
   | 'project'
-  | 'sparkle'
+  | 'history'
   | 'close'
   | 'chevron';

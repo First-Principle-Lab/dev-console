@@ -111,3 +111,12 @@ notifying the library. Failed saves retain the form and show the error. Save is
 disabled while pending. The full browser suite passed 181 tests, including failure
 retention and successful-save dismissal. Svelte check, lint, 24 frontend unit tests,
 production build, Rust formatting, Clippy and the locked Rust suite also passed.
+
+## Project history heading
+
+The project history disclosure uses the existing Lucide History icon in a muted color,
+replacing the sparkle. Scoped hover and press styles keep the heading transparent
+instead of inheriting the global action-button fill. The keyboard focus ring remains
+visible and Enter still expands the section. All 182 browser tests passed, including
+pointer and keyboard coverage. Frozen install, Svelte check, lint, 24 frontend unit
+tests, production build and the existing Rust formatting, Clippy and test gates passed.
