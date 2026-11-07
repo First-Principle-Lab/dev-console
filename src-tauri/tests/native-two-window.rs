@@ -224,9 +224,14 @@ impl Harness {
                 dev_console_lib::ipc::copy_recovery_key,
                 dev_console_lib::ipc::open_library,
                 dev_console_lib::ipc::get_settings,
+                dev_console_lib::ipc::get_theme,
                 dev_console_lib::ipc::create_backup,
                 dev_console_lib::ipc::scan_project,
                 dev_console_lib::ipc::import_project,
+                dev_console_lib::ipc::environment_projects,
+                dev_console_lib::ipc::sync_environment,
+                dev_console_lib::ipc::set_environment_sync,
+                dev_console_lib::ipc::copy_environment,
             ])
             .build(mock_context(noop_assets()))
             .expect("mock app");
@@ -427,6 +432,18 @@ fn both_windows_see_the_same_commands_and_the_same_events() {
 #[test]
 fn privileged_operations_are_authorised_by_the_calling_window() {
     let h = Harness::new("two-window-permissions");
+    let initial_theme = h.state.settings.get().theme;
+    assert_eq!(
+        invoke(&h.finder, "get_theme", json!({})).unwrap(),
+        json!(initial_theme)
+    );
+    let mut changed_settings = h.state.settings.get();
+    changed_settings.theme = "omarchy-gruvbox".into();
+    h.state.settings.save(changed_settings).unwrap();
+    assert_eq!(
+        invoke(&h.finder, "get_theme", json!({})).unwrap(),
+        json!("omarchy-gruvbox")
+    );
     let created = h
         .save(&h.library, draft(Kind::Command, "Probe", "echo probe", ""))
         .expect("create through the library");
@@ -458,6 +475,13 @@ fn privileged_operations_are_authorised_by_the_calling_window() {
             "run_command",
             json!({ "request": { "id": id, "expectedRevision": 1, "approved": true } }),
         ),
+        ("environment_projects", json!({})),
+        ("sync_environment", json!({ "path": "/missing/project" })),
+        (
+            "set_environment_sync",
+            json!({ "root": "/missing/project", "enabled": true }),
+        ),
+        ("copy_environment", json!({ "id": "missing" })),
         ("get_settings", json!({})),
         ("create_backup", json!({})),
     ];

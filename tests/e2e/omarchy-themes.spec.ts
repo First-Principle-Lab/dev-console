@@ -93,3 +93,15 @@ for (const [slug, name] of OMARCHY_THEMES) {
     await page.screenshot({ path: path.join(OUT, `${slug}-finder.png`) });
   });
 }
+
+test('Finder loads the saved theme without access to full settings and follows changes', async ({ page }) => {
+  await boot(page, { ...SEED, settings: { theme: 'omarchy-gruvbox' } }, 'finder');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'omarchy-gruvbox');
+  await page.evaluate(() => window.__devConsoleEmit?.('theme-changed', 'light'));
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.evaluate(() => {
+    (window as unknown as { __mock: { state: { settings: { theme: string } } } }).__mock.state.settings.theme = 'omarchy-tokyo-night';
+    window.__devConsoleEmit?.('finder-shown', {});
+  });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'omarchy-tokyo-night');
+});

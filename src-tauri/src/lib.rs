@@ -6,6 +6,7 @@ pub mod clipboard;
 pub mod context;
 pub mod control;
 pub mod desktop_icons;
+pub mod environment;
 pub mod error;
 pub mod execution;
 pub mod history;
@@ -130,6 +131,10 @@ fn build(argv: Vec<String>) {
             }
             desktop_icons::refresh_for_appimage();
             clipboard::spawn_expiry_worker(Arc::clone(&state));
+            environment::spawn_sync_worker(Arc::clone(&state));
+            if project_history::refresh_installed_zsh_hook().is_err() {
+                eprintln!("dev-console: could not refresh the installed shell hook");
+            }
             control::serve(app.handle(), Arc::clone(&state));
             match intent {
                 Intent::Finder => windows::show_finder(app.handle())?,
@@ -162,6 +167,7 @@ fn build(argv: Vec<String>) {
             ipc::quit_app,
             ipc::restart_app,
             ipc::get_settings,
+            ipc::get_theme,
             ipc::history_suggestions,
             ipc::install_history_tracking,
             ipc::dismiss_suggestion,
@@ -180,7 +186,11 @@ fn build(argv: Vec<String>) {
             ipc::export_archive,
             ipc::import_archive,
             ipc::scan_project,
-            ipc::import_project
+            ipc::import_project,
+            ipc::environment_projects,
+            ipc::sync_environment,
+            ipc::set_environment_sync,
+            ipc::copy_environment
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

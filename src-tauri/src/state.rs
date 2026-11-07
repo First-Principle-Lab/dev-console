@@ -579,6 +579,7 @@ mod tests {
                 }
             }],
             usage: vec![],
+            environments: vec![],
         };
         Archive::new(
             vec![command(&format!("cmd-{tag}"), &format!("cmd-{tag}"))],

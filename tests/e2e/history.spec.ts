@@ -316,6 +316,7 @@ test('project history has an unboxed pointer state and a visible keyboard focus 
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.getByTestId('tab-search').focus();
   await page.keyboard.press('Tab'); // New
+  await page.keyboard.press('Tab'); // Environment
   await page.keyboard.press('Tab'); // Import from project
   await page.keyboard.press('Tab'); // Project history
   await expect(toggle).toBeFocused();

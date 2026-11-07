@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import ProjectEnvironment from '../components/ProjectEnvironment.svelte';
   import EntryList from '../components/EntryList.svelte';
   import HistorySuggestions from '../components/HistorySuggestions.svelte';
   import EntryDetails from '../components/EntryDetails.svelte';
@@ -32,6 +33,7 @@
   import { validateDraft } from '../lib/validation';
   import { checkForUpdates, installUpdate, updates } from '../lib/updates.svelte';
 
+  let environmentRoot = $state<string | null>(null);
   let app = $state<AppStateInfo | null>(null);
   let vault = $state<VaultState | null>(null);
   let tab = $state<Kind>('command');
@@ -578,6 +580,7 @@
         />
       </div>
       <Button variant="primary" icon="plus" onclick={startNew} data-testid="add-entry">New</Button>
+      <Button icon="lock" onclick={() => (environmentRoot = meta?.project?.root || '')} data-testid="open-environment">Environment</Button>
       <!-- Reading a project's own task definitions is the only way a repository's build steps
            become library entries, so it sits beside New rather than hidden in Settings. -->
       <Button
@@ -621,6 +624,12 @@
             : tab === 'secret'
               ? 'Add a secret and it will be encrypted with the vault key.'
               : 'Add a command and it will be searchable from the Finder.'}
+          onProjectOpen={(root) => {
+            if (vault?.unlocked) void api.syncEnvironment(root).catch(() => {
+              status = 'Environment sync failed. Open the project’s Environment section to retry and see the error.';
+            });
+          }}
+          onEnvironment={(root) => (environmentRoot = root)}
           onSelect={(entry) => void select(entry)}
           onCopy={(entry) => void copyEntry(entry)}
           onPin={(entry) => void togglePin(entry)}
@@ -802,6 +811,10 @@
   <ProjectImport ondone={finishProjectImport} />
 {/if}
 
+{#if environmentRoot !== null}
+  <ProjectEnvironment initialRoot={environmentRoot} onClose={() => (environmentRoot = null)} />
+{/if}
+
 {#if showSettings}
   <SettingsPanel onClose={() => (showSettings = false)} />
 {/if}
@@ -864,12 +877,13 @@
   }
   .tools {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--gap-sm);
   }
   .search {
     position: relative;
-    flex: 1;
+    flex: 1 1 180px;
     min-width: 0;
   }
   .search-icon {

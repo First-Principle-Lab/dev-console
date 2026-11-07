@@ -91,6 +91,7 @@ fn vault(previous: bool) -> VaultFile {
             value,
         )],
         usage: vec![],
+        environments: vec![],
     }
 }
 

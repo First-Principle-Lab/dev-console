@@ -1,5 +1,6 @@
 import type {
   AppStateInfo,
+  EnvironmentProject,
   CopyResult,
   EntryDetails,
   EntryDraft,
@@ -17,6 +18,7 @@ import type {
   RunResult,
   Settings,
   TerminalOption,
+  Theme,
   VaultState
 } from './models';
 
@@ -52,6 +54,10 @@ export interface ListRequest {
 }
 
 export const api = {
+  environmentProjects: (): Promise<EnvironmentProject[]> => call('environment_projects'),
+  syncEnvironment: (path: string): Promise<{ root: string; projects: EnvironmentProject[] }> => call('sync_environment', { path }),
+  setEnvironmentSync: (root: string, enabled: boolean): Promise<void> => call('set_environment_sync', { root, enabled }),
+  copyEnvironment: (id: string): Promise<CopyResult> => call('copy_environment', { id }),
   createBackup: (): Promise<string> => call('create_backup'),
   listBackups: (): Promise<BackupInfo[]> => call('list_backups'),
   restoreBackup: (name: string): Promise<BackupOutcome> => call('restore_backup', { name }),
@@ -92,6 +98,7 @@ export const api = {
   hideSelf: (): Promise<void> => call('hide_self'),
   allowClose: (): Promise<void> => call('allow_close'),
   quit: (): Promise<void> => call('quit_app'),
+  theme: (): Promise<Theme> => call('get_theme'),
   settings: (): Promise<Settings> => call('get_settings'),
   terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
   saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings }),

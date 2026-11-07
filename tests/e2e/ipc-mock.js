@@ -13,6 +13,7 @@
 
   const state = {
     backups: [],
+    environments: seed.environments || [],
     exportedPaths: [],
     commands: (seed.commands || []).map((c) => ({ value: '', ...c })),
     secrets: (seed.secrets || []).map((s) => ({ command: '', workingDirectory: '', ...s })),
@@ -635,7 +636,11 @@
     if (command === 'allow_close') { state.closes += 1; state.hidden.push('close'); return null; }
     if (command === 'cancel_quit') { return null; }
     if (command === 'quit_app') { state.quits += 1; return null; }
-    if (command === 'get_settings') return clone(state.settings);
+    if (command === 'get_theme') return state.settings.theme;
+    if (command === 'get_settings') {
+      if (location.hash.includes('view=finder')) throw new Error('not allowed to call finder');
+      return clone(state.settings);
+    }
     if (command === 'create_backup') {
       if (!state.vaultUnlocked || state.manualLock) throw new Error('the vault is locked');
       const name = `dev-console-backup-${state.backups.length + 1}.age`;
@@ -688,6 +693,25 @@
     if (command === 'import_archive') {
       if (!payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
       return { source: payload.path, commands: 2, secrets: 1 };
+    }
+    if (['environment_projects', 'sync_environment', 'set_environment_sync', 'copy_environment'].includes(command)) {
+      requireVault();
+      if (command === 'environment_projects') return clone(state.environments);
+      if (command === 'sync_environment') {
+        if (seed.environmentSyncError) throw new Error('Project folder is missing. Saved versions are kept.');
+        let project = state.environments.find((p) => p.root === payload.path);
+        if (!project) {
+          project = { root: payload.path, enabled: true, snapshots: [] };
+          state.environments.push(project);
+        }
+        return clone({ root: project.root, projects: state.environments });
+      }
+      if (command === 'set_environment_sync') {
+        state.environments.find((p) => p.root === payload.root).enabled = payload.enabled;
+        return;
+      }
+      state.copied.push({ kind: 'secret', id: payload.id, value: 'synthetic-env-file' });
+      return { expiresAtMs: Date.now() + 30000, excluded: true };
     }
     if (command === 'pick_project_folder') {
       if (seed.projectPickerError) throw new Error('Folder picker unavailable');
