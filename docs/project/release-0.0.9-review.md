@@ -70,3 +70,25 @@ picker failure cases. The final focused project-import suite passed all 31 tests
 check, ESLint, 24 frontend unit tests, production build, Rust formatting, Clippy and the
 locked Rust suite passed. Browser tests use a picker stub; the actual native chooser
 still needs the owner's desktop test. The running local dev app rebuilt successfully.
+
+## Native Hyprland hover repair
+
+On the owner's Hyprland 0.56.2, WebKitGTK 2.54.1 and NVIDIA 615 setup, Finder
+stayed mapped, visible and floating at 680×420 while its transparent native
+surface stopped painting. A region capture showed the windows behind it instead
+of Finder. Setting `transparent(false)` on the same running build restored the
+palette during pointer hover. The page background now matches the opaque shell.
+No compositor configuration was changed. The existing float/size/center rule and
+DMABUF renderer workaround remain in place.
+
+The corrected native build passed 20 open/dismiss cycles and 40 pointer-out/in
+body/footer paint checks using Hyprland client geometry and region captures. The
+library stayed tiled at its original position and size. Header focus and row hover
+colors were excluded from the paint probes because those are expected to change.
+Captures containing the owner's entry metadata were kept out of the repository.
+Native typing and keyboard activation remain for the owner's acceptance test.
+
+All 174 browser tests, 24 frontend unit tests, Svelte check, lint, production build,
+Rust formatting, Clippy and the locked Rust suite passed. AGENTS.md now records the
+opaque-surface requirement, earlier DMABUF workaround, compositor sizing rules and
+mandatory native hover checks for future Finder changes.
