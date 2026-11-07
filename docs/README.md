@@ -32,3 +32,9 @@ to test it, and how to tell it is complete.
 - [`PROGRESS.md`](project/PROGRESS.md): progress log
 - [`HANDOFF.md`](project/HANDOFF.md): handoff notes
 - [`CLOUD_AGENT_PROMPT.md`](project/CLOUD_AGENT_PROMPT.md): the original agent brief
+
+## reviews/
+
+- [`project-import-fixes.md`](reviews/project-import-fixes.md): project import review evidence
+
+The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9-review.md).

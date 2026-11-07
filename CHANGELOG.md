@@ -5,37 +5,31 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
-- **Suggestions from your shell history.** The Commands tab offers the most-used commands from your zsh, bash or fish history as starting points for a new entry, ranked by how often and how recently you ran them. Saving opens the normal editor prefilled, so nothing is written until you confirm, and each
-suggestion is a keyboard stop: `Tab` to the command, `Enter` saves it, `Delete` dismisses it. Dismissing one is remembered as a SHA-256 digest rather than the command (Settings → General brings dismissed ones back), the history file is opened only while the feature is on (Settings → General), and a line that looks like it carries a credential is never offered.
+## 0.0.9 — 2026-11-07
 
 ### Added
-- The Finder now works out which project the terminal it was opened from is sitting in, and lists
-  that project's commands first, marked with a folder. The palette names the project it ranked by;
-  `Ctrl+P` or clicking the name ignores it for that open. Only the focused-window read (well under
-  a millisecond) happens before the palette appears; the rest runs beside it. Off Hyprland the
-  palette is ordered exactly as before. Settings → Finder has a switch that skips the lookup
-  entirely, and then `/proc` is not read at all.
+
+- Finder project ranking uses the focused terminal's project, with a project chip,
+  `Ctrl+P` to ignore it, and a Settings switch to disable detection.
+- Shell history suggestions offer frequently used commands through the normal editor.
+  Credential filters run before display, and dismissals store only command digests.
+- Import selected tasks from package.json, Make, just and Docker Compose as commands
+  with the project's working directory and tag. Existing commands are skipped.
+- Documentation is organised under `docs/` with an index.
 
 ### Fixed
-- Project import now enforces the full `just` process deadline, validates Compose YAML,
-  follows Makefile precedence, skips Make variable blocks, expands home paths, reports missing
-  selections, and forwards the CLI `--all` flag. Review dialogs keep keyboard focus and their
-  confirmation buttons visible at the minimum window size.
 
-### Added
-- **Import from project.** A library action that reads the runnable tasks a project folder already
-  defines — `package.json` scripts (run through whichever package manager its lockfile names),
-  Makefile targets, `justfile` recipes and Docker Compose services — and saves the ones you tick as
-  commands that run in that folder, tagged `project:<name>`. Scanning and importing execute nothing
-  in the folder; a task the library already has is marked "Already saved" and left alone, so
-  scanning the same folder twice writes nothing new.
+- Project import quotes task names as literal shell arguments and replaces spaces in
+  generated entry names with dashes so imported commands can be edited.
+- Import review dialogs keep keyboard focus and confirmation buttons within reach.
+- The keyring harness selects its own provider test instead of running unrelated
+  ignored tests that require a compositor or the optional `just` executable.
 
 ## 0.0.8 — 2026-11-06
 
 ### Added
 - 22 Omarchy themes with immediate preview in Settings and an explicit Save action.
 - A selector for installed terminals, including Ghostty and Kitty, with a custom command option.
-
 - Command output and errors in the app, with separate copy buttons. Commands containing `sudo` open the selected terminal.
 - Copy, pin, and delete buttons on each library row. All app icons now use Lucide.
 

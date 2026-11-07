@@ -857,3 +857,32 @@ fn installed_just_dump_imports_only_public_recipes() {
     let again = h.import(&[], true).unwrap();
     assert_eq!((again.imported, again.duplicates), (0, 1));
 }
+
+#[test]
+fn imported_task_names_are_literal_shell_arguments() {
+    for name in [
+        "dev server",
+        "test; echo injected",
+        "test$(printf injected)",
+        "it's-a-task",
+    ] {
+        let definition = serde_json::json!({"scripts": {name: "echo task"}}).to_string();
+        let h = Harness::new("Dev Console", &[(PACKAGE_JSON, &definition)]);
+        let scanned = h.scan();
+        let command = &scanned.candidates[0].command;
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!("npm() {{ printf '%s\\n' \"$@\"; }}; {command}"))
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("run\n{name}\n")
+        );
+        assert!(!scanned.candidates[0].name.chars().any(char::is_whitespace));
+        assert_eq!(h.import(&[], true).unwrap().imported, 1);
+    }
+    assert_eq!(task_argument("--help"), "-- --help");
+    assert_eq!(task_argument("test:e2e"), "test:e2e");
+}

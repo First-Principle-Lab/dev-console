@@ -174,7 +174,10 @@ pub fn scan(path: &str, repo: &Repository) -> AppResult<ProjectScan> {
     let mut taken: BTreeSet<String> = BTreeSet::new();
     let mut candidates = Vec::with_capacity(tasks.len());
     for t in tasks {
-        let base = format!("{project}{NAME_SEPARATOR}{}", t.task);
+        let base = format!("{project}{NAME_SEPARATOR}{}", t.task)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join("-");
         let already_imported = saved.contains(&(t.command.clone(), working_directory.clone()));
         candidates.push(Candidate {
             source: t.source,
@@ -419,6 +422,24 @@ fn package_manager(dir: &Path) -> &'static str {
     "npm"
 }
 
+/// Keep a task name one literal shell argument when the saved command runs through `/bin/sh`.
+fn task_argument(name: &str) -> String {
+    let quoted = if !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_-.:/".contains(c))
+    {
+        name.to_string()
+    } else {
+        format!("'{}'", name.replace('\'', "'\"'\"'"))
+    };
+    if name.starts_with('-') {
+        format!("-- {quoted}")
+    } else {
+        quoted
+    }
+}
+
 /// `<pm> run <script>` for every script except npm's own lifecycle hooks.
 fn package_json_tasks(dir: &Path) -> AppResult<Vec<Task>> {
     let Some(raw) = read_definition(dir, PACKAGE_JSON)? else {
@@ -441,7 +462,7 @@ fn package_json_tasks(dir: &Path) -> AppResult<Vec<Task>> {
             Source::Npm,
             manager,
             name.clone(),
-            format!("{manager} run {name}"),
+            format!("{manager} run {}", task_argument(name)),
             format!("package.json script: {body}"),
         ));
     }
@@ -484,7 +505,7 @@ fn makefile_tasks(dir: &Path) -> AppResult<Vec<Task>> {
                 Source::Make,
                 "make",
                 target.clone(),
-                format!("make {target}"),
+                format!("make {}", task_argument(&target)),
                 help,
             )
         })
@@ -596,7 +617,7 @@ fn justfile_tasks(dir: &Path) -> AppResult<Vec<Task>> {
                 Source::Just,
                 "just",
                 recipe.clone(),
-                format!("just {recipe}"),
+                format!("just {}", task_argument(&recipe)),
                 doc,
             )
         })
