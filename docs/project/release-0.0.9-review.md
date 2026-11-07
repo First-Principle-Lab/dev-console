@@ -120,3 +120,13 @@ instead of inheriting the global action-button fill. The keyboard focus ring rem
 visible and Enter still expands the section. All 182 browser tests passed, including
 pointer and keyboard coverage. Frozen install, Svelte check, lint, 24 frontend unit
 tests, production build and the existing Rust formatting, Clippy and test gates passed.
+
+## Final release preparation
+
+The 0.0.9 changelog is consolidated and Unreleased is empty. The public repository
+has TAURI_SIGNING_PRIVATE_KEY configured, and verify gates publication on frontend,
+backend, harnesses and build success. The next published tag is v0.0.9 while v0.0.8
+remains latest. The workflow publishes Dev-Console.AppImage, its signature and latest.json.
+Main is already an ancestor of dev, so the pre-promotion main sync requires no merge.
+The release PR remains the dev-to-main PR #26. Final-head GitHub checks must pass
+before merging it. Preparing this PR does not itself publish the release.

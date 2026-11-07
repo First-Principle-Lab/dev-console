@@ -9,36 +9,21 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ### Added
 
-- Saved commands are grouped under collapsible project headings instead of one flat sidebar.
-  The command editor can assign a project folder with Browse.
-- History suggestions show the five busiest recorded projects, each with up to five useful
-  commands and its own execution counts. Saving keeps the original working folder.
-- Local zsh integration records project/folder context before execution while the app is
-  running. Routine launchers and potential credentials are filtered before storage.
-
-- Project import has a Browse button that opens the native folder picker and scans the selected folder.
-
-- Finder project ranking uses the focused terminal's project, with a project chip,
-  `Ctrl+P` to ignore it, and a Settings switch to disable detection.
-- Shell history suggestions offer frequently used commands through the normal editor.
-  Credential filters run before display, and dismissals store only command digests.
-- Import selected tasks from package.json, Make, just and Docker Compose as commands
-  with the project's working directory and tag. Existing commands are skipped.
-- Documentation is organised under `docs/` with an index.
+- Collapsible project groups for saved commands. Assign or move a command with the editor's project-folder picker.
+- History recommendations for the five busiest recorded projects, with up to five commands each and separate counts per working folder.
+- Local zsh tracking through **Enable project tracking for zsh**. Open a new terminal after setup. Existing history is not backfilled.
+- Import selected package.json, Make, just and Docker Compose tasks through **Import from project** and its native folder picker.
+- Finder ranks commands for the focused terminal's project. Its project chip and `Ctrl+P` let you ignore that context.
+- A documentation index and organised `docs/` subfolders.
 
 ### Fixed
 
-- Project history uses a history icon and keeps its heading unboxed on hover and press. Keyboard focus remains visible.
-
-- Settings closes after a successful Save; failed saves preserve the form and show the error.
-
-- Finder keeps an opaque native surface on Hyprland so moving the mouse over it no longer makes the palette disappear.
-
-- Project import quotes task names as literal shell arguments and replaces spaces in
-  generated entry names with dashes so imported commands can be edited.
-- Import review dialogs keep keyboard focus and confirmation buttons within reach.
-- The keyring harness selects its own provider test instead of running unrelated
-  ignored tests that require a compositor or the optional `just` executable.
+- Finder stays painted when hovered on Hyprland by using an opaque native surface.
+- Settings closes after a successful save. Failed saves retain your changes and show the error.
+- Project history uses a history icon and a quiet heading hover, with visible keyboard focus.
+- Imported task names are quoted safely, and generated command names use dashes for spaces.
+- Import dialogs keep keyboard focus and their confirmation buttons visible at small window sizes.
+- Keyring verification runs its own provider test without requiring unrelated optional tools.
 
 ## 0.0.8 — 2026-11-06
 
