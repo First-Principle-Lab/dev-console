@@ -111,6 +111,8 @@ test('Settings loads in a locked profile and a general setting can still be chan
       .state.settings.clipboardExpirySeconds
   );
   expect(stored).toBe(45);
+  await expect(page.getByTestId('settings-panel')).toHaveCount(0);
+  await page.getByTestId('settings').click();
 
   // While locked there is no secret count to show, but the command count is still there.
   await page.getByTestId('import-path').fill('/tmp/portable.age');
@@ -235,7 +237,7 @@ test('Settings lists installed terminals and saves the selected launch command',
   await page.getByTestId('save-settings').click();
   const stored = await page.evaluate(() => (window as unknown as { __mock: { state: { settings: { terminal: string[] } } } }).__mock.state.settings.terminal);
   expect(stored).toEqual(['/usr/bin/kitty', '--']);
-  await page.getByTestId('close-settings').click();
+  await expect(page.getByTestId('settings-panel')).toHaveCount(0);
   await page.getByTestId('settings').click();
   await expect(page.getByTestId('terminal-choice')).toHaveValue('kitty');
 });
@@ -257,6 +259,8 @@ test('Settings offers the project ranking switch and stores it', async ({ page }
   await toggle.uncheck();
   await page.getByTestId('save-settings').click();
   expect(await storedSetting(page, 'projectContextEnabled')).toBe(false);
+  await expect(page.getByTestId('settings-panel')).toHaveCount(0);
+  await page.getByTestId('settings').click();
   await page.getByTestId('project-context').check();
   await page.getByTestId('save-settings').click();
   expect(await storedSetting(page, 'projectContextEnabled')).toBe(true);
@@ -270,3 +274,16 @@ function storedSetting(page: Page, key: string): Promise<unknown> {
     key
   );
 }
+
+
+test('a failed settings save stays open with the changed value and error', async ({ page }) => {
+  await boot(page, { ...SEED, settingsSaveError: 'Could not write settings' });
+  await page.getByTestId('settings').click();
+  await page.getByTestId('clipboard-expiry').fill('45');
+  await page.getByTestId('save-settings').click();
+  await expect(page.getByTestId('settings-panel')).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Could not write settings');
+  await expect(page.getByTestId('clipboard-expiry')).toHaveValue('45');
+  await expect(page.getByTestId('save-settings')).toBeEnabled();
+  expect(await storedSetting(page, 'clipboardExpirySeconds')).toBe(30);
+});

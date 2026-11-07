@@ -37,7 +37,7 @@ test('theme choices preview immediately and Save keeps the choice', async ({ pag
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'omarchy-tokyo-night');
   const stored = await page.evaluate(() => (window as unknown as { __mock: { state: { settings: { theme: string } } } }).__mock.state.settings.theme);
   expect(stored).toBe('omarchy-tokyo-night');
-  await page.getByTestId('close-settings').click();
+  await expect(page.getByTestId('settings-panel')).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'omarchy-tokyo-night');
   await page.getByTestId('settings').click();
   await expect(page.getByLabel('Theme')).toHaveValue('omarchy-tokyo-night');

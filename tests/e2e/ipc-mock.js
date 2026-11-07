@@ -765,7 +765,10 @@
       return clone(outcome);
     }
     if (command === 'list_terminals') return clone(state.terminals);
-    if (command === 'save_settings') { state.settings = clone(payload.settings); return clone(state.settings); }
+    if (command === 'save_settings') {
+      if (seed.settingsSaveError) throw new Error(seed.settingsSaveError);
+      state.settings = clone(payload.settings); return clone(state.settings);
+    }
     throw new Error(`unmocked command ${command}`);
   }
 

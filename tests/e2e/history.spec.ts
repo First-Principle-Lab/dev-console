@@ -161,7 +161,7 @@ test('turning the setting off in Settings hides the panel without a reload', asy
   await page.getByTestId('settings').click();
   await page.getByTestId('history-suggestions-setting').uncheck();
   await page.getByTestId('save-settings').click();
-  await page.getByTestId('close-settings').click();
+  await expect(page.getByTestId('settings-panel')).toHaveCount(0);
 
   await expect(page.getByTestId('history-suggestions')).toHaveCount(0);
   const stored = await page.evaluate(

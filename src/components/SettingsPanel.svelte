@@ -29,7 +29,7 @@
   // null means "not readable": a locked vault reports no secret count at all rather than 0.
   let currentSecrets = $state<number | null>(null);
   let error = $state<string | null>(null);
-  let saved = $state(false);
+  let saving = $state(false);
   let savedTheme: Theme | null = null;
 
   let backups = $state<BackupInfo[]>([]);
@@ -217,7 +217,6 @@
     terminalChoice = id;
     const terminal = terminals.find((option) => option.id === id);
     if (terminal) setTerminal(formatArgv(terminal.command));
-    saved = false;
   }
 
   function matchesTerminal(command: string[], option: TerminalOption): boolean {
@@ -297,21 +296,23 @@
     if (!settings) return;
     settings.theme = theme;
     applyTheme(theme);
-    saved = false;
   }
 
   async function save(): Promise<void> {
-    if (!settings || terminalError) return;
+    if (!settings || terminalError || saving) return;
     error = null;
+    saving = true;
     try {
       settings = await api.saveSettings(settings);
       savedTheme = settings.theme;
       applyTheme(settings.theme);
-      saved = true;
       // The library reacts to what was switched: suggestion panel, and nothing else it caches.
       emitLocal('settings-saved', settings);
+      onClose();
     } catch (problem: unknown) {
       error = String(problem);
+    } finally {
+      saving = false;
     }
   }
 
@@ -647,13 +648,12 @@
       {#if backupMessage}<p class="muted" role="status" data-testid="backup-message">{backupMessage}</p>{/if}
       {#if backupError}<p class="error-banner" role="alert" data-testid="backup-error">{backupError}</p>{/if}
       {#if error}<p class="error-banner" role="alert">{error}</p>{/if}
-      {#if saved}<p class="muted" role="status">Saved.</p>{/if}
     </div>
 
     <footer class="foot">
       <span class="spacer"></span>
-      <button onclick={() => void save()} data-variant="primary" data-testid="save-settings" disabled={Boolean(terminalError)}>
-        Save
+      <button onclick={() => void save()} data-variant="primary" data-testid="save-settings" disabled={saving || Boolean(terminalError)} aria-busy={saving}>
+        {saving ? 'Saving…' : 'Save'}
       </button>
     </footer>
   </div>

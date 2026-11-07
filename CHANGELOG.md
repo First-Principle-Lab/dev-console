@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+
+- Settings closes after a successful Save; failed saves preserve the form and show the error.
+
 ## 0.0.9 — 2026-11-07
 
 ### Added
