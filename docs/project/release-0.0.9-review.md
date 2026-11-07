@@ -92,3 +92,14 @@ All 174 browser tests, 24 frontend unit tests, Svelte check, lint, production bu
 Rust formatting, Clippy and the locked Rust suite passed. AGENTS.md now records the
 opaque-surface requirement, earlier DMABUF workaround, compositor sizing rules and
 mandatory native hover checks for future Finder changes.
+
+## Project-based library and recommendations
+
+The owner's follow-up replaces global history suggestions with per-project recording
+and groups the command sidebar by canonical project root. The command editor now
+assigns project folders. Details, limits, privacy behavior, source-hook setup and
+validation are in [project-command-groups.md](project-command-groups.md). The zsh
+integration is installed locally; counts start in new terminals, with no inferred
+backfill from cwd-less history. The full browser gate passed 180 tests and the final
+history/project layout passed 19 focused tests. Rust passed 168 library tests and
+nine integration tests. Fourteen environment-dependent tests remain ignored by default.

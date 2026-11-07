@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.9 — 2026-11-07
+
 ### Added
 
 - Saved commands are grouped under collapsible project headings instead of one flat sidebar.
@@ -13,10 +15,6 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
   commands and its own execution counts. Saving keeps the original working folder.
 - Local zsh integration records project/folder context before execution while the app is
   running. Routine launchers and potential credentials are filtered before storage.
-
-## 0.0.9 — 2026-11-07
-
-### Added
 
 - Project import has a Browse button that opens the native folder picker and scans the selected folder.
 
