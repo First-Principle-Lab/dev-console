@@ -5,7 +5,7 @@
   import { api } from '../lib/api';
   import { on } from '../lib/events';
   import { displayedQuery, nextSelection, selected, shouldCommit, tabCompletion } from '../lib/finder-state';
-  import type { Kind, SearchResult, VaultState } from '../lib/models';
+  import type { FinderContext, Kind, SearchResult, VaultState } from '../lib/models';
 
   const UNLOCK_ID = '__unlock_vault__';
 
@@ -19,6 +19,11 @@
   let status = $state<string | null>(null);
   let loading = $state(false);
   let requestId = 0;
+  /**
+   * The project the terminal the palette was opened from is in, once the backend has worked it
+   * out. `null` means no chip and the ranking every version of this app had.
+   */
+  let context = $state<FinderContext | null>(null);
 
   const rows = $derived<SearchResult[]>(
     vault && !vault.unlocked
@@ -33,7 +38,9 @@
             description: '',
             pinned: false,
             usageCount: 0,
-            lastUsedAt: null
+            lastUsedAt: null,
+            // The unlock prompt is not a command; it belongs to no project.
+            inContext: false
           }
         ]
       : results
@@ -128,6 +135,23 @@
     await api.hideSelf();
   }
 
+  /**
+   * Ignores the detected project for as long as this palette stays open: the chip goes, and the
+   * next search is ranked the way it would have been with no project at all. The next open looks
+   * again, so this is never a setting - it is "not this time".
+   */
+  async function ignoreContext(): Promise<void> {
+    context = null;
+    // A new order, so a new first row: keeping the old selection would leave it mid-list.
+    selectedId = null;
+    try {
+      await api.clearFinderContext();
+    } catch {
+      // The chip is already gone locally; the backend simply still has the context for this open.
+    }
+    await runSearch(query);
+  }
+
   async function hide(): Promise<void> {
     requestId += 1;
     query = '';
@@ -176,6 +200,10 @@
         if (event.ctrlKey && event.key.toLowerCase() === 'o') {
           event.preventDefault();
           await openDetails();
+        } else if (event.ctrlKey && event.key.toLowerCase() === 'p' && context) {
+          // Ctrl+P: "rank everything, not just this project's".
+          event.preventDefault();
+          await ignoreContext();
         }
     }
   }
@@ -195,12 +223,27 @@
       }),
       on('entries-changed', () => {
         void runSearch(query).catch(() => undefined);
+      }),
+      // Detection runs beside the palette, so it usually lands a frame after the first search.
+      // Re-searching when it does is what puts the rows in the order the chip promises.
+      on<FinderContext | null>('finder-context', (payload) => {
+        const next = payload ?? null;
+        if (next?.root === context?.root && next?.name === context?.name) return;
+        context = next;
+        // The first search usually ran before this arrived and selected its own top row. The
+        // project's commands now lead, so the selection starts again at the top: Enter straight
+        // after Super+F must copy the first project command, not whatever led a moment ago.
+        selectedId = null;
+        void runSearch(query).catch(() => undefined);
       })
     ];
     void api
       .appState()
       .then((state) => {
         vault = state.vault;
+        // A palette created after detection answered (a slow webview, a re-shown window) still
+        // needs to know what it is ranking by.
+        context = state.finderContext ?? null;
         return runSearch('');
       })
       .catch((problem: unknown) => (error = message(problem, 'Backend unavailable.')))
@@ -236,6 +279,19 @@
           data-testid="finder-input"
         />
       </div>
+      {#if context}
+        <button
+          type="button"
+          class="project-chip"
+          onclick={() => void ignoreContext()}
+          title={`${context.name} — its commands are ranked first. Click, or press Ctrl+P, to ignore that.`}
+          aria-label={`Ranking the project ${context.name} first. Activate to ignore it.`}
+          data-testid="finder-context"
+        >
+          <Icon name="project" size={12} />
+          <span class="project-name">{context.name}</span>
+        </button>
+      {/if}
       {#if vault}
         <span class="vaultchip" data-tone={vault.unlocked ? 'ok' : 'warn'} data-testid="finder-vault">
           <Icon name={vault.unlocked ? 'unlock' : 'lock'} size={12} />
@@ -278,6 +334,17 @@
             {/if}
           </span>
           <span class="trail">
+            {#if row.inContext}
+              <span
+                class="in-project"
+                role="img"
+                aria-label={`in ${context?.name ?? 'the current project'}`}
+                title={`in ${context?.name ?? 'the current project'}`}
+                data-testid="row-in-project"
+              >
+                <Icon name="project" size={11} />
+              </span>
+            {/if}
             {#if row.id === selectedId}
               <span data-testid="row-action" aria-hidden="true"><Keycap keys={['Enter']} /></span>
             {/if}
@@ -415,6 +482,41 @@
   }
   .vaultchip[data-tone='warn'] {
     color: var(--warn);
+  }
+  /* The project chip is a button because dismissing it is an action, but it reads as part of the
+     search line: same height and type as the vault chip beside it, no button chrome. */
+  .project-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-tags);
+    min-width: 0;
+    max-width: 40%;
+    padding: var(--gap-xs) var(--sp-2);
+    border: var(--border-hair);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--fg-dim);
+    font-size: var(--text-row-meta);
+    font-family: var(--font-ui);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      color var(--transition),
+      border-color var(--transition);
+  }
+  .project-chip:hover,
+  .project-chip:focus-visible {
+    color: var(--fg-muted);
+    border-color: var(--line-strong);
+  }
+  .project-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .in-project {
+    display: grid;
+    place-items: center;
+    color: var(--fg-dim);
   }
   .results {
     list-style: none;

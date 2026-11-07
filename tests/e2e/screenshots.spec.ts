@@ -12,7 +12,7 @@ import { boot } from './helpers';
  *   SHOT_SET=before           # historical pre-token set, frozen: artifacts/ui-review/before/
  *   SHOT_SET=after            # previous review set, frozen: artifacts/ui-review/after/
  *   SHOT_SET=native           # written by the native smoke session, not by this file
- *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/raycast-ui-research-2026-11-02.md)
+ *   SHOT_SET=raycast-baseline # untouched UI before the Raycast-inspired pass (docs/design/raycast-ui-research-2026-11-02.md)
  *   SHOT_SET=raycast-after    # the redesigned UI
  *
  * `before`, `after` and `native` stay on disk untouched: they are the review record for earlier
@@ -28,7 +28,7 @@ import { boot } from './helpers';
 // `before`, `after` and `native` are frozen review records for earlier work, so the default is no
 // longer `after`: a plain `bunx playwright test` (which is what `scripts/verify.sh` runs) would
 // otherwise overwrite 41 tracked PNGs with whatever this machine's font rendering produces.
-// docs/raycast-ui-research-2026-11-02.md owns the capture protocol.
+// docs/design/raycast-ui-research-2026-11-02.md owns the capture protocol.
 const SET = process.env.SHOT_SET ?? 'raycast-after';
 const OUT_DIR = path.join(import.meta.dirname, '..', '..', 'artifacts', 'ui-review', SET);
 const HTML_DIR = path.join(import.meta.dirname, '..', '..', 'test-results', 'screenshots', SET);
@@ -82,6 +82,39 @@ test('finder at the real palette size (680x420)', async ({ page }) => {
   await boot(page, SEED, 'finder');
   await capture(page, '13-finder-palette-680x420', 680, 420);
 });
+
+// The chip is muted text on a hairline border, which is exactly what a theme can wash out, so it is
+// reviewed in a dark, a light and two Omarchy palettes. Dark keeps the original file name.
+const CONTEXT_THEMES = [
+  ['dark', ''],
+  ['light', '-light'],
+  ['omarchy-tokyo-night', '-tokyo-night'],
+  ['omarchy-catppuccin-latte', '-catppuccin-latte']
+] as const;
+
+for (const [theme, suffix] of CONTEXT_THEMES) {
+  test(`finder with a detected project, at the real palette size (${theme})`, async ({ page }) => {
+    // The chip and the row markers share the search line and the row's action area with the vault
+    // chip and the Enter keycap, so this is the state where they would collide.
+    const seed = {
+      ...SEED,
+      context: { root: '/home/mock/src/api', name: 'api' },
+      settings: {
+        theme, autostart: false, clipboardExpirySeconds: 30,
+        terminal: ['x-terminal-emulator', '-e'], projectContextEnabled: true
+      }
+    };
+    await boot(page, seed, 'finder');
+    // A review PNG of the palette without its chip would be worthless, so the state is asserted
+    // rather than trusted: the chip names the project, and the one command saved inside it is marked.
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect(page.getByTestId('finder-context')).toHaveText('api');
+    await expect(page.getByTestId('row-in-project')).toHaveCount(1);
+    await expect(page.getByRole('img', { name: 'in api' })).toHaveCount(1);
+    await capture(page, `18-finder-project-context${suffix}`, 680, 420);
+    await expect(page.getByTestId('finder-context'), 'after capture').toHaveText('api');
+  });
+}
 
 test('library with a long name and long values (overflow check)', async ({ page }) => {
   await boot(page, LONG);

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { boot } from './helpers';
 
@@ -246,3 +246,27 @@ test('an unbalanced quote blocks saving the terminal setting', async ({ page }) 
   await expect(page.getByTestId('terminal-error')).toContainText('unbalanced');
   await expect(page.getByTestId('save-settings')).toBeDisabled();
 });
+
+test('Settings offers the project ranking switch and stores it', async ({ page }) => {
+  await boot(page, SEED);
+  await page.getByTestId('settings').click();
+  await page.getByTestId('settings-panel').waitFor();
+  const toggle = page.getByTestId('project-context');
+  await expect(toggle).toBeChecked();
+  await expect(page.getByTestId('project-context-detail')).toContainText('/proc');
+  await toggle.uncheck();
+  await page.getByTestId('save-settings').click();
+  expect(await storedSetting(page, 'projectContextEnabled')).toBe(false);
+  await page.getByTestId('project-context').check();
+  await page.getByTestId('save-settings').click();
+  expect(await storedSetting(page, 'projectContextEnabled')).toBe(true);
+});
+
+function storedSetting(page: Page, key: string): Promise<unknown> {
+  return page.evaluate(
+    (name) =>
+      (window as unknown as { __mock: { state: { settings: Record<string, unknown> } } })
+        .__mock.state.settings[name],
+    key
+  );
+}

@@ -14,7 +14,7 @@
    identical; tests/unit/design-tokens.test.ts fails the build if a token is
    added to one and not the other.
 
-   Raycast-inspired pass (docs/raycast-ui-redesign.md): the shell (the floating
+   Raycast-inspired pass (docs/design/raycast-ui-redesign.md): the shell (the floating
    window frame), the search line, the selected row band and the material layer
    each get their own tokens instead of borrowing control tokens, so a reviewer
    can retune the redesign from this file alone. Every value here is a Dev
@@ -304,7 +304,7 @@
    compositor that supports it, none of which this repo can prove on Linux, so
    this file paints no page-level blur at all: every surface is a shaded opaque
    fill, and no rule anywhere under src/ sets a CSS blur filter. The two material
-   tokens below exist so the native prototype (docs/raycast-ui-redesign.md
+   tokens below exist so the native prototype (docs/design/raycast-ui-redesign.md
    "Native material outcome") has one place to switch: `data-transparency="on"`
    supplies the tint and a candidate blur radius, `"off"` and the OS
    reduced-transparency preference force the opaque values back. Until a capture

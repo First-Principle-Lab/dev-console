@@ -428,6 +428,23 @@
             {/if}
           </p>
         </section>
+
+        <section aria-label="Finder">
+          <h4>Finder</h4>
+          <label class="row">
+            <input
+              type="checkbox"
+              bind:checked={settings.projectContextEnabled}
+              data-testid="project-context"
+            />
+            <span>Rank the project I was just working in first</span>
+          </label>
+          <p class="muted detail" data-testid="project-context-detail">
+            From the focused terminal window, Dev Console works out which repository the shell is in
+            and lists its commands first, marked with a folder. Off, it never asks the compositor
+            what is focused and never reads <code class="mono">/proc</code> at all.
+          </p>
+        </section>
       {:else}
         <p class="muted">Loading…</p>
       {/if}

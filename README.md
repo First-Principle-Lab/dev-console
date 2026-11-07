@@ -20,6 +20,19 @@ name inline, `↑`/`↓` move the selection, `Enter` copies the value, `Ctrl+O` 
 library, `Esc` dismisses. Everything is reachable from the keyboard, and the list keeps proper
 combobox/listbox semantics.
 
+**Project context** — when the Finder opens, Dev Console asks the compositor which window had
+focus (before the palette takes it), follows that window to the shell it started, and reads the
+folder that shell is sitting in. Commands saved with a working directory inside that project — or
+tagged `project:<name>` — are listed first and marked with a folder icon, and the palette names the
+project it is ranking by. `Ctrl+P`, or clicking that name, ignores it for this open; Settings →
+Finder turns it off entirely, and then neither the compositor nor `/proc` is read. Nothing is
+written to disk. On a desktop other than Hyprland (where focus is unreadable without a compositor
+API) the palette is exactly what it has always been: no chip, no marks, the old ordering.
+
+Which shell counts: when one terminal has several tabs or windows, the one whose folder the window
+title shows, else the newest. Any focused app with a shell under it counts, so an editor's built-in
+terminal does too. Under tmux, the folder is the one tmux was started from, not the pane's.
+
 **Vault** — secrets are masked everywhere by default. A manual lock is persistent: it survives
 restarting the app, and *only* a verified system authentication (polkit) can clear it. An unlock
 never clears the lock unless the vault actually decrypted.
@@ -73,7 +86,7 @@ warnings denied, the Rust test suite, plus the environment-dependent harnesses:
 | `scripts/smoke-native.sh <binary>` | the compiled app: control socket, single instance, lock survives restart, private files | exit 77 = UNVERIFIED |
 
 Each harness exits **77** when its environment is missing; that is reported as UNVERIFIED and never
-silently converted into a pass. `TEST_REPORT.md` records which acceptance criteria are proven, where,
+silently converted into a pass. `docs/project/TEST_REPORT.md` records which acceptance criteria are proven, where,
 and what is still open.
 
 ## Continuous integration
@@ -99,7 +112,7 @@ These are **UI-shell** checks: the browser preview cannot reach native IPC, so t
 documented IPC test double; the native binary is exercised separately by `scripts/smoke-native.sh`.
 
 `raycast-baseline/` and `raycast-after/` are the before/after pair for the Raycast-inspired pass
-(`docs/raycast-ui-redesign.md`, `docs/raycast-ui-research-2026-11-02.md`); the baseline set is 41
+(`docs/design/raycast-ui-redesign.md`, `docs/design/raycast-ui-research-2026-11-02.md`); the baseline set is 41
 PNGs and the redesign set 42 - the extra one, `17-library-minimum-window`, is the state the visual
 pass needed and the old grid did not have (the smallest real library window, one pane, action area
 on screen). Every other filename is shared, so `diff` between the two directory listings names the
@@ -127,7 +140,7 @@ release binary under Xvfb (`scripts/native-capture.sh`): library and palette ove
 busy X11 background, in both themes, with pixel probes proving the opaque shell never bleeds the
 background through, keeps square window corners, maps without a flash frame and does not repaint
 at rest. Wayland/Hyprland compositor blur cannot be exercised here and stays a manual checklist
-in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
+in `docs/design/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque shell, not glass.
 
 ## Keyboard
 
@@ -135,7 +148,7 @@ in `docs/raycast-ui-research-2026-11-02.md`; the shipped material is an opaque s
 | --- | --- |
 | Desktop | `Super+F` Finder (configured in your compositor, see below) |
 | Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
-| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Esc` close |
+| Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Ctrl+P` ignore the detected project, `Esc` close |
 
 ## Desktop integration (Hyprland and other Wayland compositors)
 
@@ -182,7 +195,7 @@ makepkg -si                     # in packaging/arch (builds from the tagged sour
 For AUR use the same PKGBUILD with `source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")`.
 On other distributions `sudo PREFIX=/usr/local bash packaging/install.sh` installs the same
 file set (and writes an uninstall manifest, so `sudo PREFIX=/usr/local bash packaging/install.sh uninstall` removes
-exactly what it placed). See `docs/packaging.md`.
+exactly what it placed). See `docs/packaging/packaging.md`.
 
 ## Layout
 
@@ -196,12 +209,12 @@ src-tauri/src/       Rust: repository (SQLite), vault (age), keyring, auth (polk
 src-tauri/tests/     native backend integration tests (no test doubles)
 scripts/             verification harnesses (each exits 77 when the environment is missing)
 packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD
-docs/                packaging and desktop-integration notes
+docs/                every other Markdown file, in subfolders (see docs/README.md)
 artifacts/ui-review/ before/after screenshot grid
 ```
 
 ## Status
 
-`TEST_REPORT.md` is the authoritative verdict per acceptance criterion: what is proven by an
+`docs/project/TEST_REPORT.md` is the authoritative verdict per acceptance criterion: what is proven by an
 executed test, what is only UI-shell covered, and what remains unverified in a headless container.
 Items are never marked passed without a run behind them.

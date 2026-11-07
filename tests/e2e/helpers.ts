@@ -27,6 +27,9 @@ export function mockState(page: Page): Promise<{
   opened: unknown[];
   runs: unknown[];
   manualLock: boolean;
+  /** The double's stand-in for the detected project: `null` once it has been dismissed. */
+  context: { root: string; name: string } | null;
+  settings: { projectContextEnabled?: boolean } & Record<string, unknown>;
 }> {
   return page.evaluate(() => (window as never as { __mock: { state: never } }).__mock.state);
 }
