@@ -5,13 +5,11 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
-### Added
-
-- Project import has a Browse button that opens the native folder picker and scans the selected folder.
-
 ## 0.0.9 — 2026-11-07
 
 ### Added
+
+- Project import has a Browse button that opens the native folder picker and scans the selected folder.
 
 - Finder project ranking uses the focused terminal's project, with a project chip,
   `Ctrl+P` to ignore it, and a Settings switch to disable detection.

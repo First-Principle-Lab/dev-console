@@ -57,3 +57,16 @@ of this batch, so merging main into the candidate required no additional merge c
 GitHub verification must be green before merge. Merging the promotion PR publishes
 0.0.9 through the existing workflow. No release is claimed until the main verification
 and publish jobs pass and all three signed updater assets are present.
+
+## Folder picker follow-up
+
+Project import now has a Browse action using the Tauri dialog plugin, with directory
+selection enabled and the open-dialog capability granted only to the library window.
+Choosing a folder fills its path and scans it; cancelling preserves the reviewed tasks.
+Manual path entry remains available. No commands are imported until confirmation.
+
+After this change, all 174 browser tests passed, including selection, cancellation and
+picker failure cases. The final focused project-import suite passed all 31 tests. Svelte
+check, ESLint, 24 frontend unit tests, production build, Rust formatting, Clippy and the
+locked Rust suite passed. Browser tests use a picker stub; the actual native chooser
+still needs the owner's desktop test. The running local dev app rebuilt successfully.
