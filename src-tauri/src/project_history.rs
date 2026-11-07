@@ -200,11 +200,17 @@ impl ProjectHistory {
     }
 }
 
-pub fn install_zsh_hook() -> AppResult<String> {
-    let shell = std::env::var("SHELL").unwrap_or_default();
-    if !shell.ends_with("/zsh") {
-        return Err(AppError::Validation("Automatic project tracking currently supports zsh. Set up the zsh hook from a zsh session.".into()));
+pub fn refresh_installed_zsh_hook() -> AppResult<()> {
+    if crate::paths::config_dir()?
+        .join("shell-history.zsh")
+        .exists()
+    {
+        write_zsh_hook()?;
     }
+    Ok(())
+}
+
+fn write_zsh_hook() -> AppResult<PathBuf> {
     let config = crate::paths::ensure_dir(&crate::paths::config_dir()?)?;
     let client = config.join("history-client.py");
     crate::settings::atomic_write(&client, include_bytes!("../../scripts/history-client.py"))?;
@@ -213,6 +219,16 @@ pub fn install_zsh_hook() -> AppResult<String> {
     let source = include_str!("../../scripts/shell-history.zsh")
         .replace("__DEV_CONSOLE_CLIENT__", &quote(&client.to_string_lossy()));
     crate::settings::atomic_write(&hook, source.as_bytes())?;
+    Ok(hook)
+}
+
+pub fn install_zsh_hook() -> AppResult<String> {
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    if !shell.ends_with("/zsh") {
+        return Err(AppError::Validation("Automatic project tracking currently supports zsh. Set up the zsh hook from a zsh session.".into()));
+    }
+    let hook = write_zsh_hook()?;
+    let quote = |s: &str| format!("'{}'", s.replace('\'', "'\"'\"'"));
     let home = std::env::var_os("ZDOTDIR")
         .filter(|value| !value.is_empty())
         .or_else(|| std::env::var_os("HOME"))

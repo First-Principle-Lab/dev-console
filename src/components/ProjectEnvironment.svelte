@@ -75,7 +75,7 @@
 </script>
 
 <Dialog title="Project environment" wide oncancel={onClose}>
-  <p>Local, encrypted versions of <code>.env</code> and <code>.env.*</code> files in the project folder. Opening a project group or this section starts sync for that project. Subfolders are not scanned.</p>
+  <p>Local, encrypted versions of <code>.env</code> and <code>.env.*</code> files in the project folder. Entering a project folder in a tracked terminal starts sync automatically. Subfolders are not scanned.</p>
   <div class="controls">
     <label for="environment-project">Project</label>
     <select id="environment-project" bind:value={root} disabled={busy} onchange={() => { error = ''; notice = ''; void sync(root); }} data-testid="environment-project">

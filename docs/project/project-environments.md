@@ -1,12 +1,23 @@
 # Project environment history
 
-Open a project's command group and select **Environment**, or use the toolbar's
-**Environment** button and choose a folder with **Browse**. Expanding a project group also syncs its environment when the vault is unlocked.
-The first sync opts that folder into automatic local snapshots. No existing project is scanned until then.
+Entering a project folder in zsh automatically discovers it and syncs its environment.
+No command entry, manual project addition or Browse step is needed. The existing
+Dev Console shell hook reports directory changes, a terminal's initial working folder,
+and prompts to retry visits made while the app was stopped or the vault locked.
+Existing hook installations update when Dev Console starts. Open a new terminal once
+after updating to load the directory-change hook. Older open terminals also discover
+the project when the next command is entered there. Command-history recommendations
+can be disabled independently; environment capture still works.
+
+Open **Environment** in Dev Console to see the automatically discovered folders and
+copy older versions. Expanding a project group or choosing a folder with **Browse**
+also syncs immediately. Environment capture requires the app to be running and the
+vault to be unlocked. A paused project stays paused when visited.
 
 Dev Console reads regular UTF-8 `.env` and `.env.*` files directly inside the selected
-folder. It does not scan subfolders or follow file symlinks. For a monorepo, choose
-additional app folders individually. Each file keeps its exact text, including
+folder. It does not recursively scan subfolders or follow file symlinks. Entering a monorepo
+subfolder with its own environment files automatically tracks that folder as well as
+the repository root. A folder containing environment files also works without Git. Each file keeps its exact text, including
 comments and line endings. No dotenv evaluation or variable expansion runs.
 
 Each changed file gets the next version number and a timestamp. Unchanged content

@@ -132,6 +132,40 @@ fn read_files(root: &Path) -> AppResult<Vec<(String, String)>> {
 /// First explicit sync opts this project in. Automatic sync never registers new projects or
 /// resumes a paused project. Identical files cause no vault rewrite and consume no version.
 pub fn sync(vault: &VaultService, path: &str, explicit: bool) -> AppResult<()> {
+    sync_impl(vault, path, explicit, explicit)
+}
+
+/// A directory visit discovers projects without requiring a library entry or manual addition.
+/// Root files and an entered monorepo subfolder with its own env files are tracked separately.
+pub fn visit(vault: &VaultService, path: &str) -> AppResult<()> {
+    vault.authorise()?;
+    let cwd = std::fs::canonicalize(path)?;
+    let home = std::env::var_os("HOME").and_then(|p| std::fs::canonicalize(p).ok());
+    if home.as_ref() == Some(&cwd) {
+        return Ok(());
+    }
+    let project = crate::project_history::project_for_directory(path);
+    let has_env = || -> AppResult<bool> {
+        for item in std::fs::read_dir(&cwd)? {
+            let item = item?;
+            if env_name(&item.file_name().to_string_lossy()) && item.file_type()?.is_file() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    if let Some(project) = project {
+        sync_impl(vault, &project.root.to_string_lossy(), true, false)?;
+        if cwd != project.root && has_env()? {
+            sync_impl(vault, &cwd.to_string_lossy(), true, false)?;
+        }
+    } else if has_env()? {
+        sync_impl(vault, &cwd.to_string_lossy(), true, false)?;
+    }
+    Ok(())
+}
+
+fn sync_impl(vault: &VaultService, path: &str, register: bool, force: bool) -> AppResult<()> {
     vault.authorise()?;
     let root = std::fs::canonicalize(path)?;
     if !root.is_dir() {
@@ -139,7 +173,7 @@ pub fn sync(vault: &VaultService, path: &str, explicit: bool) -> AppResult<()> {
     }
     let root = root.to_string_lossy().to_string();
     let before = vault.read(|v| Ok(v.environments.iter().find(|p| p.root == root).cloned()))?;
-    if !explicit && !before.as_ref().is_some_and(|p| p.enabled) {
+    if !force && before.as_ref().map_or(!register, |p| !p.enabled) {
         return Ok(());
     }
     let files = read_files(Path::new(&root))?;
@@ -159,13 +193,13 @@ pub fn sync(vault: &VaultService, path: &str, explicit: bool) -> AppResult<()> {
         // Recheck under the write lock: a pause or concurrent sync may have happened during IO.
         let index = match v.environments.iter().position(|p| p.root == root) {
             Some(i) => i,
-            None if explicit => {
+            None if register => {
                 v.environments.push(EnvironmentProject { root: root.clone(), enabled: true, snapshots: vec![] });
                 v.environments.len() - 1
             }
             None => return Ok(()),
         };
-        if !explicit && !v.environments[index].enabled { return Ok(()); }
+        if !force && !v.environments[index].enabled { return Ok(()); }
         let mut total: usize = v.environments.iter().flat_map(|p| &p.snapshots).map(|s| s.content.len()).sum();
         let p = &mut v.environments[index];
         for (name, content) in files {
@@ -344,6 +378,44 @@ mod tests {
         std::fs::write(dir.path().join(".env.large"), [0xff]).unwrap();
         assert!(sync(&v, dir.path().to_str().unwrap(), true).is_err());
         assert!(list(&v).unwrap().is_empty());
+    }
+
+    #[test]
+    fn entering_a_directory_discovers_environments_without_adding_a_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        let nested = root.join("server");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(root.join(".env"), "SYNTHETIC=root").unwrap();
+        std::fs::write(nested.join(".env.local"), "SYNTHETIC=server").unwrap();
+        let v = vault(dir.path());
+        visit(&v, nested.to_str().unwrap()).unwrap();
+        let saved = v.snapshot().unwrap();
+        assert_eq!(saved.environments.len(), 2);
+        assert_eq!(saved.environments[0].snapshots[0].content, "SYNTHETIC=root");
+        assert_eq!(
+            saved.environments[1].snapshots[0].content,
+            "SYNTHETIC=server"
+        );
+        let generation = v.generation();
+        visit(&v, nested.to_str().unwrap()).unwrap();
+        assert_eq!(generation, v.generation());
+        let canonical = std::fs::canonicalize(&root)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        set_enabled(&v, &canonical, false).unwrap();
+        std::fs::write(root.join(".env"), "SYNTHETIC=paused").unwrap();
+        visit(&v, root.to_str().unwrap()).unwrap();
+        assert_eq!(v.snapshot().unwrap().environments[0].snapshots.len(), 1);
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        std::fs::write(plain.join(".env"), "SYNTHETIC=plain").unwrap();
+        visit(&v, plain.to_str().unwrap()).unwrap();
+        assert_eq!(v.snapshot().unwrap().environments.len(), 3);
+        v.lock().unwrap();
+        assert!(visit(&v, plain.to_str().unwrap()).is_err());
     }
 
     #[test]

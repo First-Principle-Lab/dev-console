@@ -37,6 +37,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D w
 echo "== cargo test =="
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
+echo "== zsh environment directory hook =="
+python3 scripts/test-environment-hook.py
+
 echo "== keyring integration against a real Secret Service provider =="
 if [[ "${SKIP_KEYRING_TEST:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_KEYRING_TEST=1)"

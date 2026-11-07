@@ -132,6 +132,9 @@ fn build(argv: Vec<String>) {
             desktop_icons::refresh_for_appimage();
             clipboard::spawn_expiry_worker(Arc::clone(&state));
             environment::spawn_sync_worker(Arc::clone(&state));
+            if project_history::refresh_installed_zsh_hook().is_err() {
+                eprintln!("dev-console: could not refresh the installed shell hook");
+            }
             control::serve(app.handle(), Arc::clone(&state));
             match intent {
                 Intent::Finder => windows::show_finder(app.handle())?,

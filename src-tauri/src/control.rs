@@ -187,7 +187,22 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
     let command = request.command.as_str();
     let path = request.path.as_deref();
     match command {
+        "project.visit" => {
+            let result = crate::environment::visit(&state.vault, path.unwrap_or(""));
+            // The shell only sends its cwd. Never return environment values or paths.
+            Reply {
+                ok: result.is_ok(),
+                code: if result.is_ok() { EXIT_OK } else { EXIT_ERROR },
+                message: String::new(),
+                vault: None,
+            }
+        }
         "history.record" => {
+            // Older loaded hooks still discover a directory on its first command. Environment
+            // capture is independent of whether command recommendations are enabled.
+            if let Some(path) = path {
+                let _ = crate::environment::visit(&state.vault, path);
+            }
             let result = if state.settings.get().history_suggestions_enabled {
                 crate::project_history::database_path()
                     .and_then(|path| crate::project_history::ProjectHistory::open(&path))
