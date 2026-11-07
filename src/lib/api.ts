@@ -4,6 +4,7 @@ import type {
   EntryDetails,
   EntryDraft,
   EntryMeta,
+  HistorySuggestion,
   Kind,
   SavedEntry,
   SearchResponse,
@@ -91,5 +92,13 @@ export const api = {
   quit: (): Promise<void> => call('quit_app'),
   settings: (): Promise<Settings> => call('get_settings'),
   terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
-  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings })
+  saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings }),
+  /** Ranked suggestions from the shell's history. The backend reads the file per call. */
+  historySuggestions: (limit?: number): Promise<HistorySuggestion[]> =>
+    call('history_suggestions', { limit: limit ?? null }),
+  dismissSuggestion: (key: string): Promise<void> => call('dismiss_suggestion', { key }),
+  /** How many suggestions are dismissed, for the Settings row that brings them back. */
+  dismissedSuggestionCount: (): Promise<number> => call('dismissed_suggestion_count'),
+  /** Forgets every dismissal; returns how many there were. */
+  clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions')
 };

@@ -169,6 +169,20 @@ export interface Settings {
   terminal: string[];
   /** Rank the project the terminal was in first. Off, nothing is detected at all. */
   projectContextEnabled: boolean;
+  /** Offer frequently used commands from the shell's own history as new entries. */
+  historySuggestionsEnabled: boolean;
+}
+
+/**
+ * One command from the shell's history worth offering as a new entry. `key` is a SHA-256 digest
+ * of the normalised command - it is what a dismissal refers to, so dismissing never writes the
+ * command itself anywhere.
+ */
+export interface HistorySuggestion {
+  key: string;
+  command: string;
+  count: number;
+  suggestedName: string;
 }
 
 export interface TerminalOption {

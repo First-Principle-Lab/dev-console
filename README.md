@@ -49,6 +49,21 @@ for authentication. In-app output is limited to 64 KiB per stream, and commands 
 terminals found in `PATH` and keeps a custom command option. A saved `x-terminal-emulator` setting
 falls back to an installed terminal when that executable is missing.
 
+**Suggestions from shell history** — the Commands tab offers the most-used commands from your
+zsh, bash or fish history as starting points for a new entry, ranked by count weighted by recency.
+The file is parsed in Rust on request (when the library opens, on **Rescan**), never watched, never
+written to, and never opened at all while the setting is off (Settings → General). Lines that look
+like they carry a credential are dropped before anything reaches the screen: an exported
+`*_TOKEN`, `-p<password>` or `sshpass -p …`/`docker login -p …`, `--password`/`--token`/`--api-key`
+and their kin, `Authorization:` and other credential headers (`X-Api-Key:`, `Cookie:`), a
+`user:pass@host` URL or a token as the user part of an `https://` URL, a setting such as
+`aws_secret_access_key …`, and a long hex or base64 blob (except a full commit id where git expects
+a revision). **Save** only prefills the normal editor; nothing is written until you confirm. A
+**Dismissal** is stored as the SHA-256 of the command, never the command itself, and Settings →
+General can bring every dismissed suggestion back. Each suggestion is a keyboard stop as well:
+`Tab` to the command, `Enter` saves it, `Delete` dismisses it. When several history files exist,
+the one written most recently counts as the most recent.
+
 **Backups** — sealed age archives of the command table plus the vault, rotated to the newest eight
 in `~/.local/share/dev-console/backups`, plus an explicit encrypted export/import. A wrong key, a
 truncated file, a corrupted file or a newer format is rejected before anything is applied.

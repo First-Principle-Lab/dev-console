@@ -1,8 +1,8 @@
 <script lang="ts">
   import {
-    ArrowLeft, Check, Copy, Eye, FolderGit2, Inbox, KeyRound, List, LockKeyhole,
-    LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search,
-    Settings, Shield, Terminal, Trash2, TriangleAlert
+    ArrowLeft, Check, ChevronDown, Copy, Eye, FolderGit2, Inbox, KeyRound, List, LockKeyhole,
+    LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search, Settings, Shield,
+    Sparkles, Terminal, Trash2, TriangleAlert, X
   } from '@lucide/svelte';
   import type { IconName } from '../lib/icons';
 
@@ -28,7 +28,10 @@
     shield: Shield,
     gear: Settings,
     update: RefreshCw,
-    project: FolderGit2
+    project: FolderGit2,
+    sparkle: Sparkles,
+    close: X,
+    chevron: ChevronDown
   } satisfies Record<IconName, typeof Terminal>;
   let Component = $derived(icons[name]);
 </script>

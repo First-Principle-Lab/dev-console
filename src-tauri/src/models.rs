@@ -334,6 +334,9 @@ pub struct Settings {
     /// Rank the project the terminal was in first. Off means no detection at all: `/proc` and the
     /// compositor are left completely alone, not just their result ignored.
     pub project_context_enabled: bool,
+    /// Offer commands taken from the shell's own history as starting points for new entries.
+    /// Off, the history files are never opened.
+    pub history_suggestions_enabled: bool,
 }
 
 impl Default for Settings {
@@ -344,6 +347,7 @@ impl Default for Settings {
             clipboard_expiry_seconds: 30,
             terminal: vec!["x-terminal-emulator".into(), "-e".into()],
             project_context_enabled: true,
+            history_suggestions_enabled: true,
         }
     }
 }

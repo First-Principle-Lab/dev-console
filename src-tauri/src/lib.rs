@@ -8,6 +8,7 @@ pub mod control;
 pub mod desktop_icons;
 pub mod error;
 pub mod execution;
+pub mod history;
 pub mod import;
 pub mod ipc;
 pub mod keyring;
@@ -137,6 +138,10 @@ fn build(argv: Vec<String>) {
             ipc::quit_app,
             ipc::restart_app,
             ipc::get_settings,
+            ipc::history_suggestions,
+            ipc::dismiss_suggestion,
+            ipc::clear_dismissed_suggestions,
+            ipc::dismissed_suggestion_count,
             ipc::list_terminals,
             ipc::save_settings,
             ipc::open_settings,

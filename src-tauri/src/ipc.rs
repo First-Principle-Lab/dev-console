@@ -6,7 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::*;
 use crate::repository::validate_draft;
 use crate::state::AppState;
-use crate::{execution, search, tray, windows};
+use crate::{execution, history, search, tray, windows};
 
 /// Frontend windows are untrusted. Every privileged operation is re-checked here against the
 /// calling window label, so the restriction does not depend on hidden buttons or on the
@@ -530,6 +530,65 @@ pub fn get_settings<R: Runtime>(
 ) -> AppResult<Settings> {
     require_library(&window)?;
     Ok(state(&app).settings.get())
+}
+
+/// Ranked suggestions taken from the user's own shell history.
+///
+/// The history files are located and parsed here, on request, and only for the library window;
+/// nothing is written to a log and nothing is persisted. With the setting off, the files are never
+/// opened at all. Reading and parsing up to a few megabytes of history runs on a blocking worker,
+/// not on the main thread, so the library stays responsive while it does.
+#[tauri::command]
+pub async fn history_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    limit: Option<usize>,
+) -> AppResult<Vec<history::Suggestion>> {
+    require_library(&window)?;
+    let state = state(&app);
+    if !state.settings.get().history_suggestions_enabled {
+        return Ok(Vec::new());
+    }
+    let limit = limit
+        .unwrap_or(history::DEFAULT_LIMIT)
+        .clamp(1, history::MAX_LIMIT);
+    tauri::async_runtime::spawn_blocking(move || {
+        state.history_suggestions(&history::locate(), limit)
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
+}
+
+/// Marks one suggestion as never to be offered again. Only its digest is stored, so a dismissal
+/// cannot put a history line into the database either.
+#[tauri::command]
+pub fn dismiss_suggestion<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    key: String,
+) -> AppResult<()> {
+    require_library(&window)?;
+    state(&app).repo.dismiss_suggestion(&key)
+}
+
+/// Forgets every dismissal, so those commands can be suggested again. Returns how many there were.
+#[tauri::command]
+pub fn clear_dismissed_suggestions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<usize> {
+    require_library(&window)?;
+    state(&app).repo.clear_dismissed_suggestions()
+}
+
+/// How many suggestions are dismissed, for the Settings row that brings them back.
+#[tauri::command]
+pub fn dismissed_suggestion_count<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<usize> {
+    require_library(&window)?;
+    Ok(state(&app).repo.dismissed_suggestion_keys()?.len())
 }
 
 #[tauri::command]

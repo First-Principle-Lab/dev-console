@@ -280,3 +280,51 @@ for (const viewport of VIEWPORTS) {
     await capture(page, '12-finder-locked-row', width, height);
   });
 }
+
+/**
+ * The shell-history suggestion panel, reviewed at the widest and the narrowest size the library is
+ * used at: a row is a three-column grid, and 390px is where it has to collapse.
+ */
+const HISTORY_SEED = {
+  ...SEED,
+  settings: {
+    theme: 'dark',
+    autostart: false,
+    clipboardExpirySeconds: 30,
+    terminal: ['x-terminal-emulator', '-e'],
+    historySuggestionsEnabled: true
+  },
+  history: [
+    { command: 'docker compose -f compose.yml up --build api worker', count: 14 },
+    { command: 'bun run test:watch', count: 9 },
+    { command: 'kubectl -n staging logs -f api-6d9f7b', count: 4 }
+  ]
+};
+
+if (SET === 'raycast-after') {
+  test('shell history suggestions @ desktop-1440 and mobile-390', async ({ page }) => {
+    // 1440 is the width the panel was designed against and 390 is where it has to give something
+    // up; both are reviewed in each palette.
+    await boot(page, HISTORY_SEED);
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions', 1440, 900);
+
+    await boot(page, {
+      ...HISTORY_SEED,
+      settings: { ...HISTORY_SEED.settings, theme: 'light' }
+    });
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions-light', 1440, 900);
+
+    // Narrow: under 900px the library shows one pane, and a row selected at the wider size would
+    // leave the list - and the panel above it - off screen.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await boot(page, HISTORY_SEED);
+    await expect(page.getByTestId('history-suggestion-row')).toHaveCount(3);
+    await capture(page, '18-history-suggestions', 390, 780);
+
+    await page.getByTestId('history-suggestions-toggle').click();
+    await expect(page.getByTestId('history-suggestion-list')).toHaveCount(0);
+    await capture(page, '19-history-suggestions-collapsed', 390, 780);
+  });
+}
