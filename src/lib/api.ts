@@ -18,6 +18,7 @@ import type {
   RunResult,
   Settings,
   TerminalOption,
+  Theme,
   VaultState
 } from './models';
 
@@ -97,6 +98,7 @@ export const api = {
   hideSelf: (): Promise<void> => call('hide_self'),
   allowClose: (): Promise<void> => call('allow_close'),
   quit: (): Promise<void> => call('quit_app'),
+  theme: (): Promise<Theme> => call('get_theme'),
   settings: (): Promise<Settings> => call('get_settings'),
   terminals: (): Promise<TerminalOption[]> => call('list_terminals'),
   saveSettings: (settings: Settings): Promise<Settings> => call('save_settings', { settings }),

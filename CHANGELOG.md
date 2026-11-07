@@ -7,6 +7,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## 0.0.10 — 2026-11-07
 
+- Finder loads the same theme as Library and follows saved theme changes without restarting.
+
 - Serialize concurrent environment scans and reject queued vault operations after locking.
 
 - Environment sync discovers project folders when entered in zsh, without adding them in Dev Console first.

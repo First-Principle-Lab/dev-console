@@ -167,6 +167,7 @@ fn build(argv: Vec<String>) {
             ipc::quit_app,
             ipc::restart_app,
             ipc::get_settings,
+            ipc::get_theme,
             ipc::history_suggestions,
             ipc::install_history_tracking,
             ipc::dismiss_suggestion,

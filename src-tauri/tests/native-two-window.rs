@@ -224,6 +224,7 @@ impl Harness {
                 dev_console_lib::ipc::copy_recovery_key,
                 dev_console_lib::ipc::open_library,
                 dev_console_lib::ipc::get_settings,
+                dev_console_lib::ipc::get_theme,
                 dev_console_lib::ipc::create_backup,
                 dev_console_lib::ipc::scan_project,
                 dev_console_lib::ipc::import_project,
@@ -431,6 +432,18 @@ fn both_windows_see_the_same_commands_and_the_same_events() {
 #[test]
 fn privileged_operations_are_authorised_by_the_calling_window() {
     let h = Harness::new("two-window-permissions");
+    let initial_theme = h.state.settings.get().theme;
+    assert_eq!(
+        invoke(&h.finder, "get_theme", json!({})).unwrap(),
+        json!(initial_theme)
+    );
+    let mut changed_settings = h.state.settings.get();
+    changed_settings.theme = "omarchy-gruvbox".into();
+    h.state.settings.save(changed_settings).unwrap();
+    assert_eq!(
+        invoke(&h.finder, "get_theme", json!({})).unwrap(),
+        json!("omarchy-gruvbox")
+    );
     let created = h
         .save(&h.library, draft(Kind::Command, "Probe", "echo probe", ""))
         .expect("create through the library");

@@ -18,12 +18,18 @@ secret clipboard. Sync respects vault locking and per-project pause settings.
 The review also checked bounded reads, symlink exclusion, encrypted persistence,
 archive round trips, older vault compatibility, window authorization, directory
 hooks, per-project versioning, missing source recovery and the environment UI.
-No further release blockers were found.
+Finder's startup theme request also incorrectly used the Library-only full Settings
+API. Both windows now use a theme-only read command, with saved-theme events and a
+refresh on Finder reopen. Native IPC tests preserve the full-settings restriction;
+the browser mock now enforces it too. Native Hyprland validation confirmed the saved
+Kanagawa palette, six open/dismiss cycles, 24 hover paint checks, query entry,
+clearing, arrow navigation and Escape. Finder stayed floating at 680×420 and Library
+stayed tiled. No further release blockers were found.
 
 ## Validation
 
 - Svelte check: no errors or warnings; ESLint and frontend production build passed.
-- Frontend unit tests: 24 passed. Browser tests: 186 passed.
+- Frontend unit tests: 24 passed. Browser tests: 187 passed.
 - Rust tests: 176 library tests and 9 integration tests passed; 14 tests requiring
   external providers or a live desktop were ignored locally, not counted as passed.
 - Rust formatting and Clippy with warnings denied passed.

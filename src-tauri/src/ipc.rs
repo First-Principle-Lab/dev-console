@@ -593,6 +593,12 @@ pub fn list_terminals<R: Runtime>(
     Ok(execution::available_terminals())
 }
 
+/// Both windows may read the selected theme; full settings remain library-only.
+#[tauri::command]
+pub fn get_theme<R: Runtime>(app: AppHandle<R>) -> String {
+    state(&app).settings.get().theme
+}
+
 #[tauri::command]
 pub fn save_settings<R: Runtime>(
     app: AppHandle<R>,
@@ -602,6 +608,7 @@ pub fn save_settings<R: Runtime>(
     require_library(&window)?;
     let state = state(&app);
     let saved = state.settings.save(settings)?;
+    let _ = app.emit("theme-changed", &saved.theme);
     if let Err(error) = crate::autostart::apply(saved.autostart) {
         return Err(AppError::Other(format!(
             "settings saved but autostart failed: {error}"

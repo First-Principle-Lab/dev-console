@@ -636,7 +636,11 @@
     if (command === 'allow_close') { state.closes += 1; state.hidden.push('close'); return null; }
     if (command === 'cancel_quit') { return null; }
     if (command === 'quit_app') { state.quits += 1; return null; }
-    if (command === 'get_settings') return clone(state.settings);
+    if (command === 'get_theme') return state.settings.theme;
+    if (command === 'get_settings') {
+      if (location.hash.includes('view=finder')) throw new Error('not allowed to call finder');
+      return clone(state.settings);
+    }
     if (command === 'create_backup') {
       if (!state.vaultUnlocked || state.manualLock) throw new Error('the vault is locked');
       const name = `dev-console-backup-${state.backups.length + 1}.age`;
