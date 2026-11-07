@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "library",
-  "description": "Library window. Only event subscription is granted to the webview; the library never calls window or IPC plugin APIs directly, and every privileged command is re-checked against the calling window label in Rust.",
+  "description": "Library window. Native folder selection, app version, updates, restart and event subscription are granted to this window. Every custom privileged command is re-checked against the calling window label in Rust.",
   "windows": [
     "library"
   ],
@@ -10,6 +10,7 @@
     "core:event:allow-unlisten",
     "core:app:allow-version",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "dialog:allow-open"
   ]
 }

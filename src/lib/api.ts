@@ -103,6 +103,18 @@ export const api = {
   dismissedSuggestionCount: (): Promise<number> => call('dismissed_suggestion_count'),
   /** Forgets every dismissal; returns how many there were. */
   clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions'),
+  pickProjectFolder: async (defaultPath?: string): Promise<string | null> => {
+    if (typeof window !== 'undefined' && window.__devConsoleIpc) {
+      return call('pick_project_folder', { defaultPath });
+    }
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    return open({
+      title: 'Choose a project folder',
+      directory: true,
+      multiple: false,
+      defaultPath: defaultPath?.startsWith('/') ? defaultPath : undefined
+    });
+  },
   scanProject: (path: string): Promise<ProjectScan> => call('scan_project', { request: { path } }),
   importProject: (path: string, names: string[]): Promise<ProjectImportOutcome> =>
     call('import_project', { request: { path, names } })

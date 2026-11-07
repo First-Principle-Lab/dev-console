@@ -375,3 +375,33 @@ for (const theme of ['dark', 'light', 'omarchy-catppuccin', 'omarchy-gruvbox']) 
     });
   }
 }
+
+
+test('Browse selects and scans a folder without typing or importing', async ({ page }) => {
+  await boot(page, { ...SEED, projectFolder: '/home/dev/projects/space folder' });
+  await openDialog(page, '');
+  await page.getByTestId('project-browse').click();
+  await expect(page.getByTestId('project-path')).toHaveValue('/home/dev/projects/space folder');
+  await expect(page.getByTestId('project-scan-summary')).toContainText('/home/dev/projects/space folder');
+  await expect(page.getByTestId('project-candidate')).toHaveCount(7);
+  expect(await commandRows(page)).toHaveLength(0);
+});
+
+test('cancelling Browse preserves the path and reviewed selection', async ({ page }) => {
+  await boot(page, SEED);
+  await openDialog(page);
+  await page.getByTestId('project-candidate').first().locator('input').uncheck();
+  await page.getByTestId('project-browse').click();
+  await expect(page.getByTestId('project-path')).toHaveValue(PROJECT);
+  await expect(page.getByTestId('project-import-count')).toHaveText('6 of 7 selected');
+  await expect(page.getByTestId('status-error')).toHaveCount(0);
+});
+
+test('a folder picker failure leaves manual path entry available', async ({ page }) => {
+  await boot(page, { ...SEED, projectPickerError: true });
+  await openDialog(page, '');
+  await page.getByTestId('project-browse').click();
+  await expect(page.getByTestId('status-error')).toContainText('Folder picker unavailable');
+  await scan(page, PROJECT);
+  await expect(page.getByTestId('project-candidate')).toHaveCount(7);
+});

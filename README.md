@@ -71,7 +71,7 @@ Compose services. Scanning lists them grouped by source, ticks the new ones, and
 library already has as "Already saved". Importing writes the ticked ones as ordinary commands whose
 working directory is that folder and whose tag is `project:<repo>`. Reading and importing execute
 nothing in the folder — the commands are only written down, and running one still goes through the
-approval above. The folder field accepts absolute paths and `~/` paths. Makefile discovery
+approval above. Browse opens the native folder picker and scans the selected folder. The folder field also accepts absolute paths and `~/` paths. Makefile discovery
 uses GNU Make's file precedence and ignores `define` blocks. Compose files are validated as YAML.
 The optional read-only `just --dump` process has a three-second deadline covering output and exit.
 If selected tasks disappear before import, the review reports them alongside the saved tasks.

@@ -674,6 +674,10 @@
       if (!payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
       return { source: payload.path, commands: 2, secrets: 1 };
     }
+    if (command === 'pick_project_folder') {
+      if (seed.projectPickerError) throw new Error('Folder picker unavailable');
+      return seed.projectFolder ?? null;
+    }
     if (command === 'scan_project') {
       const dir = String(payload.request?.path || '').trim();
       if (dir.length === 0) throw new Error('choose a folder first');

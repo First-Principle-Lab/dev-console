@@ -31,6 +31,7 @@
    */
   const selected = new SvelteSet<string>();
   let busy = $state(false);
+  let picking = $state(false);
   let error = $state<string | null>(null);
   /** A non-failure worth saying out loud, e.g. "everything you picked is already saved". */
   let notice = $state<string | null>(null);
@@ -84,6 +85,21 @@
     }
   }
 
+  async function browse(): Promise<void> {
+    if (busy || picking) return;
+    picking = true;
+    try {
+      const folder = await api.pickProjectFolder(path.trim() || undefined);
+      if (folder === null) return;
+      path = folder;
+      await rescan();
+    } catch (problem) {
+      error = describe(problem, 'The folder picker could not be opened. You can enter a path instead.');
+    } finally {
+      picking = false;
+    }
+  }
+
   function choose(names: string[], want: boolean): void {
     for (const name of names) {
       if (want) selected.add(name);
@@ -126,12 +142,12 @@
     class="picker"
     onsubmit={(event) => {
       event.preventDefault();
-      void rescan();
+      if (!busy && !picking) void rescan();
     }}
   >
     <label class="field" for="project-path">Project folder</label>
     <div class="path-row">
-      <!-- An absolute path is all this needs: the backend reads the folder, it never runs it. -->
+      <!-- Keep manual entry available alongside the native directory picker. -->
       <input
         id="project-path"
         class="path mono"
@@ -139,10 +155,14 @@
         placeholder="~/src/my-project"
         autocomplete="off"
         spellcheck="false"
+        disabled={busy || picking}
         bind:value={path}
         data-testid="project-path"
       />
-      <Button type="submit" icon="search" loading={busy && scan === null} data-testid="project-scan">
+      <Button type="button" icon="folder" disabled={busy || picking} onclick={() => void browse()} data-testid="project-browse">
+        Browse…
+      </Button>
+      <Button type="submit" icon="search" disabled={busy || picking} loading={busy && scan === null} data-testid="project-scan">
         {scan === null ? 'Scan' : 'Rescan'}
       </Button>
     </div>
@@ -242,7 +262,7 @@
     <Button onclick={() => ondone(0)} data-testid="project-cancel">Cancel</Button>
     <Button
       variant="primary"
-      disabled={scan === null || chosen.length === 0}
+      disabled={scan === null || chosen.length === 0 || picking}
       loading={busy && scan !== null}
       onclick={() => void confirm()}
       data-testid="project-import"
@@ -267,9 +287,10 @@
   .path-row {
     display: flex;
     gap: var(--gap-sm);
+    flex-wrap: wrap;
   }
   .path {
-    flex: 1;
+    flex: 1 1 200px;
     min-width: 0;
   }
   .hint {
