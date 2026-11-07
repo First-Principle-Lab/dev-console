@@ -14,6 +14,7 @@ pub mod ipc;
 pub mod keyring;
 pub mod models;
 pub mod paths;
+pub mod projects;
 pub mod recovery;
 pub mod repository;
 pub mod search;
@@ -49,6 +50,20 @@ pub fn run() {
             }
         },
         Intent::ImportBitwarden(file) => match control::run_import(&file) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ScanProject { dir } => match control::run_project(&dir, false) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("dev-console: {error}");
+                std::process::exit(control::EXIT_ERROR);
+            }
+        },
+        Intent::ImportProject { dir } => match control::run_project(&dir, true) {
             Ok(code) => std::process::exit(code),
             Err(error) => {
                 eprintln!("dev-console: {error}");
@@ -153,7 +168,9 @@ fn build(argv: Vec<String>) {
             ipc::recovery_key,
             ipc::copy_recovery_key,
             ipc::export_archive,
-            ipc::import_archive
+            ipc::import_archive,
+            ipc::scan_project,
+            ipc::import_project
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

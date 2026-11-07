@@ -479,7 +479,7 @@ test('settings, the delete dialog and the palette draw one shared shell frame', 
 
   await page.getByTestId('entry-row').first().click();
   await page.getByTestId('delete').click();
-  const dialog = await frameOf('[role="dialog"].surface-shell');
+  const dialog = await frameOf('dialog.surface-shell');
   expect(dialog.radius, 'a confirmation is the same object as settings').toBe(settings.radius);
   expect(dialog.border, 'one hairline edge, not a stack of frames').toBe('1px solid');
   expect(dialog.shadow).not.toBe('none');

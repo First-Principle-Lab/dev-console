@@ -225,6 +225,8 @@ impl Harness {
                 dev_console_lib::ipc::open_library,
                 dev_console_lib::ipc::get_settings,
                 dev_console_lib::ipc::create_backup,
+                dev_console_lib::ipc::scan_project,
+                dev_console_lib::ipc::import_project,
             ])
             .build(mock_context(noop_assets()))
             .expect("mock app");
@@ -927,4 +929,114 @@ fn the_recovery_credential_stays_behind_the_vault_and_copies_natively() {
     }
 
     h.drop_profile();
+}
+
+#[test]
+fn project_import_round_trips_through_ipc_and_preserves_execution_approval() {
+    let h = Harness::new("project-import-ipc");
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(
+        folder.path().join("Makefile"),
+        "probe:\n\t@pwd\nsecond:\n\t@true\n",
+    )
+    .unwrap();
+    let path = std::fs::canonicalize(folder.path()).unwrap();
+    let scan_request = json!({"request": {"path": path}});
+    assert!(invoke(&h.finder, "scan_project", scan_request.clone()).is_err());
+    assert!(invoke(
+        &h.finder,
+        "import_project",
+        json!({"request": {"path": path, "names": [], "all": true}})
+    )
+    .is_err());
+    let scanned = invoke(&h.library, "scan_project", scan_request.clone()).unwrap();
+    assert_eq!(scanned["candidates"].as_array().unwrap().len(), 2);
+    assert!(h.state.repo.all_command_records().unwrap().is_empty());
+    let names: Vec<_> = scanned["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].clone())
+        .collect();
+    let request = json!({"request": {"path": path, "names": names}});
+    assert_eq!(
+        invoke(&h.library, "import_project", request.clone()).unwrap()["imported"],
+        json!(2)
+    );
+    let rescanned = invoke(&h.library, "scan_project", scan_request).unwrap();
+    assert!(rescanned["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["alreadyImported"] == true));
+    let repeated = invoke(&h.library, "import_project", request).unwrap();
+    assert_eq!(repeated["imported"], json!(0));
+    assert_eq!(repeated["duplicates"], json!(2));
+    let records = h.state.repo.all_command_records().unwrap();
+    let record = &records
+        .iter()
+        .find(|(record, _, _)| record.command == "make probe")
+        .unwrap()
+        .0;
+    assert_eq!(record.working_directory, path.to_str().unwrap());
+    assert!(!h.state.repo.approval_state(record).unwrap());
+    let denied = invoke(
+        &h.library,
+        "run_command",
+        json!({"request": {"id": record.id, "expectedRevision": record.revision, "approved": false}}),
+    );
+    assert!(denied.is_err());
+    let output = invoke(&h.library, "run_command", json!({"request": {"id": record.id, "expectedRevision": record.revision, "approved": true}})).unwrap();
+    assert_eq!(output["stdout"], json!(format!("{}\n", path.display())));
+    assert_eq!(output["exitCode"], json!(0));
+}
+
+#[test]
+fn project_cli_round_trips_over_a_real_control_socket() {
+    use dev_console_lib::control;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    let h = Harness::new("project-control-socket");
+    let folder = tempfile::tempdir().unwrap();
+    let runtime = folder.path().join("runtime");
+    let old_runtime = std::env::var_os("DEV_CONSOLE_RUNTIME_DIR");
+    std::env::set_var("DEV_CONSOLE_RUNTIME_DIR", &runtime);
+    std::fs::write(folder.path().join("Makefile"), "probe:\n\t@true\n").unwrap();
+    control::serve(h.app.handle(), Arc::clone(&h.state));
+    let mut stream = UnixStream::connect(control::socket_path()).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .unwrap();
+    writeln!(
+        stream,
+        "{}",
+        json!({"command":"project.scan", "path":folder.path()})
+    )
+    .unwrap();
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply).unwrap();
+    let reply: Value = serde_json::from_str(&reply).unwrap();
+    assert_eq!(reply["ok"], json!(true));
+    assert!(reply["message"].as_str().unwrap().contains("make probe"));
+    assert!(h.state.repo.all_command_records().unwrap().is_empty());
+    assert_eq!(
+        control::run_project(folder.path().to_str().unwrap(), false).unwrap(),
+        0
+    );
+    assert!(h.state.repo.all_command_records().unwrap().is_empty());
+    assert_eq!(
+        control::run_project(folder.path().to_str().unwrap(), true).unwrap(),
+        0
+    );
+    assert_eq!(
+        control::run_project(folder.path().to_str().unwrap(), true).unwrap(),
+        0
+    );
+    assert_eq!(h.state.repo.all_command_records().unwrap().len(), 1);
+    control::remove_socket();
+    if let Some(old) = old_runtime {
+        std::env::set_var("DEV_CONSOLE_RUNTIME_DIR", old);
+    } else {
+        std::env::remove_var("DEV_CONSOLE_RUNTIME_DIR");
+    }
 }

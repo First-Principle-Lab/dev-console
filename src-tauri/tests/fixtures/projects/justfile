@@ -1,0 +1,10 @@
+# Public recipe
+public:
+  @echo hello
+
+[private]
+internal:
+  @echo hidden
+
+_hidden:
+  @echo hidden

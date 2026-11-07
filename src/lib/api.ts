@@ -11,6 +11,8 @@ import type {
   ArchiveSummary,
   BackupInfo,
   BackupOutcome,
+  ProjectImportOutcome,
+  ProjectScan,
   RecoveryKeyInfo,
   RunResult,
   Settings,
@@ -100,5 +102,8 @@ export const api = {
   /** How many suggestions are dismissed, for the Settings row that brings them back. */
   dismissedSuggestionCount: (): Promise<number> => call('dismissed_suggestion_count'),
   /** Forgets every dismissal; returns how many there were. */
-  clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions')
+  clearDismissedSuggestions: (): Promise<number> => call('clear_dismissed_suggestions'),
+  scanProject: (path: string): Promise<ProjectScan> => call('scan_project', { request: { path } }),
+  importProject: (path: string, names: string[]): Promise<ProjectImportOutcome> =>
+    call('import_project', { request: { path, names } })
 };

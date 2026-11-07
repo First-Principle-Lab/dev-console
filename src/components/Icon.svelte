@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    ArrowLeft, Check, ChevronDown, Copy, Eye, FolderGit2, Inbox, KeyRound, List, LockKeyhole,
+    ArrowLeft, Check, ChevronDown, Copy, Eye, FolderGit2, FolderOpen, Inbox, KeyRound, List, LockKeyhole,
     LockKeyholeOpen, Pencil, Pin, Play, Plus, RefreshCw, Search, Settings, Shield,
     Sparkles, Terminal, Trash2, TriangleAlert, X
   } from '@lucide/svelte';
@@ -20,6 +20,7 @@
     pin: Pin,
     run: Play,
     trash: Trash2,
+    folder: FolderOpen,
     search: Search,
     plus: Plus,
     back: ArrowLeft,

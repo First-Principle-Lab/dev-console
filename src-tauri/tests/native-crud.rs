@@ -372,3 +372,33 @@ fn a_suggestion_is_offered_saved_then_never_offered_again_through_the_real_backe
         "a dismissed suggestion stays gone after a restart"
     );
 }
+
+#[test]
+fn project_scan_import_and_rescan_use_real_persistent_records() {
+    let folder = tempfile::tempdir().unwrap();
+    let db = folder.path().join("commands.sqlite3");
+    let project = folder.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        include_str!("fixtures/projects/package.json"),
+    )
+    .unwrap();
+    let path = project.to_str().unwrap();
+    let repo = dev_console_lib::repository::Repository::open(&db).unwrap();
+    let scan = dev_console_lib::projects::scan(path, &repo).unwrap();
+    assert_eq!(scan.candidates.len(), 2);
+    let names: Vec<_> = scan.candidates.iter().map(|c| c.name.clone()).collect();
+    assert_eq!(
+        dev_console_lib::projects::import(path, &names, false, &repo)
+            .unwrap()
+            .imported,
+        2
+    );
+    drop(repo);
+    let repo = dev_console_lib::repository::Repository::open(&db).unwrap();
+    let rescan = dev_console_lib::projects::scan(path, &repo).unwrap();
+    assert!(rescan.candidates.iter().all(|c| c.already_imported));
+    let again = dev_console_lib::projects::import(path, &[], true, &repo).unwrap();
+    assert_eq!((again.imported, again.duplicates), (0, 2));
+}

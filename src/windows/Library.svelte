@@ -9,6 +9,7 @@
   import Button from '../components/Button.svelte';
   import Dialog from '../components/Dialog.svelte';
   import EmptyState from '../components/EmptyState.svelte';
+  import ProjectImport from '../components/ProjectImport.svelte';
   import Icon from '../components/Icon.svelte';
   import Keycap from '../components/Keycap.svelte';
   import StatusLine from '../components/StatusLine.svelte';
@@ -61,6 +62,9 @@
   let outputCopyError = $state<string | null>(null);
   let pendingClose = $state(false);
   let showSettings = $state(false);
+  /** The project-script import dialog; `null` closes it. */
+  let importingProject = $state(false);
+
   let narrow = $state(false);
   let authenticating = $state(false);
   let counts = $state<{ command: number; secret: number }>({ command: 0, secret: 0 });
@@ -222,6 +226,24 @@
     } catch (error: unknown) {
       status = message(error, 'Could not dismiss that suggestion.');
       void loadSuggestions();
+    }
+  }
+
+  /** The dialog only ever creates commands, so it opens on the tab that shows them. */
+  function startProjectImport(): void {
+    tab = 'command';
+    importingProject = true;
+  }
+
+  /**
+   * Close the import dialog and refresh the command list. The backend already wrote the rows, so
+   * this only re-reads them; `imported` is 0 when the dialog was cancelled.
+   */
+  function finishProjectImport(imported: number): void {
+    importingProject = false;
+    if (imported > 0) {
+      status = `Imported ${imported} ${imported === 1 ? 'task' : 'tasks'}.`;
+      void loadList().catch(() => undefined);
     }
   }
 
@@ -550,6 +572,15 @@
         />
       </div>
       <Button variant="primary" icon="plus" onclick={startNew} data-testid="add-entry">New</Button>
+      <!-- Reading a project's own task definitions is the only way a repository's build steps
+           become library entries, so it sits beside New rather than hidden in Settings. -->
+      <Button
+        icon="folder"
+        onclick={startProjectImport}
+        title="Import the tasks a project folder defines as commands"
+        data-testid="import-project"
+        >Import from project</Button
+      >
     </div>
   </div>
 
@@ -758,6 +789,10 @@
       >
     {/snippet}
   </Dialog>
+{/if}
+
+{#if importingProject}
+  <ProjectImport ondone={finishProjectImport} />
 {/if}
 
 {#if showSettings}

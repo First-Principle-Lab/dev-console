@@ -149,6 +149,127 @@
       .slice(0, limit);
   }
 
+
+  /*
+   * A synthetic project folder for the two `*_project` commands, in exactly the shapes
+   * `projects::ProjectScan` and `projects::ImportOutcome` serialise. Seeding a command whose
+   * `command` + `workingDirectory` match one of these rows is how a spec exercises the
+   * "already saved" path against data it controls; `projectStale` makes the first scan answer
+   * as though the library had changed underneath it.
+   */
+  const PROJECT_TASKS = [
+    {
+      source: 'npm',
+      name: 'webapp\u00b7dev',
+      command: 'bun run dev',
+      description: 'package.json script: vite',
+      entryType: 'bun'
+    },
+    {
+      source: 'npm',
+      name: 'webapp\u00b7test',
+      command: 'bun run test',
+      description: 'package.json script: vitest run',
+      entryType: 'bun'
+    },
+    {
+      source: 'npm',
+      name: 'webapp\u00b7seed',
+      command: 'bun run seed',
+      description: 'package.json script: node scripts/seed.js',
+      entryType: 'bun'
+    },
+    {
+      source: 'make',
+      name: 'webapp\u00b7assets',
+      command: 'make assets',
+      description: 'Bundle the static assets',
+      entryType: 'make'
+    },
+    {
+      source: 'just',
+      name: 'webapp\u00b7fmt',
+      command: 'just fmt',
+      description: 'Format the Rust crates',
+      entryType: 'just'
+    },
+    {
+      source: 'compose',
+      name: 'webapp\u00b7up-db',
+      command: 'docker compose up -d db',
+      description: 'Start db in the background',
+      entryType: 'compose'
+    },
+    {
+      source: 'compose',
+      name: 'webapp\u00b7down',
+      command: 'docker compose down',
+      description: 'Stop this compose project',
+      entryType: 'compose'
+    }
+  ];
+
+  // Exposed so a spec can seed "these rows are already in the library" from this one fixture.
+  window.__mockProjectTasks = PROJECT_TASKS;
+
+  /** Already-saved rows are derived exactly as the backend derives them: text plus folder. */
+  let missingProjectTask = null;
+  function projectScan(dir) {
+    const saved = new Set(
+      state.commands.map((row) => `${row.command ?? ''}\u0000${row.workingDirectory ?? ''}`)
+    );
+    return {
+      project: 'webapp',
+      dir,
+      candidates: PROJECT_TASKS.filter((task) => task.name !== missingProjectTask).map((task) => ({
+        ...task,
+        alreadyImported: saved.has(`${task.command}\u0000${dir}`)
+      }))
+    };
+  }
+
+  /** The same shape as `PROJECT_TASKS`, only big enough to overflow the review list. */
+  const LARGE_TASKS = (() => {
+    const scripts = [
+      'lint', 'format', 'typecheck', 'bundle', 'preview', 'audit', 'docs', 'clean', 'watch', 'coverage'
+    ];
+    const tasks = [];
+    for (const manager of ['npm', 'bun', 'pnpm']) {
+      for (const script of scripts) {
+        tasks.push({
+          source: 'npm',
+          name: `bigrepo${manager}-${script}`,
+          command: `${manager} run ${script}`,
+          description: `package.json script: node scripts/${script}.js`,
+          entryType: manager,
+          alreadyImported: false
+        });
+      }
+    }
+    for (let n = 0; n < 15; n += 1) {
+      tasks.push({
+        source: 'make',
+        name: `bigrepo·target-${n}`,
+        command: `make target-${n}`,
+        description: `Build target ${n}`,
+        entryType: 'make',
+        alreadyImported: false
+      });
+    }
+    return tasks;
+  })();
+
+  /** Every task either fixture can offer: what a write resolves the selection against. */
+  const ALL_TASKS = [...PROJECT_TASKS, ...LARGE_TASKS];
+
+  /** A folder with far more tasks than fit on screen; the review list has to scroll, not grow. */
+  function largeProject(dir) {
+    return { project: 'bigrepo', dir, candidates: LARGE_TASKS };
+  }
+
+  /** One-shot: answers the first scan of a run as if the library had changed since. */
+  let staleScanAnswered = false;
+
   function meta(record, kind) {
     return {
       id: record.id,
@@ -552,6 +673,77 @@
     if (command === 'import_archive') {
       if (!payload.path.endsWith('.age')) throw new Error('the archive is not a valid Dev Console backup');
       return { source: payload.path, commands: 2, secrets: 1 };
+    }
+    if (command === 'scan_project') {
+      const dir = String(payload.request?.path || '').trim();
+      if (dir.length === 0) throw new Error('choose a folder first');
+      // A file rather than a folder: the same message the real scanner gives back.
+      if (dir.endsWith('.txt')) {
+        throw new Error('cannot open /home/dev/notes.txt: Not a directory (os error 20)');
+      }
+      if (seed.projectEmpty) return clone({ project: 'blank', dir, candidates: [] });
+      if (seed.projectLarge) return clone(largeProject(dir));
+      const fresh = projectScan(dir);
+      if (seed.projectStale && !staleScanAnswered) {
+        staleScanAnswered = true;
+        return clone({
+          ...fresh,
+          candidates: fresh.candidates.map((c) => ({ ...c, alreadyImported: false }))
+        });
+      }
+      return clone(fresh);
+    }
+    if (command === 'import_project') {
+      const request = payload.request || {};
+      const dir = String(request.path || '');
+      const wanted = new Set(request.names || []);
+      const outcome = { imported: 0, duplicates: 0, skipped: [] };
+      if (seed.projectMissingOnImport) missingProjectTask = 'webapp·test';
+      for (const task of ALL_TASKS) {
+        if (!wanted.has(task.name)) continue;
+        if (task.name === missingProjectTask) {
+          outcome.skipped.push(`${task.name} (no longer in this folder; scan it again)`);
+          continue;
+        }
+        // Same rule the backend applies: the text and the folder together are the identity.
+        if (
+          state.commands.some(
+            (row) => row.command === task.command && row.workingDirectory === dir
+          )
+        ) {
+          outcome.duplicates += 1;
+          continue;
+        }
+        const id = `cmd-${state.commands.length + 1}`;
+        state.commands.push({
+          id,
+          revision: 1,
+          kind: 'command',
+          name: task.name,
+          type: task.entryType,
+          tags: ['project:webapp'],
+          description: task.description,
+          notes: '',
+          fields: [],
+          pinned: false,
+          command: task.command,
+          workingDirectory: dir,
+          usageCount: 0,
+          updatedAt: now
+        });
+        emit('entries-changed', {
+          kind: 'command',
+          id,
+          revision: 1,
+          operation: 'created',
+          vaultGeneration: state.generation
+        });
+        outcome.imported += 1;
+      }
+      if (outcome.imported === 0 && outcome.duplicates === 0) {
+        throw new Error('select at least one task to import');
+      }
+      return clone(outcome);
     }
     if (command === 'list_terminals') return clone(state.terminals);
     if (command === 'save_settings') { state.settings = clone(payload.settings); return clone(state.settings); }

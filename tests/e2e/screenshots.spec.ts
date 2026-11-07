@@ -153,6 +153,39 @@ test('library record at the real minimum window size', async ({ page }) => {
   await capture(page, '17-library-minimum-window', 760, 520);
 });
 
+/** Opens the project-task dialog over a scanned folder; the dialog is the surface under review. */
+async function importDialog(page: Page, large = false, theme = 'dark'): Promise<void> {
+  await boot(page, { ...EMPTY, projectLarge: large, settings: {
+    theme, autostart: false, clipboardExpirySeconds: 30, terminal: ['x-terminal-emulator', '-e']
+  } });
+  await page.getByTestId('import-project').click();
+  await page.getByTestId('project-path').fill(
+    large ? '/home/dev/projects/bigrepo' : '/home/dev/projects/webapp'
+  );
+  await page.getByTestId('project-scan').click();
+  await page.getByTestId('project-scan-summary').waitFor();
+}
+
+test('project task review at the real library size and at the minimum window size', async ({
+  page
+}) => {
+  // The review list scrolls inside the dialog, so the Import action must stay reachable at both
+  // the size the shell is usually created at and the smallest one it accepts.
+  await importDialog(page);
+  await capture(page, '18-project-import', 1040, 700);
+  await importDialog(page);
+  await capture(page, '18-project-import-minimum', 760, 520);
+  await importDialog(page);
+  await capture(page, '18-project-import-mobile', 390, 780);
+});
+
+test('project task review with far more tasks than fit on screen', async ({ page }) => {
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list', 1440, 900);
+  await importDialog(page, true);
+  await capture(page, '19-project-import-long-list-minimum', 760, 520);
+});
+
 const EMPTY = { commands: [], secrets: [] };
 
 /** Deliberately awkward content: long names, tags, values and paths must not break the layout. */
@@ -326,5 +359,16 @@ if (SET === 'raycast-after') {
     await page.getByTestId('history-suggestions-toggle').click();
     await expect(page.getByTestId('history-suggestion-list')).toHaveCount(0);
     await capture(page, '19-history-suggestions-collapsed', 390, 780);
+  });
+}
+
+for (const theme of ['dark', 'light', 'omarchy-catppuccin', 'omarchy-gruvbox']) {
+  test(`project import review captures in ${theme}`, async ({ page }) => {
+    for (const [width, height] of [[1440, 900], [390, 780]]) {
+      await importDialog(page, false, theme);
+      await capture(page, `20-project-import-${theme}`, width, height);
+      await importDialog(page, true, theme);
+      await capture(page, `21-project-import-long-${theme}`, width, height);
+    }
   });
 }

@@ -273,6 +273,23 @@ pub struct SaveRequest {
     pub draft: EntryDraft,
 }
 
+/// Which folder to read tasks from.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScanProjectRequest {
+    pub path: String,
+}
+
+/// Which of a scan's candidates to save. `all` imports every one of them, which is what `--all`
+/// means on the command line.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ImportProjectRequest {
+    pub path: String,
+    pub names: Vec<String>,
+    pub all: bool,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OpenLibraryRequest {
