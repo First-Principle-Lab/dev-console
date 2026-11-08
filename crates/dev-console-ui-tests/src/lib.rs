@@ -25,7 +25,7 @@
 //! until plan milestone 2 moves it in.
 
 use dev_console_desktop::ui::{finder_view, library_view, Finder, Library};
-use rune::{Cx, El, Env, Runtime};
+use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime};
 
 /// The Finder viewport, in logical points. The same constant the window asks the compositor for
 /// (`dev_console_desktop::identity::FINDER_SIZE`); duplicated deliberately so a scripted test still
@@ -48,10 +48,10 @@ pub const FINDER_KEYS: &[&str] = &[
     "finder-rows",
     "finder-empty",
     "finder-footer",
-    "footer-up",
-    "footer-open",
-    "footer-copy",
+    "footer-move",
+    "footer-tab",
     "footer-dismiss",
+    "footer-count",
 ];
 
 /// Keys the Library's tree is expected to carry.
@@ -85,6 +85,14 @@ impl<S: 'static> Stage<S> {
     /// The state a script drove.
     pub fn state(&self) -> &S {
         &self.runtime.state
+    }
+
+    /// The state, for setting up a case no interaction can produce - a result list that got
+    /// shorter under the highlight, say, which the search port will cause and no key here can.
+    /// Never a substitute for driving the UI: a script that mutates its way to an assertion has
+    /// tested the fixture.
+    pub fn state_mut(&mut self) -> &mut S {
+        &mut self.runtime.state
     }
 
     /// Lays out another frame, e.g. after a press, so animations and layout settle again.
@@ -133,6 +141,74 @@ impl<S: 'static> Stage<S> {
         self.runtime.pointer_up(x, y);
         self.runtime.frame(1.0 / 60.0);
         true
+    }
+
+    /// Which element holds keyboard focus, by its key. `None` when nothing does - and that is the
+    /// state a stage starts in, because Rune gives nothing focus until a pointer or a Tab asks.
+    pub fn focused_key(&self) -> Option<String> {
+        self.runtime
+            .elements()
+            .into_iter()
+            .find(|element| element.focused)
+            .and_then(|element| element.key)
+    }
+
+    /// The accessible name `key` carries, for scripts that have to read a label rather than guess
+    /// one from the source - the only way to check a footer promises a binding that exists.
+    pub fn label_of(&self, key: &str) -> Option<String> {
+        self.runtime
+            .elements()
+            .into_iter()
+            .find(|element| element.key.as_deref() == Some(key))
+            .and_then(|element| element.label)
+    }
+
+    /// Every accessible name under `prefix`, sorted, so a "nothing else advertises itself" check
+    /// names what it looked at instead of trusting a key list.
+    pub fn labels_starting_with(&self, prefix: &str) -> Vec<String> {
+        let mut labels: Vec<String> = self
+            .runtime
+            .elements()
+            .into_iter()
+            .filter(|element| {
+                element
+                    .key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with(prefix))
+            })
+            .filter_map(|element| element.label)
+            .collect();
+        labels.sort();
+        labels
+    }
+
+    /// Presses `key` where it lies and returns whether the press left it holding keyboard focus.
+    /// Every key-routing script has to start here: in Rune a text field is the only thing that sees
+    /// its own keys before its editor does, so a key sent to an unfocused field proves nothing.
+    pub fn press_until_focused(&mut self, key: &str) -> bool {
+        self.press(key) && self.focused_key().as_deref() == Some(key)
+    }
+
+    /// Injects one key event and lays out the frame that follows it, so the state the handler left
+    /// and the tree rebuilt from it are both observable when this returns. `mods` are empty, which
+    /// is all the bindings ported so far read; a chord test passes its own [`KeyEvent`].
+    pub fn press_key(&mut self, key: Key) {
+        self.send_key(KeyEvent {
+            key,
+            mods: Mods::default(),
+        });
+    }
+
+    /// Injects a full key event, modifiers included.
+    pub fn send_key(&mut self, ev: KeyEvent) {
+        self.runtime.key(ev);
+        self.runtime.frame(1.0 / 60.0);
+    }
+
+    /// Types literal text the way a confirmed keystroke arrives: one `Key::Text` event, which is
+    /// what a field inserts and a routing handler has to fall through to.
+    pub fn type_text(&mut self, text: &str) {
+        self.press_key(Key::Text(text.to_owned()));
     }
 }
 
@@ -200,6 +276,8 @@ pub fn library_with_entries() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the scripts below build a view of their own; the harness's job is to drive the shell's.
+    use rune::{col, text_input, TextEdit, TextStyle};
 
     #[test]
     fn a_stage_lays_out_the_finder_before_any_script_runs() {
@@ -217,10 +295,10 @@ mod tests {
                 "finder-context",
                 "finder-rows",
                 "finder-footer",
-                "footer-up",
-                "footer-open",
-                "footer-copy",
-                "footer-dismiss"
+                "footer-move",
+                "footer-tab",
+                "footer-dismiss",
+                "footer-count"
             ]
         );
     }
@@ -247,5 +325,65 @@ mod tests {
             .iter()
             .all(|entry| entry.starts_with("synthetic")));
         assert!(SYNTHETIC_QUERY.starts_with("synthetic"));
+    }
+
+    /// A bare field with no routing at all, for the two claims every keyboard script leans on and
+    /// which no Finder-level assertion can establish by itself: that this harness can tell which
+    /// element holds focus, and that an injected key really drives Rune's editor. Without the
+    /// second, "the routing handler consumed the arrow" would pass just as happily when the field
+    /// never had the key in the first place.
+    #[derive(Debug)]
+    struct Bare {
+        field: TextEdit,
+    }
+
+    fn bare_view(state: &Bare, _cx: &mut Cx<Bare>) -> El {
+        col().key("bare-window").size(240.0, 120.0).child(
+            text_input(&state.field, TextStyle::new(14.0, 400.0))
+                .key("bare-field")
+                .size(200.0, 30.0)
+                .on_edit(|state: &mut Bare| &mut state.field),
+        )
+    }
+
+    fn bare() -> Bare {
+        Bare {
+            field: TextEdit::new(String::new()),
+        }
+    }
+
+    #[test]
+    fn focus_starts_empty_and_a_press_puts_it_in_the_field() {
+        let mut stage = Stage::new(bare(), bare_view, (240.0, 120.0));
+        assert_eq!(
+            stage.focused_key(),
+            None,
+            "nothing holds focus until a pointer or Tab asks, so a script that skips the press is \
+             testing the window rather than the field"
+        );
+        assert!(
+            stage.press_until_focused("bare-field"),
+            "a press inside a text field is what focuses it"
+        );
+    }
+
+    #[test]
+    fn an_injected_key_drives_the_real_editor() {
+        let mut stage = Stage::new(bare(), bare_view, (240.0, 120.0));
+        assert!(stage.press_until_focused("bare-field"));
+        stage.type_text("synthetic-token");
+        assert_eq!(
+            stage.state().field.text,
+            "synthetic-token",
+            "a Key::Text event has to reach the field's own state, or every routing script below \
+             is asserting on a key that never arrived"
+        );
+        stage.press_key(Key::Backspace);
+        assert_eq!(
+            stage.state().field.text,
+            "synthetic-toke",
+            "a key nothing routes has to fall through to the editor: this is what makes \
+             \"the handler consumed it\" a claim rather than a tautology"
+        );
     }
 }

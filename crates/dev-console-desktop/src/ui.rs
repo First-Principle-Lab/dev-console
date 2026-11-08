@@ -12,10 +12,24 @@
 //! milestone 2 moves into `dev-console-core`: the repository and search ranking behind
 //! [`Library::entries`], the vault state behind the header, the project scanners behind
 //! [`Finder::context`], and the ports of the draft validation, argument parsing, formatting and
-//! Finder selection logic now living in `src/lib/*.ts`. Keyboard routing (Escape, arrow selection,
-//! Ctrl+1/Ctrl+2), the focus trap, completion behaviour, output panels and the SVG icon set are all
-//! milestone 4 work against a real renderer; none of them can be *accepted* headlessly, so they are
-//! not invented here.
+//! Finder selection logic now living in `src/lib/*.ts`.
+//!
+//! ## Which of these this container can decide
+//!
+//! The Finder's keyboard routing is decidable here and is therefore built here: [`Finder::route_key`]
+//! runs on keys the runtime injects with `Runtime::key`, the query field takes focus from a scripted
+//! press, and `dev-console-ui-tests/tests/finder_keys.rs` asserts the resulting state transitions.
+//! What that harness still cannot decide is delivery: whether the compositor hands the global
+//! shortcut to the window at all, and whether the focus ring or the caret *looks* right - both stay
+//! UNVERIFIED (owner desktop) in the native-feasibility ledger.
+//!
+//! Still unbuilt, and not faked: `Enter`/`Space` copy (needs the clipboard seam the service port
+//! brings), `Ctrl+O` details and `Ctrl+P` ignore-context (need the details panel), the Library's
+//! `Ctrl+1`/`Ctrl+2` tab chords, the focus trap, output panels and the SVG icon set. `Space` is
+//! deliberately left unbound rather than bound imperfectly: the shipped handler binds it beside
+//! `Enter` behind `shouldCommit` (`src/lib/finder-state.ts`), and Rune's IME composition flag is
+//! `pub(super)`, so a handler cannot honour that guard - `route_key` holds `Enter`/`Escape` back
+//! mid-composition but not `Space`, which a composed space would have to survive.
 //!
 //! ## Colour rule
 //!
@@ -32,7 +46,7 @@
 //! change, and the ported data is what that change will map from - not a second colour source.
 
 use rune::tok::{radius, space, type_};
-use rune::{col, el, row, text, text_input, Cx, El, TextEdit};
+use rune::{col, el, row, text, text_input, Cx, El, Key, KeyEvent, TextEdit, Tx};
 
 /// Which list the Library is showing. Mirrors the Ctrl+1 / Ctrl+2 tabs of the current app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,6 +93,11 @@ pub struct Finder {
     /// The project folder the Finder detected from the focused window, shown as a chip. Empty
     /// means no context was detected. A path only - never file contents.
     pub context: String,
+    /// Set when the palette asked to be dismissed. Explicit state rather than a window call: the
+    /// shell that hides the window reads it (the shipped palette's `api.hideSelf()` hop), so the
+    /// decision "Escape clears the palette and takes it out of the way" is testable here while the
+    /// unmapping itself stays the owner-desktop check it is.
+    pub dismissed: bool,
 }
 
 impl Default for Finder {
@@ -88,6 +107,7 @@ impl Default for Finder {
             rows: Vec::new(),
             selected: 0,
             context: String::new(),
+            dismissed: false,
         }
     }
 }
@@ -110,6 +130,94 @@ impl Finder {
             return true;
         }
         false
+    }
+
+    /// Moves the highlight by `delta`, the port of `nextSelection` in `src/lib/finder-state.ts`:
+    /// it clamps instead of wrapping, keeps a still-valid selection, and when the selected row has
+    /// fallen out of a shortened list it restarts at the end the movement was heading for. Returns
+    /// whether the highlight moved.
+    pub fn move_selection(&mut self, delta: isize) -> bool {
+        if self.rows.is_empty() {
+            return false;
+        }
+        let last = self.rows.len() - 1;
+        if self.selected > last {
+            self.selected = if delta >= 0 { 0 } else { last };
+            return true;
+        }
+        let wanted = self.selected as isize + delta;
+        let next = wanted.clamp(0, last as isize) as usize;
+        if next == self.selected {
+            return false;
+        }
+        self.selected = next;
+        true
+    }
+
+    /// Accepts the selected row into the field: the port of `tabCompletion` in
+    /// `src/lib/finder-state.ts`, which returns the row's name for both a prefix match and a fuzzy
+    /// one, and nothing at all once the field already holds that name. Writes through
+    /// [`TextEdit::replace_text`], which zeroes the old draft - the query field can hold a secret's
+    /// name, so a plain `String` assignment would leave the old bytes in the allocation.
+    ///
+    /// The shipped handler also re-searches and keeps the same row selected (`acceptCompletion`);
+    /// there is no search backend behind this state yet, so only the field changes.
+    pub fn complete(&mut self) -> bool {
+        let Some(row) = self.rows.get(self.selected) else {
+            return false;
+        };
+        if row == &self.query.text {
+            return false;
+        }
+        let row = row.clone();
+        self.query.replace_text(row);
+        true
+    }
+
+    /// Takes the palette out of the way: the port of `hide` in `src/windows/Finder.svelte`, which
+    /// clears the query, the rows and the selection and then closes the window. `clear` rather than
+    /// an empty assignment because it zeroes the old draft and keeps keyboard focus on the field,
+    /// which is where the next summon wants it. The request-counter half of the shipped `hide`
+    /// belongs to the search port and is not here yet.
+    pub fn dismiss(&mut self) {
+        self.query.clear();
+        self.rows.clear();
+        self.selected = 0;
+        self.dismissed = true;
+    }
+
+    /// The palette's key routing, the native mirror of `<input on:keydown={onKeydown}>` in
+    /// `src/windows/Finder.svelte`. It is reached through [`El::on_input_key`] on the query field -
+    /// the only Rune hook that sees a key while a text field holds focus, because `El::on_key`
+    /// covers controls that own their keys and `Runtime::on_key` runs only for keys the focused
+    /// field left alone (`route_key` in `runtime/input/keys.rs` consults the input's own handler
+    /// before the editor and the window's).
+    ///
+    /// Returning true is `preventDefault`: the key never reaches the editor, so an arrow does not
+    /// move the caret and Escape does not blur the field. The four bindings below are the shipped
+    /// ones this state can honour today; `Enter`/`Space` (copy) and `Ctrl+O`/`Ctrl+P` fall through
+    /// to the field until the seams behind them exist, and the footer says the same thing this
+    /// comment does rather than advertising a binding that is not there.
+    pub fn route_key(&mut self, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+        match ev.key {
+            Key::Down => {
+                self.move_selection(1);
+                true
+            }
+            Key::Up => {
+                self.move_selection(-1);
+                true
+            }
+            Key::Tab => {
+                self.complete();
+                true
+            }
+            Key::Escape => {
+                self.dismiss();
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -301,7 +409,13 @@ fn query_field(state: &Finder, theme: rune::tok::Theme) -> El {
                 .role("textbox")
                 .label("Search commands and secrets")
                 .color(theme.text)
-                .on_edit(|state: &mut Finder| &mut state.query),
+                .on_edit(|state: &mut Finder| &mut state.query)
+                // The palette's bindings belong on the field, not on the window: the shipped
+                // handler is `<input on:keydown>`, and a focused Rune field is also the only thing
+                // that sees its own keys before the editor does. See [`Finder::route_key`].
+                .on_input_key(|state: &mut Finder, ev: &KeyEvent, tx: &mut Tx| {
+                    state.route_key(ev, tx)
+                }),
         )
 }
 
@@ -371,21 +485,32 @@ fn result_rows(state: &Finder, theme: rune::tok::Theme) -> El {
         }))
 }
 
+/// The footer's hints. Each string is the binding [`Finder::route_key`] actually honours, in the
+/// order `src/windows/Finder.svelte` lists them: the shipped footer also offers `Enter` copy and
+/// `Ctrl+O` details, and those chips stay out of this one until the clipboard and details seams
+/// exist, because a hint is a promise the shell has to keep.
+const FINDER_HINTS: [(&str, &str); 3] = [
+    ("footer-move", "Up+Down select"),
+    ("footer-tab", "Tab complete"),
+    ("footer-dismiss", "Esc dismiss"),
+];
+
 fn finder_footer(state: &Finder, theme: rune::tok::Theme) -> El {
-    row()
+    let mut footer = row()
         .key("finder-footer")
         .w_full()
         .gap(space::S2)
-        .center_y()
-        .child(keycap("footer-up", "↑↓", theme))
-        .child(keycap("footer-open", "↵ open", theme))
-        .child(keycap("footer-copy", "⌥⌘C copy", theme))
-        .child(keycap("footer-dismiss", "esc", theme))
-        .child(
-            text(format!("{} of {}", state.selected + 1, state.rows.len()))
-                .font(type_::LABEL)
-                .color(theme.text_secondary),
-        )
+        .center_y();
+    for (key, hint) in FINDER_HINTS {
+        footer = footer.child(keycap(key, hint, theme));
+    }
+    // The shipped footer pushes its row count to the far edge with a flex spacer; `grow` is Rune's.
+    footer.child(el().grow(1.0)).child(
+        text(format!("{}", state.rows.len()))
+            .key("footer-count")
+            .font(type_::LABEL)
+            .color(theme.text_secondary),
+    )
 }
 
 /// A keyboard hint chip. `Keycap` in the current UI; the milestone-4 pass adds the real glyph set.
