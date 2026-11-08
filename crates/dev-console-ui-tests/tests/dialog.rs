@@ -22,7 +22,7 @@
 
 use dev_console_desktop::dialog::Dialog;
 use dev_console_desktop::ui::{Library, Tab};
-use dev_console_ui_tests::{Stage, DIALOG_KEYS};
+use dev_console_ui_tests::{entry_names, Stage, DIALOG_KEYS};
 use rune::Key;
 
 /// The three entries every script below uses: the middle one is what the confirmation is opened on,
@@ -152,7 +152,7 @@ fn confirming_removes_the_named_record_and_closes_the_confirmation() {
         "the commit action has to be where it is drawn"
     );
     assert_eq!(
-        stage.state().entries,
+        entry_names(stage.state()),
         vec!["synthetic command one", "synthetic command three"],
         "the record it named is gone; its neighbours are not"
     );
@@ -171,20 +171,18 @@ fn a_record_that_moved_in_the_list_is_still_the_record_that_gets_removed() {
     let mut stage = open(1);
     stage.state_mut().entries.reverse();
     assert_eq!(
-        stage.state().entries.first().map(String::as_str),
+        entry_names(stage.state()).first().map(String::as_str),
         Some("synthetic command three"),
         "the list moved under the open confirmation, which is the case being tested"
     );
     stage.press("dialog-confirm");
     assert!(
-        !stage
-            .state()
-            .entries
+        !entry_names(stage.state())
             .iter()
             .any(|entry| entry == "synthetic command two"),
         "the named record is removed wherever it has ended up"
     );
-    assert_eq!(stage.state().entries.len(), 2);
+    assert_eq!(entry_names(stage.state()).len(), 2);
 }
 
 #[test]
@@ -192,7 +190,7 @@ fn cancelling_removes_nothing() {
     let mut stage = open(2);
     assert!(stage.press("dialog-cancel"));
     assert_eq!(
-        stage.state().entries,
+        entry_names(stage.state()),
         vec![
             "synthetic command one",
             "synthetic command two",
@@ -212,7 +210,7 @@ fn escape_backs_out_of_the_confirmation_without_touching_the_list() {
     let mut stage = open(1);
     stage.press_key(Key::Escape);
     assert!(!stage.has("dialog"), "Escape closes it");
-    assert_eq!(stage.state().entries.len(), 3, "and removes nothing");
+    assert_eq!(entry_names(stage.state()).len(), 3, "and removes nothing");
     assert!(stage.state().pending_delete.is_none());
 }
 
@@ -225,7 +223,7 @@ fn a_press_off_the_panel_backs_out_of_the_confirmation_too() {
     assert!(stage.press("library-title"));
     assert!(!stage.has("dialog"), "a press off the panel dismisses it");
     assert_eq!(
-        stage.state().entries.len(),
+        entry_names(stage.state()).len(),
         3,
         "and dismisses it without acting"
     );
@@ -241,7 +239,7 @@ fn the_list_behind_an_open_confirmation_cannot_act() {
     let mut stage = open(1);
     stage.press_row(0);
     assert_eq!(
-        stage.state().entries.len(),
+        entry_names(stage.state()).len(),
         3,
         "the row behind the panel is inert: nothing is removed and no second handler fires"
     );
@@ -251,7 +249,7 @@ fn the_list_behind_an_open_confirmation_cannot_act() {
     );
     assert!(stage.state().pending_delete.is_none());
     assert_eq!(
-        stage.state().entries,
+        entry_names(stage.state()),
         vec![
             "synthetic command one",
             "synthetic command two",
@@ -336,7 +334,7 @@ fn closing_the_confirmation_puts_the_keyboard_back_where_it_came_from() {
         Some("entry-1"),
         "cancelling restores focus to the row that asked"
     );
-    assert_eq!(stage.state().entries.len(), 3);
+    assert_eq!(entry_names(stage.state()).len(), 3);
 }
 
 /// The shipped component guards its restore with `if (trigger?.isConnected) trigger.focus()`: a

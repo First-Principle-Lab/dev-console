@@ -5,6 +5,11 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+
+- The native shell has an entry editor pane and the state behind it: opening an edit copies the saved record into a draft, the pane reports `unsaved changes` only while the draft differs from that record, and the list is swapped out while it is open. Saving writes the draft back into the record the editor was opened on rather than into the slot it sat in, so a record that went away meanwhile is neither recreated nor silently replaced.
+- The shared dialog panel has a second user, the unsaved-changes prompt: three actions (`Keep editing`, `Discard`, `Save`), its own copy, a keyboard trap over three stops, and the same three dismissive routes as the delete confirmation. A close request and the Library's tab chords both refuse to throw a draft away, the way the shipped window does.
+
 ### Fixed
 
 - Closing the finder while Dev Console is quitting finishes the quit at once instead of waiting out the five-second grace period.

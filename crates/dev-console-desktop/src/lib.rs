@@ -27,6 +27,8 @@
 pub mod app;
 pub mod copy;
 pub mod dialog;
+pub mod editor;
+pub mod finder;
 pub mod identity;
 pub mod instance;
 pub mod off_thread;

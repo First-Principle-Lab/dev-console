@@ -231,8 +231,8 @@ fn a_confirmation_survives_a_tab_switch_under_it_and_still_names_its_own_record(
     assert!(stage.press("dialog-confirm"));
 
     assert_eq!(
-        stage.state().entries,
-        vec!["synthetic command one".to_owned()],
+        stage.state().entries[0].name,
+        "synthetic command one",
         "the record it named, not the one the newly shown tab happens to list first"
     );
     assert!(stage.state().pending_delete.is_none());

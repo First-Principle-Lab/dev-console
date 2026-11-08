@@ -45,7 +45,7 @@
 use dev_console_core::models::CopyRequest;
 use dev_console_desktop::app::library_spec;
 use dev_console_desktop::copy::CopySource;
-use dev_console_desktop::ui::{finder_view, Candidate, Finder, Library};
+use dev_console_desktop::ui::{finder_view, Candidate, Finder, Library, Tab};
 use rune::clipboard::MemoryClipboard;
 use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx};
 
@@ -113,6 +113,32 @@ pub const DIALOG_KEYS: &[&str] = &[
     "dialog-footer",
     "dialog-cancel",
     "dialog-confirm",
+];
+
+/// Keys the unsaved-changes prompt draws, in focus order. The same shape as [`DIALOG_KEYS`] with one
+/// action more - which is the point of the list: the shared shell is one panel to two screens, and the
+/// difference between them is data and a footer action, not a second trap. The prefix differs from
+/// `"dialog"` because Rune addresses elements by key and both panels can be on screen at once.
+pub const PROMPT_KEYS: &[&str] = &[
+    "prompt-scrim",
+    "prompt",
+    "prompt-title",
+    "prompt-body",
+    "prompt-footer",
+    "prompt-cancel",
+    "prompt-discard",
+    "prompt-confirm",
+];
+
+/// Keys the editor pane draws when it is open. `dirty-indicator` is in the middle because that is
+/// where the shipped header puts it - beside the title - and it is present only while the draft
+/// differs from the saved record, so scripts should read this list through `present_from` rather than
+/// assume the whole of it is there.
+pub const EDITOR_KEYS: &[&str] = &[
+    "entry-editor",
+    "editor-title",
+    "dirty-indicator",
+    "field-name",
 ];
 
 /// A runtime driven without a display, with the assertions the suites share.
@@ -208,12 +234,50 @@ impl<S: 'static> Stage<S> {
         &self.runtime.state
     }
 
+    /// Runs `f` over the state, then rebuilds the tree from it, and returns what `f` returned.
+    ///
+    /// A script needs this and not bare [`Stage::state_mut`] whenever it is about to ask the *tree* a
+    /// question: Rune re-runs the view when state changes through a handler, a poll or an explicit
+    /// invalidation, so mutating the state and then reading `has`/`label_of` would be reading the tree
+    /// as it was before the change - a silent "the element is not there because nothing rebuilt it",
+    /// which is the worst kind of false failure to debug. Anything that changes state from outside a
+    /// handler and then asserts on the surface goes through here.
+    ///
+    /// This is still not a substitute for driving the UI. A press, a chord and an injected key are how
+    /// a shipped interaction is exercised; `apply` is for the state a UI affordance has not been built
+    /// for yet (an editor the details pane has not opened, a close request Rune has not delivered), and
+    /// every use of it should say which.
+    pub fn apply<R>(&mut self, f: impl FnOnce(&mut S) -> R) -> R {
+        let outcome = f(&mut self.runtime.state);
+        self.runtime.invalidate();
+        self.runtime.frame(1.0 / 60.0);
+        outcome
+    }
+
+    /// Rebuilds the tree from the state as it is now: Rune's own "state changed outside a handler"
+    /// invalidation, then the frame that re-runs the view and lays it out.
+    ///
+    /// Public because a script that changes state in a way no handler and no borrow covers still has to
+    /// say so before reading the tree; in every other case [`Stage::state_mut`]'s borrow or a press does
+    /// it. Note what this does *not* do: it does not change the state, so a test that fails after
+    /// calling it is failing on the view's own behaviour.
+    pub fn settle(&mut self) {
+        self.runtime.invalidate();
+        self.runtime.frame(1.0 / 60.0);
+    }
+
     /// The state, for setting up a case no interaction can produce - a result list that got
     /// shorter under the highlight, say, which the search port will cause and no key here can.
     /// Never a substitute for driving the UI: a script that mutates its way to an assertion has
-    /// tested the fixture.
-    pub fn state_mut(&mut self) -> &mut S {
-        &mut self.runtime.state
+    /// tested the fixture, and the doc above each use should say what no interaction could produce.
+    ///
+    /// The borrow settles the tree when it ends, and that is not a convenience. Rune re-runs a window's
+    /// view when state changes *through a handler*, so a script that changed the state here and then
+    /// asked the tree a question would have been reading the frame from before the change - an
+    /// "element not present" failure that looks like a view bug and is really a missing rebuild. The
+    /// guard settles it: one invalidate and one frame when the borrow ends.
+    pub fn state_mut(&mut self) -> State<'_, S> {
+        State { stage: self }
     }
 
     /// Lays out another frame, e.g. after a press, so animations and layout settle again.
@@ -250,6 +314,18 @@ impl<S: 'static> Stage<S> {
     pub fn centre_of(&self, key: &str) -> Option<(f32, f32)> {
         let ([x, y, width, height], _) = self.box_of(key)?;
         Some((x + width / 2.0, y + height / 2.0))
+    }
+
+    /// Presses at a point, which is the only way to land a press *beside* something.
+    ///
+    /// The shell's two panels are full-window scrims with the panel centred inside them, so the centre
+    /// of a scrim is its own panel - and a script testing "a press off the panel" has to aim off it.
+    /// The coordinates are the runtime's, i.e. the same space `box_of` reports, and a press outside the
+    /// window's bounds is simply a press on nothing.
+    pub fn press_point(&mut self, x: f32, y: f32) {
+        self.runtime.pointer_down(x, y);
+        self.runtime.pointer_up(x, y);
+        self.runtime.frame(1.0 / 60.0);
     }
 
     /// Presses `key` where it lies. Returns false when the key is not in the tree, so a script that
@@ -517,16 +593,52 @@ pub fn secret_candidate() -> Candidate {
     Candidate::secret("synthetic-secret-1", "synthetic deploy token")
 }
 
+/// A borrow of a [`Stage`]'s state that settles the tree when the script is done with it. Derefs to
+/// the state, so `stage.state_mut().rows = vec![..]` and `stage.state_mut().discard_draft()` read
+/// exactly as they would against a bare `&mut S`.
+///
+/// See [`Stage::state_mut`] for why settling belongs to the borrow rather than to each call site.
+pub struct State<'a, S: 'static> {
+    stage: &'a mut Stage<S>,
+}
+
+impl<S: 'static> std::ops::Deref for State<'_, S> {
+    type Target = S;
+    fn deref(&self) -> &S {
+        &self.stage.runtime.state
+    }
+}
+
+impl<S: 'static> std::ops::DerefMut for State<'_, S> {
+    fn deref_mut(&mut self) -> &mut S {
+        &mut self.stage.runtime.state
+    }
+}
+
+impl<S: 'static> Drop for State<'_, S> {
+    fn drop(&mut self) {
+        self.stage.settle();
+    }
+}
+
+/// The names the list holds, in order. The assertions a delete confirmation and a tab switch have to
+/// satisfy are about *which records are left*, and a row is now a saved record rather than a bare name
+/// (`editor::EntryDraft`), so this is how those assertions stay about the records instead of having to
+/// name the row type at every call.
+pub fn entry_names(library: &Library) -> Vec<String> {
+    library
+        .entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect()
+}
+
 /// A Library with rows, so the list and the empty state can both be exercised.
 pub fn library_with_entries() -> Library {
-    Library {
-        entries: vec![
-            "synthetic command one".into(),
-            "synthetic command two".into(),
-        ],
-        vault_unlocked: true,
-        ..Library::default()
-    }
+    Library::with_entries(
+        Tab::Commands,
+        &["synthetic command one", "synthetic command two"],
+    )
 }
 
 #[cfg(test)]
@@ -585,7 +697,7 @@ mod tests {
         assert!(library
             .entries
             .iter()
-            .all(|entry| entry.starts_with("synthetic")));
+            .all(|entry| entry.name.starts_with("synthetic")));
         assert!(SYNTHETIC_QUERY.starts_with("synthetic"));
     }
 

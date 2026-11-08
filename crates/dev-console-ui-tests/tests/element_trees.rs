@@ -160,7 +160,12 @@ fn pressing_a_row_reaches_that_rows_handler() {
         "the row's handler is the confirmation, so pressing has to open it"
     );
     assert_eq!(
-        stage.state().entries,
+        stage
+            .state()
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["synthetic command one", "synthetic command two"],
         "a press asks; it does not remove"
     );
@@ -275,10 +280,12 @@ fn no_window_state_can_hold_a_secret_value() {
     assert!(finder.query.text.is_empty());
 
     // A Library is a tab, entry *titles* and a lock flag. Nothing in either type can carry a value,
-    // a key or command output, so `Debug`-formatting a state cannot print one either.
+    // a key or command output, so `Debug`-formatting a state cannot print one either - and now that a
+    // row is a saved record with command text beside its name, that half of the claim is worth
+    // re-asserting on a state whose list is *not* empty, which is what the row below is for.
     let library = Library {
-        entries: vec!["synthetic command".into()],
-        ..Library::default()
+        vault_unlocked: false,
+        ..Library::with_entries(Tab::Commands, &["synthetic command"])
     };
     let debug = format!("{library:?} {finder:?}");
     for marker in ["BEGIN PRIVATE", "password=", "token", "vault-key"] {

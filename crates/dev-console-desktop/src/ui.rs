@@ -10,34 +10,35 @@
 //!
 //! Plan milestone 4 ("Port all feature screens") fills these in, with data from the services that
 //! milestone 2 moves into `dev-console-core`: the repository and search ranking behind
-//! [`Library::entries`], the vault state behind the header, the project scanners behind
-//! [`Finder::context`], and the ports of the draft validation, argument parsing, formatting and
+//! [`Library::entries`], the vault state behind the header, the project scanners behind the
+//! palette's context chip, and the ports of the draft validation, argument parsing, formatting and
 //! Finder selection logic now living in `src/lib/*.ts`.
+//!
+//! ## Where the Finder is
+//!
+//! The palette's own state machine - [`Finder`], its [`Candidate`]s, `finder_view`, its keyboard
+//! routing and the copy seam - is in [`crate::finder`], and the reasons this host can decide those
+//! things are stated there. This module is the Library window: its tab strip, its list placeholder,
+//! the editor pane, and the two panels this window can put on top of them.
 //!
 //! ## Which of these this container can decide
 //!
-//! The Finder's keyboard routing is decidable here and is therefore built here: [`Finder::route_key`]
-//! runs on keys the runtime injects with `Runtime::key`, the query field takes focus from a scripted
-//! press, and `dev-console-ui-tests/tests/finder_keys.rs` asserts the resulting state transitions.
-//! What that harness still cannot decide is delivery: whether the compositor hands the global
-//! shortcut to the window at all, and whether the focus ring or the caret *looks* right - both stay
-//! UNVERIFIED (owner desktop) in the native-feasibility ledger.
+//! Both windows' keyboard routing is decidable here and is therefore built here: [`Library::route_key`]
+//! runs on the chords read off the same `AppSpec` the real window is built with, and
+//! `dev-console-ui-tests/tests/library_keys.rs` asserts what the chords do to the state. What that
+//! harness still cannot decide is *delivery*: whether the compositor hands the global shortcut to the
+//! window at all, and whether the focus ring or the caret *looks* right - both stay UNVERIFIED (owner
+//! desktop) in the native-feasibility ledger.
 //!
-//! Copying is decidable here too, which is what [`Finder::activate`] and [`crate::copy`] exist for:
-//! the value is resolved by id behind a [`copy::CopySource`] trait and written through Rune's own
-//! secret-copy path, so no field of any state in this module can hold one, and the scripted tests in
-//! `tests/finder_copy.rs` decide the copy, the failure message and the hygiene rules that go with it.
-//! What is *not* built is the other side of that seam: the only [`CopySource`] in the shell today is
-//! [`copy::Unwired`], so a real binary resolves no entry and shows the shipped failure line until
-//! milestone 2 hands the seam a `dev-console-core` state.
-//!
-//! Still unbuilt, and not faked: `Space` copy (see below), `Ctrl+O` details and `Ctrl+P`
-//! ignore-context (need the details panel), the Library's `Ctrl+N`/`Ctrl+S` (need an editor), the
-//! command-output panel and the SVG icon set. Two things have come off that list since it was
-//! written: destructive confirmation, because [`Library::request_delete`] opens [`crate::dialog`]'s
-//! shared shell (which owns the focus trap, the initial focus and the restore), and the Library's
-//! `Ctrl+1`/`Ctrl+2` tab chords, routed by [`Library::route_key`] off the same `AppSpec` the real
-//! window is built from. `Space` is deliberately left unbound rather than bound imperfectly:
+//! Still unbuilt, and not faked: `Ctrl+N` (nothing opens an editor without the inspector's Edit
+//! button), `Ctrl+S` (an editor draft exists now, but the `validateDraft` gate that would let the
+//! chord answer for a save does not), `Space` copy and `Ctrl+O` details and `Ctrl+P` ignore-context
+//! (need the details panel), the command-output panel and the SVG icon set. Three things have come
+//! off that list since it was written: destructive confirmation, because [`Library::request_delete`]
+//! opens [`crate::dialog`]'s shared shell (which owns the focus trap, the initial focus and the
+//! restore), the Library's `Ctrl+1`/`Ctrl+2` tab chords, routed by [`Library::route_key`] off the same
+//! `AppSpec` the real window is built from, and the editor pane with the draft rules behind it
+//! ([`crate::editor], [`Library::start_edit`]). `Space` is deliberately left unbound rather than bound imperfectly:
 //! the shipped handler binds it beside `Enter` behind `shouldCommit` (`src/lib/finder-state.ts`), and
 //! Rune's IME composition flag is `pub(super)`, so a handler cannot honour that guard - `route_key`
 //! holds `Enter`/`Escape` back mid-composition but not `Space`, which a composed space would have to
@@ -57,14 +58,13 @@
 //! views use `rune::tok::theme` to stay token-driven while the palette mapping is a milestone-4
 //! change, and the ported data is what that change will map from - not a second colour source.
 
-use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::sync::LazyLock;
 
-use crate::copy::{self, CopyOutcome, CopySource, Unwired};
 use crate::dialog::{self, Dialog};
-use dev_console_core::models::{CopyRequest, Kind};
+use crate::editor::{Editor, EntryDraft};
+pub use crate::finder::{finder_view, Candidate, Finder};
 use rune::tok::{radius, space, type_};
-use rune::{col, el, row, text, text_input, Chord, Cx, El, Key, KeyEvent, TextEdit, Tx};
+use rune::{col, el, row, text, Chord, Cx, El, KeyEvent, Tx};
 
 /// Which list the Library is showing. Mirrors the Ctrl+1 / Ctrl+2 tabs of the current app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -114,9 +114,12 @@ pub struct PendingDelete {
 pub struct Library {
     /// Commands or Secrets.
     pub tab: Tab,
-    /// Placeholder for the ranked, grouped rows `src/lib` builds from the repository; empty means
-    /// the empty state is shown. Synthetic strings only - never entry content from a real profile.
-    pub entries: Vec<String>,
+    /// The rows, standing in for the ranked, grouped list `src/lib` builds from the repository; empty
+    /// means the empty state is shown. A [`EntryDraft`] rather than a bare name because a *saved*
+    /// record is what an editor draft is compared against and written back to - see that type's doc.
+    /// Every value in one is synthetic test material in every harness that builds it, and a secret's
+    /// *value* has no field here at all.
+    pub entries: Vec<EntryDraft>,
     /// True when the vault is unlocked. Only the *status* crosses into the UI; the key and any
     /// secret value never reach this struct.
     pub vault_unlocked: bool,
@@ -125,6 +128,19 @@ pub struct Library {
     /// detail for the same reason: what the confirmation *names* has to be decided when the press
     /// lands, not when the panel is drawn.
     pub pending_delete: Option<PendingDelete>,
+    /// The entry being edited and the draft typed over it, `None` while the window is showing the
+    /// list. The shipped app holds the same fact as `mode === 'edit'`, and the *draft* half is state
+    /// rather than a widget detail for the reason `pendingDelete` is: the unsaved-changes prompt, the
+    /// dirty chip and the write-back all read the same draft, and a draft only held by a text field
+    /// would leave "is there anything to lose?" unanswerable from the state the view is built from.
+    ///
+    /// `Default` is `None`, so every existing `Library { .. }` literal still compiles unchanged.
+    pub editing: Option<Editor>,
+    /// The unsaved-changes prompt is on screen: the shipped `pendingClose`, and a flag of its own for
+    /// the shipped reason - it is raised by a *close request*, not by the draft being dirty, and
+    /// `Keep editing` has to put it away without touching the draft. Deriving the prompt from the draft
+    /// alone would leave it with no dismissive route at all.
+    pub pending_close: bool,
 }
 
 /// The two tab chords the Library window owns, in the order the shipped handler tests them:
@@ -154,15 +170,50 @@ static TAB_CHORDS: [(LazyLock<Chord>, Tab); 2] = [
 /// route is worse than no footer at all, and the Finder already has a test holding that line.
 pub const TAB_HINT: &str = "Ctrl+1 / Ctrl+2 to switch tabs";
 
+/// The element-key prefix of the delete confirmation, which is also the prefix the shipped spec's
+/// `data-testid`s resolve (`dialog`, `dialog-cancel`, `dialog-confirm`). The one carried as a value
+/// rather than a literal at the call site because the shell's two panels are distinguished by it:
+/// Rune addresses elements by key, so two live panels in one tree cannot share the seven keys their
+/// actions are drawn under.
+const DIALOG_ID: &str = "dialog";
+
+/// The unsaved-changes prompt's prefix, for the same reason - and the reason it is not `"dialog"` is
+/// the reason [`DIALOG_ID`] is not inlined: the two panels can be on screen at once, and a scripted
+/// test has to be able to press *this* panel's `Keep editing` rather than whichever one the runtime
+/// resolves a shared key to.
+const PROMPT_ID: &str = "prompt";
+
 impl Library {
-    /// A Library showing `entries` on `tab`, for tests and for the headless scenes.
+    /// A Library showing `entries` on `tab`, for tests and for the headless scenes. Each row is saved
+    /// under its own name with no command text, which is all the placeholder list and the placeholder
+    /// editor need; note that [`Library::save_edit`] overwrites the whole saved record, so a fixture
+    /// that wants command text in the record it edits has to build `entries` itself.
     pub fn with_entries(tab: Tab, entries: &[&str]) -> Library {
         Library {
             tab,
-            entries: entries.iter().map(|entry| (*entry).to_owned()).collect(),
+            entries: entries
+                .iter()
+                .map(|name| EntryDraft {
+                    name: (*name).to_owned(),
+                    command: String::new(),
+                })
+                .collect(),
             vault_unlocked: true,
+            editing: None,
+            pending_close: false,
             pending_delete: None,
         }
+    }
+
+    /// The name row `index` draws, for the view. A view that reached into `entries` itself could
+    /// assume the placeholder list is a `Vec<String>`, which is the assumption the saved-record type
+    /// exists to break; this is the one place the list's shape is allowed to show. Out of range reads
+    /// as empty, which no row of the drawn list can be.
+    pub fn name_field(&self, index: usize) -> String {
+        self.entries
+            .get(index)
+            .map(|entry| entry.name.clone())
+            .unwrap_or_default()
     }
 
     /// Asks whether to remove row `index` - the shipped row's `onDelete` hop, and the only way a
@@ -174,7 +225,7 @@ impl Library {
             return false;
         };
         self.pending_delete = Some(PendingDelete {
-            name: entry.clone(),
+            name: entry.name.clone(),
             kind: self.tab.kind(),
         });
         true
@@ -187,7 +238,11 @@ impl Library {
         let Some(pending) = self.pending_delete.take() else {
             return;
         };
-        if let Some(position) = self.entries.iter().position(|entry| *entry == pending.name) {
+        if let Some(position) = self
+            .entries
+            .iter()
+            .position(|entry| entry.name == pending.name)
+        {
             self.entries.remove(position);
         }
     }
@@ -198,8 +253,142 @@ impl Library {
         self.pending_delete = None;
     }
 
-    /// The confirmation to draw, built from the pending record. `None` means no dialog, and the
-    /// view function turns on it.
+    /// Opens the editor on row `index`, porting the shipped `startEdit`: the draft is a *copy* of the
+    /// saved record, and nothing written into it touches that record until [`Library::save_edit`] says
+    /// so. False when there is no such row - the shipped `if (!details || !selectedId) return;`.
+    ///
+    /// The one hop that is not here is the secret's `api.reveal`, which the shell cannot perform and
+    /// which is not faked: a secret editor, and the deliberate reveal that opens it, are recorded in
+    /// the capability matrix as absent rather than simulated with an empty draft.
+    pub fn start_edit(&mut self, index: usize) -> bool {
+        let Some(record) = self.entries.get(index) else {
+            return false;
+        };
+        self.editing = Some(Editor::new(index, record));
+        true
+    }
+
+    /// True when a draft differs from the record it was copied from - the shipped `draftDirty`, which
+    /// is `JSON.stringify(draft) !== JSON.stringify(baseline)`. False with no editor at all, because
+    /// `mode === 'edit' && draftDirty` is a conjunction and the list has nothing to lose.
+    ///
+    /// Field-wise rather than a JSON string compare: the comparison is *about the values*, and going
+    /// through a string encoding would mean the shell's idea of "changed" depended on an encoding
+    /// order. The shipped `baseline` is the same fact held the other way round - a snapshot to compare
+    /// against, not the live draft.
+    pub fn draft_dirty(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_some_and(|editor| editor.draft != editor.baseline)
+    }
+
+    /// Asks the state, not a widget, whether there is anything to lose: `mode === 'edit' &&
+    /// draftDirty`, the guard the shipped app repeats at the top of `select`, `togglePin`,
+    /// `startEdit`, `saveSuggestion` and the close request. Every native guard is written against
+    /// this one method, so the phrase cannot mean two things in this crate.
+    pub fn draft_is_open(&self) -> bool {
+        self.draft_dirty()
+    }
+
+    /// Writes the draft's name into the saved record - `api.save(draft)` in the shipped app, minus the
+    /// repository, the revision check and the change event, none of which the shell has.
+    ///
+    /// The draft is *copied over* the saved record rather than swapped for it, which is what keeps the
+    /// name and the command text of the original record intact: an editor that could reach only the
+    /// name must not be able to blank a field it cannot show. A record that has gone away is not
+    /// created.
+    ///
+    /// Returns whether anything was written. A record that went away while the editor was open is not
+    /// recreated - and the caller is told, because silently "saving" into nothing is the one outcome
+    /// the shipped `api.save(draft)` makes noise about.
+    pub fn save_edit(&mut self) -> bool {
+        let Some(editor) = self.editing.take() else {
+            return false;
+        };
+        // The slot is not the record. `index` says where the editor was opened, but between opening
+        // and saving the list can lose that row - the same await-shaped hole the delete confirmation
+        // refuses to act on by index - and then the slot holds somebody else's record. Writing the
+        // draft into it would be the bug, so the write goes to the record that is still what the
+        // editor was opened on, matched on its saved text: the same identity rule `confirm_delete`
+        // states, with the same caveat (two byte-identical saved records are not tellable apart here,
+        // and the real fix is the id the placeholder record does not have).
+        let written = match self
+            .entries
+            .iter()
+            .position(|record| *record == editor.baseline)
+        {
+            Some(position) => {
+                self.entries[position].name = editor.draft.name;
+                true
+            }
+            None => false,
+        };
+        self.pending_close = false;
+        written
+    }
+
+    /// Drops the draft and keeps the saved record exactly as it is - the shipped `cancelEdit`, whose
+    /// whole promise is that the record was never written to.
+    pub fn discard_draft(&mut self) {
+        self.editing = None;
+        self.pending_close = false;
+    }
+
+    /// The prompt's `Keep editing`: put the question away and change *nothing else*. This is the route
+    /// the shipped prompt shares with Escape and with a click off the panel (`oncancel` is
+    /// `() => (pendingClose = false)` - it sets one flag and nothing else), and it is the assertion
+    /// that separates a real cancel from a discard that happens to look the same on screen.
+    pub fn keep_editing(&mut self) {
+        self.pending_close = false;
+    }
+
+    /// The window asked to close: with something to lose, ask first - the shipped `close-requested`
+    /// handler's `if (mode === 'edit' && draftDirty) pendingClose = true;`, returning whether the window
+    /// may go now.
+    ///
+    /// Two honest gaps, both in the host rather than in this state machine, and neither worked around.
+    /// There is no native *producer* for the event yet: the window's close request belongs to Rune, and
+    /// `AppSpec::on_close` is not wired to this state, so the scripted tests call the handler directly,
+    /// as they call the chord router's state methods. And Rune's close hook has no veto at this
+    /// revision - where the shipped app keeps the window open to answer the prompt, a native close
+    /// would hide the window with the prompt on it. Both are recorded in the capability matrix.
+    pub fn request_close(&mut self) -> bool {
+        if self.draft_is_open() {
+            self.pending_close = true;
+            return false;
+        }
+        true
+    }
+
+    /// The prompt's `Save`: write the draft back, which closes the editor and so closes the prompt -
+    /// the shipped `saveDraft().then(() => allowClose())`, whose prompt cannot outlive the save because
+    /// the editor is no longer open to be dirty.
+    pub fn save_draft_from_prompt(&mut self) {
+        self.save_edit();
+    }
+
+    /// The field's hop: what a text input bound to the draft would call on every change.
+    ///
+    /// No Rune field is wired to it yet - see `editor_pane` for why a controlled input needs a
+    /// widget handle the state does not hold - so this is the seam that stands in for one, and the
+    /// scripted tests change a draft through it. That is not the same as testing a field (there is
+    /// none), and it is not the shell's rule either: every dirty-draft rule in here is decided from
+    /// `draft != baseline`, so what the scripts assert is the *shell's* behaviour once that relation
+    /// holds - the chip, the tab guard, the prompt, the write-back - none of which is this setter.
+    pub fn set_draft_name(&mut self, name: impl Into<String>) {
+        if let Some(editor) = self.editing.as_mut() {
+            editor.draft.name = name.into();
+        }
+    }
+
+    /// The prompt to draw, built from the draft rather than from a copy of it: the shipped prompt names
+    /// no entry and shows no field, so there is nothing here for a value to reach.
+    pub fn unsaved_dialog(&self) -> Option<Dialog> {
+        (self.pending_close && self.draft_is_open()).then(Dialog::unsaved_changes)
+    }
+
+    /// The confirmation to draw, built from the pending record. `None` means no dialog, and the view
+    /// function turns on it.
     pub fn delete_dialog(&self) -> Option<Dialog> {
         self.pending_delete
             .as_ref()
@@ -207,11 +396,30 @@ impl Library {
     }
 
     /// Shows `tab`: the port of `selectTab` in `src/windows/Library.svelte`. False when that tab is
-    /// already showing, because the shipped handler's first line is `if (tab === next) return` and
-    /// the rest of it (clearing `selectedId`, dropping `details`, reloading the list) has no native
-    /// twin until the shell has a selection, a details pane and a repository behind the list.
+    /// already showing, because the shipped handler's first line is `if (tab === next) return`, and
+    /// false when an unsaved draft is open, because its next three lines are the guard this is the
+    /// shell's only expression of:
+    ///
+    /// ```text
+    /// if (mode === 'edit' && draftDirty) { status = 'Save or discard the open edit first.'; return; }
+    /// ```
+    ///
+    /// ## Why the refusal raises the prompt
+    ///
+    /// The shipped app writes that sentence into its status line, which the native shell has not
+    /// built (no `StatusLine`, no `status` field), and a refusal that swallowed the keystroke in
+    /// silence would be a worse port than an incomplete one. So the guard asks the question that
+    /// sentence is asking instead: the unsaved-changes prompt, whose `Keep editing` / `Discard` /
+    /// `Save` are the three answers the refusal is waiting for, and which is built here rather than
+    /// promised. What the port does *not* do is change the tab, discard the draft, or pretend the
+    /// switch happened; a `status: Option<&'static str>` status line remains the literal port for
+    /// later.
     pub fn select_tab(&mut self, tab: Tab) -> bool {
         if self.tab == tab {
+            return false;
+        }
+        if self.draft_is_open() {
+            self.pending_close = true;
             return false;
         }
         self.tab = tab;
@@ -246,310 +454,16 @@ impl Library {
     }
 }
 
-/// One row of the palette's result list.
-///
-/// A candidate is *metadata*: the entry's id, the name the row prints, and which kind it is. That is
-/// the whole shape, and it is the point - the shipped palette receives exactly this from
-/// `api.search()` (`SearchResult`), and the value behind a `Secret` candidate reaches the clipboard
-/// only through [`Finder::activate`]'s call to the [`CopySource`], never through a field of a state
-/// struct a dump could print.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
-    /// The entry id the copy request is made for (`api.copy(kind, id, 0)`). Metadata, not a secret.
-    pub id: String,
-    /// The name the row prints, and the text Tab writes into the field (`tabCompletion`'s input).
-    pub name: String,
-    /// Command or secret: it decides the copy's wording and which backend path resolves the value.
-    pub kind: Kind,
-}
-
-impl Candidate {
-    /// A command candidate whose id is `id`.
-    pub fn command(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Candidate {
-            id: id.into(),
-            name: name.into(),
-            kind: Kind::Command,
-        }
-    }
-
-    /// A secret candidate: `name` is all the window ever sees of it.
-    pub fn secret(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Candidate {
-            id: id.into(),
-            name: name.into(),
-            kind: Kind::Secret,
-        }
-    }
-}
-
-/// A bare name is a command candidate whose id is that name - the shorthand the placeholder lists and
-/// the scripted fixtures use, so `vec!["git status".into()]` still reads as one row.
-impl From<&str> for Candidate {
-    fn from(name: &str) -> Self {
-        Candidate::command(name, name)
-    }
-}
-
-/// The Finder window's state.
-pub struct Finder {
-    /// The query field's editable text.
-    pub query: TextEdit,
-    /// Completion candidates, best first. Placeholder for the ported Finder selection logic; the
-    /// ranking rules live in `src/lib/search-ranking.ts` until that moves.
-    pub rows: Vec<Candidate>,
-    /// Index of the highlighted row.
-    pub selected: usize,
-    /// The project folder the Finder detected from the focused window, shown as a chip. Empty
-    /// means no context was detected. A path only - never file contents.
-    pub context: String,
-    /// Set when the palette asked to be dismissed. Explicit state rather than a window call: the
-    /// shell that hides the window reads it (the shipped palette's `api.hideSelf()` hop), so the
-    /// decision "Escape clears the palette and takes it out of the way" is testable here while the
-    /// unmapping itself stays the owner-desktop check it is.
-    pub dismissed: bool,
-    /// What the last copy attempt left to say, the mirror of the shipped `status`/`error` pair.
-    /// [`CopyOutcome`] is an enum of fixed strings, so there is no field here a value could be
-    /// written into - which is the whole of the shipped app's "the value itself never appears here"
-    /// comment turned into a type. Cleared by the next copy; the shipped palette clears it when a new
-    /// search starts, which is the seam that does not exist yet.
-    pub copy_status: Option<CopyOutcome>,
-    /// How long a copied value may stay on the clipboard before the shell clears it, if it still owns
-    /// it: the native form of `clipboardExpirySeconds` ([`copy::default_expiry`] reads the same
-    /// default the shipped app reads).
-    pub copy_expiry: Duration,
-    /// Where a highlighted row's value comes from. A `dyn` pointer, deliberately: the resolver is the
-    /// only thing in this struct that can reach a value, and it reaches it *outwards* - straight to
-    /// the clipboard - so no state field, `Debug` line or element dump can carry one.
-    pub source: Arc<dyn CopySource>,
-}
-
-impl Default for Finder {
-    fn default() -> Self {
-        Finder {
-            query: TextEdit::new(String::new()),
-            rows: Vec::new(),
-            selected: 0,
-            context: String::new(),
-            dismissed: false,
-            copy_status: None,
-            copy_expiry: copy::default_expiry(),
-            source: Arc::new(Unwired),
-        }
-    }
-}
-
-/// Hand-written rather than derived, and the difference matters: the derived form would print
-/// `source`, whose `Debug` is this crate's own and prints the resolver's *identity* only - so the one
-/// path a value could take out of this struct in a log line or a `assert_eq!` diff is closed by what
-/// the impl says rather than by what it forgot to skip.
-impl std::fmt::Debug for Finder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Finder")
-            .field("query", &self.query.text)
-            .field("rows", &self.rows)
-            .field("selected", &self.selected)
-            .field("context", &self.context)
-            .field("dismissed", &self.dismissed)
-            .field("copy_status", &self.copy_status)
-            .field("copy_expiry", &self.copy_expiry)
-            .field("source", &"dyn CopySource")
-            .finish()
-    }
-}
-
-impl Finder {
-    /// A Finder showing `rows` as command candidates, for tests and the headless snapshot scenes.
-    pub fn with_rows(rows: &[&str]) -> Self {
-        Finder {
-            rows: rows.iter().map(|row| Candidate::from(*row)).collect(),
-            ..Finder::default()
-        }
-    }
-
-    /// A Finder showing exact candidates, so a fixture can name the id and kind a copy will ask for.
-    pub fn with_candidates(rows: &[Candidate]) -> Self {
-        Finder {
-            rows: rows.to_vec(),
-            ..Finder::default()
-        }
-    }
-
-    /// The Finder backed by `source` instead of [`Unwired`]: the seam the scripted tests put a
-    /// synthetic vault behind, and the one milestone 2 will hand an `Arc<AppState>` to.
-    pub fn with_copy_source(mut self, source: Arc<dyn CopySource>) -> Self {
-        self.source = source;
-        self
-    }
-
-    /// Highlights `index` when it names a row, and says whether anything moved. The scripted tests
-    /// drive selection through this rather than through a private field, so the rule "a press on a
-    /// row that is not in the list cannot select it" is one tested place.
-    pub fn select(&mut self, index: usize) -> bool {
-        if index < self.rows.len() && self.selected != index {
-            self.selected = index;
-            return true;
-        }
-        false
-    }
-
-    /// Moves the highlight by `delta`, the port of `nextSelection` in `src/lib/finder-state.ts`:
-    /// it clamps instead of wrapping, keeps a still-valid selection, and when the selected row has
-    /// fallen out of a shortened list it restarts at the end the movement was heading for. Returns
-    /// whether the highlight moved.
-    pub fn move_selection(&mut self, delta: isize) -> bool {
-        if self.rows.is_empty() {
-            return false;
-        }
-        let last = self.rows.len() - 1;
-        if self.selected > last {
-            self.selected = if delta >= 0 { 0 } else { last };
-            return true;
-        }
-        let wanted = self.selected as isize + delta;
-        let next = wanted.clamp(0, last as isize) as usize;
-        if next == self.selected {
-            return false;
-        }
-        self.selected = next;
-        true
-    }
-
-    /// Accepts the selected row into the field: the port of `tabCompletion` in
-    /// `src/lib/finder-state.ts`, which returns the row's name for both a prefix match and a fuzzy
-    /// one, and nothing at all once the field already holds that name. Writes through
-    /// [`TextEdit::replace_text`], which zeroes the old draft - the query field can hold a secret's
-    /// name, so a plain `String` assignment would leave the old bytes in the allocation.
-    ///
-    /// The shipped handler also re-searches and keeps the same row selected (`acceptCompletion`);
-    /// there is no search backend behind this state yet, so only the field changes.
-    pub fn complete(&mut self) -> bool {
-        let Some(row) = self.rows.get(self.selected) else {
-            return false;
-        };
-        if row.name == self.query.text {
-            return false;
-        }
-        let name = row.name.clone();
-        self.query.replace_text(name);
-        true
-    }
-
-    /// Copies the highlighted row: the port of `activate()` in `src/windows/Finder.svelte`, all three
-    /// of its hops.
-    ///
-    /// The value is asked for by *id* through [`CopySource`] and handed straight to
-    /// [`Tx::copy_secret`], which zeroes the buffer and re-clears the board when the deadline passes
-    /// **only if the clipboard still holds what this copy wrote** - Rune's version of the shipped
-    /// `expire_due` guard ("clear the clipboard only when it still holds the value this app copied"),
-    /// and the reason the write goes through the toolkit rather than a second owner beside it. A
-    /// secret and a command both take `copy_secret`, because in the shipped app both go through
-    /// [`dev_console_core::clipboard::Clipboard::copy`], which schedules the same expiry whichever
-    /// kind it was handed.
-    ///
-    /// `None` means there was nothing highlighted: the shipped `activate` returns before touching
-    /// `status` in that case, so no line appears, which is why the return type distinguishes it from
-    /// [`CopyOutcome::Failed`]. On success this sets [`Finder::dismissed`] *without* calling
-    /// [`Finder::dismiss`], because the shipped success path is `api.hideSelf()` - the palette closes
-    /// as it stands - while Escape's `hide()` is the one that clears the query and the rows.
-    pub fn activate(&mut self, tx: &mut Tx) -> Option<CopyOutcome> {
-        let row = self.rows.get(self.selected)?;
-        let request = CopyRequest {
-            kind: row.kind,
-            id: row.id.clone(),
-            // The shipped palette passes a literal 0 here: "whatever revision the backend currently
-            // holds" (see `CopyRequest`). The revision-checked variant is the Library's copy action,
-            // not the palette's, and the staleness rules behind it are ported and tested in core.
-            expected_revision: 0,
-        };
-        let outcome = match self.source.value_for(&request) {
-            Some(value) => {
-                tx.copy_secret(value, self.copy_expiry);
-                CopyOutcome::for_kind(request.kind)
-            }
-            None => CopyOutcome::Failed,
-        };
-        self.copy_status = Some(outcome);
-        if outcome.succeeded() {
-            self.dismissed = true;
-        }
-        Some(outcome)
-    }
-
-    /// Takes the palette out of the way: the port of `hide` in `src/windows/Finder.svelte`, which
-    /// clears the query, the rows and the selection and then closes the window. `clear` rather than
-    /// an empty assignment because it zeroes the old draft and keeps keyboard focus on the field,
-    /// which is where the next summon wants it. The request-counter half of the shipped `hide`
-    /// belongs to the search port and is not here yet.
-    pub fn dismiss(&mut self) {
-        self.query.clear();
-        self.rows.clear();
-        self.selected = 0;
-        self.dismissed = true;
-        // The shipped `hide()` clears `error` and leaves `status` alone, and the split is deliberate:
-        // "Copy failed." describes an attempt the user is entitled to be told about on the way out,
-        // while a "Copied …" confirmation describes a palette state that is about to be gone. The one
-        // place the shipped app clears a confirmation is at the start of the next search
-        // (`runSearch`), which is the seam that does not exist here yet - hence a confirmation
-        // surviving this call, and the matrix row that says so staying uncovered rather than being
-        // tested against a search that isn't there.
-        if matches!(self.copy_status, Some(CopyOutcome::Failed)) {
-            self.copy_status = None;
-        }
-    }
-
-    /// The palette's key routing, the native mirror of `<input on:keydown={onKeydown}>` in
-    /// `src/windows/Finder.svelte`. It is reached through [`El::on_input_key`] on the query field -
-    /// the only Rune hook that sees a key while a text field holds focus, because `El::on_key`
-    /// covers controls that own their keys and `Runtime::on_key` runs only for keys the focused
-    /// field left alone (`route_key` in `runtime/input/keys.rs` consults the input's own handler
-    /// before the editor and the window's).
-    ///
-    /// Returning true is `preventDefault`: the key never reaches the editor, so an arrow does not
-    /// move the caret and Escape does not blur the field. The five bindings below are the shipped ones
-    /// this state can honour today; `Ctrl+O`/`Ctrl+P` fall through to the field until the details
-    /// panel and the ignore-context hop exist, and the footer says the same thing this comment does
-    /// rather than advertising a binding that is not there.
-    ///
-    /// `Space` stays unbound on purpose, unlike the shipped handler which binds it beside `Enter`
-    /// behind `shouldCommit`: Rune's IME composition flag is `pub(super)` and its own guard holds
-    /// `Enter`/`Escape` back mid-composition but not `Space`, so binding it would swallow a space the
-    /// user is composing. `Enter` is safe for exactly that reason.
-    pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        match ev.key {
-            Key::Down => {
-                self.move_selection(1);
-                true
-            }
-            Key::Up => {
-                self.move_selection(-1);
-                true
-            }
-            Key::Tab => {
-                self.complete();
-                true
-            }
-            Key::Enter => {
-                // Consumed whether or not a row is highlighted, as the shipped `case 'Enter'` is: it
-                // calls `preventDefault()` before `activate()` decides there is nothing to copy.
-                self.activate(tx);
-                true
-            }
-            Key::Escape => {
-                self.dismiss();
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
 /// Draws the Library window.
 pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let theme = rune::tok::theme(cx.system_dark());
-    // Drawn from the same state the confirmation acts on, and last so it is the top of the tree:
-    // `El::modal` is what makes everything before it inert, not an ordering trick here.
+    // Both panels are built by the one shell, and the *order* they are drawn in is what decides which
+    // one owns the keyboard: `El::modal` marks everything before the modal in tree order inert, so the
+    // panel drawn last takes the trap and the one underneath stays visible and clickable without
+    // owning Tab or Escape. A delete confirmation opened over an open unsaved-changes prompt is the
+    // only way to get two here, and the confirmation is the more urgent thing to put on top.
     let pending = state.delete_dialog();
+    let prompt = state.unsaved_dialog();
     col()
         .key("library-window")
         .w_full()
@@ -560,14 +474,48 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
         .gap(space::S3)
         .child(header(state, theme))
         .child(tabs(state))
-        .child(entry_list(state, theme))
+        // The shipped `{#if mode === 'edit'}` swap, and it is a swap rather than an overlay for the
+        // shipped reason: the editor replaces the list, so there is no second copy of the entry on
+        // screen and no way to read a saved record and its draft as if both were current.
+        .child(if state.editing.is_some() {
+            editor_pane(state, theme)
+        } else {
+            entry_list(state, theme)
+        })
         .child(footer(state, theme))
-        .children(pending.iter().map(|dialog| {
-            dialog::confirm::<Library>(
-                dialog,
+        // The prompt, when it is the only panel up: the shell's modal, drawn from the same
+        // `dialog::panel` as the confirmation with a third footer action and different routes. When a
+        // confirmation is *also* open it is drawn underneath and does not take the trap - see the
+        // comment above and `prompt_and_confirmation_can_both_be_on_screen_at_once`.
+        .children(prompt.iter().map(|spec| {
+            dialog::panel::<Library>(
+                spec,
                 theme,
-                Library::cancel_delete,
-                Library::confirm_delete,
+                if pending.is_some() {
+                    dialog::Modal::Under
+                } else {
+                    dialog::Modal::Trap
+                },
+                PROMPT_ID,
+                dialog::Actions {
+                    cancel: Library::keep_editing,
+                    discard: Some(Library::discard_draft),
+                    confirm: Library::save_draft_from_prompt,
+                },
+            )
+        }))
+        // Drawn from the same state the confirmation acts on, and last so it is the top of the tree.
+        .children(pending.iter().map(|spec| {
+            dialog::panel::<Library>(
+                spec,
+                theme,
+                dialog::Modal::Trap,
+                DIALOG_ID,
+                dialog::Actions {
+                    cancel: Library::cancel_delete,
+                    discard: None,
+                    confirm: Library::confirm_delete,
+                },
             )
         }))
 }
@@ -633,6 +581,76 @@ fn tab(tab: Tab, current: Tab) -> El {
         .child(text(tab.label()).font(type_::LABEL))
 }
 
+/// The editor pane: the native half of `EntryEditor.svelte`'s header - which record is open, and
+/// whether what is on screen differs from what is saved.
+///
+/// ## What is here, and what is a field the shell cannot draw yet
+///
+/// The shipped header is a kind glyph, `Edit command` / `Edit secret` / `New ...` (the `New` branch
+/// waits on `Ctrl+N`, which is still inert), the **`unsaved changes` chip** the web asserts as
+/// `data-testid="dirty-indicator"`, and then the fields. Two of those are here and the fields are not,
+/// and the reason is worth having down: `text_input` at this revision of Rune takes its text *by
+/// reference* and returns a `Text<String>` that the window state must own, so a field bound to a draft
+/// held in an `Option` needs that `Option` to hold a Rune text widget - which is a widget detail
+/// reaching back into the state layout. It is not built here, and it is not faked with an unbound
+/// field that would look like an editor and edit nothing.
+///
+/// What *is* built is the part every one of the shipped dirty-draft behaviours actually turns on: the
+/// draft's current value drawn as text, and the chip that says it differs from the saved record. The
+/// draft itself is state ([`Editor`]) rather than widget state, which is what lets the tab guard, the
+/// close request and the prompt be decided at all - and it is why a field can be added later without
+/// moving those rules.
+fn editor_pane(state: &Library, theme: rune::tok::Theme) -> El {
+    let Some(editor) = state.editing.as_ref() else {
+        return el().size(0.0, 0.0);
+    };
+    col()
+        .key("entry-editor")
+        .role("form")
+        .w_full()
+        .gap(space::S2)
+        .child(
+            text(format!("Edit {}", state.tab.kind()))
+                .key("editor-title")
+                .font(type_::TITLE)
+                .color(theme.text),
+        )
+        // The shipped chip: `{#if dirty}<span data-testid="dirty-indicator">unsaved changes</span>`,
+        // and absent - not dimmed - when the draft matches the record, which is what the web asserts
+        // with `toHaveCount(0)`. Same word, same condition, one that the state can answer.
+        .children(state.draft_dirty().then(|| {
+            text("unsaved changes")
+                .key("dirty-indicator")
+                .role("status")
+                .font(type_::LABEL)
+                .color(theme.text_secondary)
+        }))
+        // The shipped Name field, drawn rather than bound: the box carries the label the web's
+        // `<label>` gives it and the key the spec queries (`field-name`), and the text inside is the
+        // draft's current value. Binding a real field to it needs the state to own a Rune text widget
+        // (see this function's doc), so the value is *shown* and the rules built on it are decided from
+        // the state, which is where they were always going to be.
+        .child(
+            col()
+                .key("field-name-box")
+                .role("textbox")
+                .label("Name")
+                .w_full()
+                .h(28.0)
+                .px(space::S2)
+                .center_y()
+                .radius(radius::MD)
+                .fill(theme.card)
+                .border(1.0, theme.card_border)
+                .child(
+                    text(editor.draft.name.clone())
+                        .key("field-name")
+                        .font(type_::BODY)
+                        .color(theme.text),
+                ),
+        )
+}
+
 fn entry_list(state: &Library, theme: rune::tok::Theme) -> El {
     if state.entries.is_empty() {
         return col()
@@ -664,11 +682,11 @@ fn entry_list(state: &Library, theme: rune::tok::Theme) -> El {
         .w_full()
         .h_full()
         .gap(space::S1)
-        .children(state.entries.iter().enumerate().map(|(index, entry)| {
+        .children(state.entries.iter().enumerate().map(|(index, _)| {
             row()
                 .key(format!("entry-{index}"))
                 .role("listitem")
-                .label(entry.clone())
+                .label(state.name_field(index))
                 .focusable(true)
                 .h(28.0)
                 .px(space::S2)
@@ -681,7 +699,7 @@ fn entry_list(state: &Library, theme: rune::tok::Theme) -> El {
                     // this shell's honest half is the gate in front of a placeholder.
                     state.request_delete(index);
                 })
-                .child(text(entry.clone()).font(type_::BODY))
+                .child(text(state.name_field(index)).font(type_::BODY))
         }))
 }
 
@@ -707,204 +725,8 @@ fn footer(state: &Library, theme: rune::tok::Theme) -> El {
         .child(keycap("footer-hint", TAB_HINT, theme))
 }
 
-/// Draws the Finder window: query field, context chip, candidates and the keyboard footer.
-pub fn finder_view(state: &Finder, cx: &mut Cx<Finder>) -> El {
-    let theme = rune::tok::theme(cx.system_dark());
-    col()
-        .key("finder-window")
-        .w_full()
-        .h_full()
-        .fill(theme.bg)
-        .px(space::S3)
-        .py(space::S3)
-        .gap(space::S2)
-        .child(query_field(state, theme))
-        .child(context_chip(state, theme))
-        .child(result_rows(state, theme))
-        .child(copy_line(state, theme))
-        .child(finder_footer(state, theme))
-}
-
-/// The one line the palette shows after a copy attempt, and the only surface a copy ever writes to.
-///
-/// Mirrors the shipped pair exactly: `class="copied" role="status"` for a copy that happened and
-/// `class="error-banner" role="alert"` for one that did not, one line at a time (`{:else if}`), with
-/// the same text. The element *key* follows that split too - `finder-status` / `finder-error` are the
-/// `data-testid`s `tests/e2e/finder.spec.ts` reaches for - and what both can ever carry is one of
-/// [`CopyOutcome`]'s three fixed strings, which is the leak-proof half of the shipped design done in
-/// the type rather than in the template.
-///
-/// With nothing to report this emits an unkeyed zero-sized spacer, exactly as [`context_chip`] does:
-/// a `finder-status` element that says nothing would be a live region a screen reader announces as
-/// empty, and a scripted check reading its presence as "a copy just happened" would be wrong.
-fn copy_line(state: &Finder, theme: rune::tok::Theme) -> El {
-    let Some(outcome) = state.copy_status else {
-        return el().size(0.0, 0.0);
-    };
-    // The shipped markup distinguishes the two: a confirmation is a `role="status"` live region, a
-    // failure is a `role="alert"` one. Which one a headless tree announces is the a11y half this
-    // container cannot settle, so the split is carried by the role and the key, not by a colour -
-    // `rune::tok::Theme` has no danger token, and inventing a hex for a failure would break both the
-    // token rule and the palette port. The panel's two states are told apart by contrast within the
-    // tokens that exist.
-    let failed = outcome == CopyOutcome::Failed;
-    row()
-        .key(if failed {
-            "finder-error"
-        } else {
-            "finder-status"
-        })
-        .role(if failed { "alert" } else { "status" })
-        .label(outcome.message())
-        .w_full()
-        .h(20.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::SM)
-        .fill(if failed {
-            theme.control_off
-        } else {
-            theme.card
-        })
-        .border(1.0, theme.card_border)
-        .child(text(outcome.message()).font(type_::LABEL).color(if failed {
-            theme.text
-        } else {
-            theme.text_secondary
-        }))
-}
-
-fn query_field(state: &Finder, theme: rune::tok::Theme) -> El {
-    row()
-        .key("finder-query-row")
-        .w_full()
-        .h(34.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::MD)
-        .fill(theme.card)
-        .border(1.0, theme.card_border)
-        .child(
-            text_input(&state.query, type_::BODY)
-                .key("finder-query")
-                .role("textbox")
-                .label("Search commands and secrets")
-                .color(theme.text)
-                .on_edit(|state: &mut Finder| &mut state.query)
-                // The palette's bindings belong on the field, not on the window: the shipped
-                // handler is `<input on:keydown>`, and a focused Rune field is also the only thing
-                // that sees its own keys before the editor does. See [`Finder::route_key`].
-                .on_input_key(|state: &mut Finder, ev: &KeyEvent, tx: &mut Tx| {
-                    state.route_key(ev, tx)
-                }),
-        )
-}
-
-fn context_chip(state: &Finder, theme: rune::tok::Theme) -> El {
-    // No detected project folder: emit an unkeyed, zero-sized spacer, not a `finder-context`
-    // element. A keyed-but-empty chip would put an accessible node that announces nothing into the
-    // tree, and the scripted checks read the presence of `finder-context` as "a folder was detected"
-    // (`an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip`). The unkeyed spacer keeps
-    // the column's gap and layout identical; only the misleading identity is gone.
-    if state.context.is_empty() {
-        return el().size(0.0, 0.0);
-    }
-    row()
-        .key("finder-context")
-        .h(22.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::SM)
-        .fill(theme.card)
-        .border(1.0, theme.card_border)
-        .label(format!("Project {}", state.context))
-        .child(
-            text(state.context.clone())
-                .font(type_::MONO_CAPTION)
-                .color(theme.text_secondary),
-        )
-}
-
-fn result_rows(state: &Finder, theme: rune::tok::Theme) -> El {
-    if state.rows.is_empty() {
-        return col().key("finder-empty").w_full().h_full().center().child(
-            text("Type to search")
-                .font(type_::BODY)
-                .color(theme.text_secondary),
-        );
-    }
-    col()
-        .key("finder-rows")
-        .role("list")
-        .label("Results")
-        .w_full()
-        .h_full()
-        .gap(space::S1)
-        .children(state.rows.iter().enumerate().map(|(index, candidate)| {
-            let selected = index == state.selected;
-            row()
-                .key(format!("finder-row-{index}"))
-                .role("listitem")
-                // The name, never the value: `Candidate::name` is the row's metadata and the same
-                // string `row.name` prints in the shipped list. The kind glyph (`Icon
-                // name="secret"`) has no native equivalent yet - the SVG icon set is still on the
-                // unbuilt list - so a secret row and a command row are told apart by what they copy,
-                // not by what they print, which is the safer direction for a leak.
-                .label(candidate.name.clone())
-                // No `selected` state exists on `El` at this revision (see `tab`); the row's place
-                // in the list is announced and the highlight is drawn.
-                .position_in_set(index + 1, state.rows.len())
-                .focusable(true)
-                .h(28.0)
-                .px(space::S2)
-                .center_y()
-                .radius(radius::MD)
-                .fill(if selected { theme.hover } else { theme.bg })
-                .on_press_tx(move |state: &mut Finder, _| {
-                    state.select(index);
-                })
-                .child(
-                    text(candidate.name.clone())
-                        .font(type_::BODY)
-                        .color(if selected {
-                            theme.text
-                        } else {
-                            theme.text_secondary
-                        }),
-                )
-        }))
-}
-
-/// The footer's hints. Each string is the binding [`Finder::route_key`] actually honours, in the order
-/// `src/windows/Finder.svelte` lists them. `Ctrl+O details` is the one shipped chip left out, because
-/// there is no details panel to open yet and a hint is a promise the shell has to keep.
-const FINDER_HINTS: [(&str, &str); 4] = [
-    ("footer-move", "Up+Down select"),
-    ("footer-tab", "Tab complete"),
-    ("footer-copy", "Enter copy"),
-    ("footer-dismiss", "Esc dismiss"),
-];
-
-fn finder_footer(state: &Finder, theme: rune::tok::Theme) -> El {
-    let mut footer = row()
-        .key("finder-footer")
-        .w_full()
-        .gap(space::S2)
-        .center_y();
-    for (key, hint) in FINDER_HINTS {
-        footer = footer.child(keycap(key, hint, theme));
-    }
-    // The shipped footer pushes its row count to the far edge with a flex spacer; `grow` is Rune's.
-    footer.child(el().grow(1.0)).child(
-        text(format!("{}", state.rows.len()))
-            .key("footer-count")
-            .font(type_::LABEL)
-            .color(theme.text_secondary),
-    )
-}
-
 /// A keyboard hint chip. `Keycap` in the current UI; the milestone-4 pass adds the real glyph set.
-fn keycap(key: &'static str, label: &str, theme: rune::tok::Theme) -> El {
+pub(crate) fn keycap(key: &'static str, label: &str, theme: rune::tok::Theme) -> El {
     row()
         .key(key)
         .h(18.0)

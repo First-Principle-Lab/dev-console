@@ -250,9 +250,15 @@ crates/dev-console-desktop/src/
   app.rs, identity.rs        window specs, titles, sizes, scene names, exit codes
   off_thread.rs              a blocking call on a Rune worker; the answer is judged by
                              dev_console_core::freshness before a view may paint it
-  instance.rs, tray.rs, ui.rs control socket and lock, native menu, the view state; the tray's
-                             menu ids reach their behaviour through tray::menu_action, which a
-                             test holds against the menu the host is shown
+  instance.rs, tray.rs     control socket and lock, native menu; the tray's menu ids reach their
+                             behaviour through tray::menu_action, which a test holds against the
+                             menu the host is shown
+  ui.rs, finder.rs         the two windows' explicit state and view functions, and the element
+                             keys the scripted tests address: ui.rs is the Library (tab strip,
+                             list placeholder, editor pane, the two panels it can raise),
+                             finder.rs is the palette (query, context chip, rows, copy seam).
+                             dialog.rs is the one panel shell both windows' panels stand on and
+                             editor.rs the draft record the Library's editor pane renders
   ledger_tests.rs            the gate over docs/project/native-feasibility-ledger.md: every
                              container-settled row must cite a test that still exists, every
                              UNVERIFIED row must name the command the owner runs
