@@ -98,11 +98,20 @@ mod tests {
     #[test]
     fn the_finder_asks_for_an_opaque_borderless_fixed_size_window() {
         let options = finder_options();
-        assert!(!options.transparent, "the Finder surface stays opaque on WebKitGTK 2.54 + Hyprland");
+        assert!(
+            !options.transparent,
+            "the Finder surface stays opaque on WebKitGTK 2.54 + Hyprland"
+        );
         assert!(options.borderless);
-        assert!(!options.resizable, "a resizable Finder would break the 680×420 palette band rule");
+        assert!(
+            !options.resizable,
+            "a resizable Finder would break the 680×420 palette band rule"
+        );
         assert!(options.always_on_top);
-        assert!(!options.visible, "the resident app opens the Finder only on demand");
+        assert!(
+            !options.visible,
+            "the resident app opens the Finder only on demand"
+        );
         assert_eq!(
             options.physical_size, None,
             "size comes from the logical AppSpec size, so it scales with the display"

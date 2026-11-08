@@ -24,7 +24,7 @@
 //! values, and nothing here can reach a profile: `dev-console-desktop` has no storage code at all
 //! until plan milestone 2 moves it in.
 
-use dev_console_desktop::ui::{Finder, Library, finder_view, library_view};
+use dev_console_desktop::ui::{finder_view, library_view, Finder, Library};
 use rune::{Cx, El, Env, Runtime};
 
 /// The Finder viewport, in logical points. The same constant the window asks the compositor for
@@ -92,14 +92,24 @@ impl<S: 'static> Stage<S> {
         self.runtime.frame(dt);
     }
 
-    /// True when `key` is in the presented tree.
+    /// True when `key` is in the live tree right now.
+    ///
+    /// Deliberately not `presented`: when an element leaves the tree Rune plays its exit transition
+    /// and keeps it in the frame, and `presented` reports it throughout ("exiting or not"). A script
+    /// that pressed a row and wants to assert the row is *gone* must ask the live-tree question, which
+    /// is what `Runtime::find` answers - it treats an exiting subtree as gone. `box_of`/`press` still
+    /// read `presented`, because they operate on the frame currently laid out under the pointer.
     pub fn has(&self, key: &str) -> bool {
-        self.runtime.presented(key).is_some()
+        self.runtime.find(key).is_some()
     }
 
     /// The keys from `candidates` that are present, in the order given.
     pub fn present_from(&self, candidates: &[&'static str]) -> Vec<&'static str> {
-        candidates.iter().copied().filter(|key| self.has(key)).collect()
+        candidates
+            .iter()
+            .copied()
+            .filter(|key| self.has(key))
+            .collect()
     }
 
     /// `key`'s laid-out box: `(x, y, width, height)` and the scale it was measured at.
@@ -124,7 +134,6 @@ impl<S: 'static> Stage<S> {
         self.runtime.frame(1.0 / 60.0);
         true
     }
-
 }
 
 /// A stage whose rows are addressable by index, so a script can press the Nth result.
@@ -179,7 +188,10 @@ pub fn finder_with_rows() -> Finder {
 /// A Library with rows, so the list and the empty state can both be exercised.
 pub fn library_with_entries() -> Library {
     Library {
-        entries: vec!["synthetic command one".into(), "synthetic command two".into()],
+        entries: vec![
+            "synthetic command one".into(),
+            "synthetic command two".into(),
+        ],
         vault_unlocked: true,
         ..Library::default()
     }
@@ -192,7 +204,10 @@ mod tests {
     #[test]
     fn a_stage_lays_out_the_finder_before_any_script_runs() {
         let stage = Stage::finder(finder_with_rows());
-        assert!(stage.has("finder-window"), "the first frame must present the tree");
+        assert!(
+            stage.has("finder-window"),
+            "the first frame must present the tree"
+        );
         assert_eq!(
             stage.present_from(FINDER_KEYS),
             vec![
@@ -213,7 +228,10 @@ mod tests {
     #[test]
     fn pressing_a_key_that_is_not_there_presses_nothing() {
         let mut stage = Stage::finder(Finder::default());
-        assert!(!stage.press("finder-row-0"), "an empty Finder has no rows to press");
+        assert!(
+            !stage.press("finder-row-0"),
+            "an empty Finder has no rows to press"
+        );
         assert_eq!(stage.state().selected, 0);
     }
 
@@ -224,7 +242,10 @@ mod tests {
         let finder = finder_with_rows();
         assert_eq!(finder.context, "synthetic-project");
         let library = library_with_entries();
-        assert!(library.entries.iter().all(|entry| entry.starts_with("synthetic")));
+        assert!(library
+            .entries
+            .iter()
+            .all(|entry| entry.starts_with("synthetic")));
         assert!(SYNTHETIC_QUERY.starts_with("synthetic"));
     }
 }

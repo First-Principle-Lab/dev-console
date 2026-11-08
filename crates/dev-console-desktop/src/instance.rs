@@ -136,7 +136,10 @@ fn ensure_private_dir(dir: &Path) -> io::Result<()> {
 pub struct InstanceLock {
     /// Never read: the `File` is what the `flock` is attached to, so holding it is the whole
     /// purpose, and dropping it closes the descriptor and releases the lock.
-    #[allow(dead_code, reason = "kept for its Drop: closing the descriptor releases the flock")]
+    #[allow(
+        dead_code,
+        reason = "kept for its Drop: closing the descriptor releases the flock"
+    )]
     file: File,
 }
 
@@ -203,7 +206,10 @@ impl Server {
     fn finish(listener: UnixListener, path: &Path) -> io::Result<Server> {
         // The directory is already 0700; the socket mode is belt and braces for a shared runtime dir.
         std::fs::set_permissions(path, Permissions::from_mode(0o600))?;
-        Ok(Server { listener, path: path.to_path_buf() })
+        Ok(Server {
+            listener,
+            path: path.to_path_buf(),
+        })
     }
 
     /// Where this server listens.
@@ -261,7 +267,10 @@ fn read_intent(mut stream: UnixStream) -> io::Result<Intent> {
     // `take` bounds the buffer: a caller that streams without a newline cannot grow this process.
     let read = BufReader::new((&mut stream).take(MAX_REQUEST_BYTES)).read_line(&mut line)?;
     if read == 0 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the caller closed the connection"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "the caller closed the connection",
+        ));
     }
     let request: Request = serde_json::from_str(line.trim())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -286,14 +295,17 @@ pub fn send_intent(path: &Path, intent: Intent) -> io::Result<()> {
     let mut line = String::new();
     let read = BufReader::new((&mut stream).take(MAX_REQUEST_BYTES)).read_line(&mut line)?;
     if read == 0 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the resident instance answered nothing"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "the resident instance answered nothing",
+        ));
     }
     let reply: Reply = serde_json::from_str(line.trim())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if reply.ok {
         Ok(())
     } else {
-        Err(io::Error::new(io::ErrorKind::Other, "the resident instance refused the intent"))
+        Err(io::Error::other("the resident instance refused the intent"))
     }
 }
 
@@ -324,9 +336,14 @@ mod tests {
         let server = Server::bind(&socket).unwrap();
         assert_eq!(server.path(), socket.as_path());
 
+        // `send_intent` is a full request/reply round trip: it returns only once the listener has
+        // read the request and written the reply. So `accept` must be answering on its own thread,
+        // exactly as `app::run` drives it through `Server::serve`; a sequential accept on this
+        // thread would only be reached after `send_intent` had already timed out.
+        let accepted = std::thread::spawn(move || server.accept());
         send_intent(&socket, Intent::Finder).unwrap();
 
-        assert_eq!(server.accept().unwrap(), Intent::Finder);
+        assert_eq!(accepted.join().unwrap().unwrap(), Intent::Finder);
     }
 
     #[test]
@@ -335,13 +352,19 @@ mod tests {
         let (socket, _) = paths(dir.path());
         let server = Server::bind(&socket).unwrap();
 
+        // The listener skips the malformed request and answers the next one, so it runs on its own
+        // thread while this thread is inside `send_intent` waiting for its reply.
+        let accepted = std::thread::spawn(move || server.accept());
+
         let mut caller = UnixStream::connect(&socket).unwrap();
-        caller.write_all(b"{\"intent\":\"reveal-secret\"}\n").unwrap();
+        caller
+            .write_all(b"{\"intent\":\"reveal-secret\"}\n")
+            .unwrap();
         caller.shutdown(std::net::Shutdown::Write).unwrap();
 
         // The bad request is skipped and the next well-formed one still arrives.
         send_intent(&socket, Intent::Library).unwrap();
-        assert_eq!(server.accept().unwrap(), Intent::Library);
+        assert_eq!(accepted.join().unwrap().unwrap(), Intent::Library);
     }
 
     /// A caller that streams without ever sending a newline must not be able to grow this process:
@@ -351,10 +374,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (socket, _) = paths(dir.path());
         let server = Server::bind(&socket).unwrap();
+        let accepted = std::thread::spawn(move || server.accept());
 
         let flood_socket = socket.clone();
         let flooder = std::thread::spawn(move || {
-            let Ok(mut caller) = UnixStream::connect(&flood_socket) else { return };
+            let Ok(mut caller) = UnixStream::connect(&flood_socket) else {
+                return;
+            };
             // A prefix that looks like a request, then an unbounded run of bytes with no newline.
             let _ = caller.write_all(b"{\"intent\":\"library\",\"junk\":\"");
             let chunk = vec![b'a'; 64 * 1024];
@@ -371,7 +397,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
         send_intent(&socket, Intent::Finder).unwrap();
         assert_eq!(
-            server.accept().unwrap(),
+            accepted.join().unwrap().unwrap(),
             Intent::Finder,
             "the capped request is skipped, not queued ahead of a real one"
         );
@@ -385,7 +411,10 @@ mod tests {
 
         let first = InstanceLock::acquire(&lock).unwrap();
         assert!(first.is_some(), "the first process takes the lock");
-        assert!(InstanceLock::acquire(&lock).unwrap().is_none(), "a second process is refused");
+        assert!(
+            InstanceLock::acquire(&lock).unwrap().is_none(),
+            "a second process is refused"
+        );
 
         drop(first);
         assert!(
@@ -413,8 +442,9 @@ mod tests {
         assert!(!instance_running(&socket));
 
         let second = Server::bind(&socket).unwrap();
-        send_intent(second.path(), Intent::Library).unwrap();
-        assert_eq!(second.accept().unwrap(), Intent::Library);
+        let accepted = std::thread::spawn(move || second.accept());
+        send_intent(&socket, Intent::Library).unwrap();
+        assert_eq!(accepted.join().unwrap().unwrap(), Intent::Library);
     }
 
     #[test]
@@ -424,9 +454,19 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("sub")).unwrap();
         std::fs::set_permissions(dir.path().join("sub"), Permissions::from_mode(0o755)).unwrap();
         let server = Server::bind(&socket).unwrap();
-        let mode = std::fs::metadata(dir.path().join("sub")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o700, "the directory is the socket's access control");
-        let mode = std::fs::metadata(server.path()).unwrap().permissions().mode();
+        let mode = std::fs::metadata(dir.path().join("sub"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o700,
+            "the directory is the socket's access control"
+        );
+        let mode = std::fs::metadata(server.path())
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 
@@ -439,12 +479,18 @@ mod tests {
 
     #[test]
     fn the_wire_shape_is_a_stable_kebab_case_intent_and_nothing_else() {
-        let encoded = serde_json::to_string(&Request { intent: Intent::Finder }).unwrap();
+        let encoded = serde_json::to_string(&Request {
+            intent: Intent::Finder,
+        })
+        .unwrap();
         assert_eq!(encoded, r#"{"intent":"finder"}"#);
         // Two shape hazards, both refused loudly rather than misread: a capability the shell must
         // not act on, and a field the receiver does not know about.
         assert!(serde_json::from_str::<Request>(r#"{"intent":"vault.unlock"}"#).is_err());
-        assert!(serde_json::from_str::<Request>(r#"{"intent":"library","path":"/home/me/.ssh/id_ed25519"}"#).is_err());
+        assert!(serde_json::from_str::<Request>(
+            r#"{"intent":"library","path":"/home/me/.ssh/id_ed25519"}"#
+        )
+        .is_err());
     }
 
     /// The wakeup path never carries a value that could be a secret: a request is exactly one
@@ -453,7 +499,10 @@ mod tests {
     fn a_request_can_carry_nothing_but_a_window_name() {
         let round_trip: Request = serde_json::from_str(r#"{"intent":"finder"}"#).unwrap();
         assert!(matches!(round_trip.intent, Intent::Finder));
-        assert_eq!(serde_json::to_string(&round_trip).unwrap(), r#"{"intent":"finder"}"#);
+        assert_eq!(
+            serde_json::to_string(&round_trip).unwrap(),
+            r#"{"intent":"finder"}"#
+        );
         assert_eq!(Intent::ALL.len(), 2);
     }
 }

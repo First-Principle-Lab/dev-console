@@ -27,7 +27,7 @@
 //! something without inventing a parallel colour source.
 
 use rune::tok::{radius, space, type_};
-use rune::{Cx, El, TextEdit, col, el, row, text, text_input};
+use rune::{col, el, row, text, text_input, Cx, El, TextEdit};
 
 /// Which list the Library is showing. Mirrors the Ctrl+1 / Ctrl+2 tabs of the current app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,14 +78,22 @@ pub struct Finder {
 
 impl Default for Finder {
     fn default() -> Self {
-        Finder { query: TextEdit::new(String::new()), rows: Vec::new(), selected: 0, context: String::new() }
+        Finder {
+            query: TextEdit::new(String::new()),
+            rows: Vec::new(),
+            selected: 0,
+            context: String::new(),
+        }
     }
 }
 
 impl Finder {
     /// A Finder showing `rows`, for tests and for the headless snapshot scenes.
     pub fn with_rows(rows: &[&str]) -> Self {
-        Finder { rows: rows.iter().map(|row| (*row).to_owned()).collect(), ..Finder::default() }
+        Finder {
+            rows: rows.iter().map(|row| (*row).to_owned()).collect(),
+            ..Finder::default()
+        }
     }
 
     /// Highlights `index` when it names a row, and says whether anything moved. The scripted tests
@@ -123,7 +131,12 @@ fn header(state: &Library, theme: rune::tok::Theme) -> El {
         .w_full()
         .gap(space::S3)
         .center_y()
-        .child(text("Dev Console").key("library-title").font(type_::TITLE).color(theme.text))
+        .child(
+            text("Dev Console")
+                .key("library-title")
+                .font(type_::TITLE)
+                .color(theme.text),
+        )
         .child(
             row()
                 .key("vault-status")
@@ -134,15 +147,23 @@ fn header(state: &Library, theme: rune::tok::Theme) -> El {
                 .fill(theme.card)
                 .border(1.0, theme.card_border)
                 .child(
-                    text(if state.vault_unlocked { "Vault unlocked" } else { "Vault locked" })
-                        .font(type_::LABEL)
-                        .color(theme.text_secondary),
+                    text(if state.vault_unlocked {
+                        "Vault unlocked"
+                    } else {
+                        "Vault locked"
+                    })
+                    .font(type_::LABEL)
+                    .color(theme.text_secondary),
                 ),
         )
 }
 
 fn tabs(state: &Library) -> El {
-    row().key("library-tabs").gap(space::S2).child(tab(Tab::Commands, state.tab)).child(tab(Tab::Secrets, state.tab))
+    row()
+        .key("library-tabs")
+        .gap(space::S2)
+        .child(tab(Tab::Commands, state.tab))
+        .child(tab(Tab::Secrets, state.tab))
 }
 
 fn tab(tab: Tab, current: Tab) -> El {
@@ -173,8 +194,20 @@ fn entry_list(state: &Library, theme: rune::tok::Theme) -> El {
             .h_full()
             .center()
             .gap(space::S2)
-            .child(text(if state.tab == Tab::Secrets { "No secrets yet" } else { "No commands yet" }).font(type_::TITLE).color(theme.text))
-            .child(text("Add one with the editor, or import tasks from a project folder.").font(type_::BODY).color(theme.text_secondary));
+            .child(
+                text(if state.tab == Tab::Secrets {
+                    "No secrets yet"
+                } else {
+                    "No commands yet"
+                })
+                .font(type_::TITLE)
+                .color(theme.text),
+            )
+            .child(
+                text("Add one with the editor, or import tasks from a project folder.")
+                    .font(type_::BODY)
+                    .color(theme.text_secondary),
+            );
     }
 
     col()
@@ -211,11 +244,23 @@ fn footer(state: &Library, theme: rune::tok::Theme) -> El {
         .gap(space::S3)
         .center_y()
         .child(
-            text(format!("{} {}", state.entries.len(), if state.tab == Tab::Secrets { "secrets" } else { "commands" }))
-                .font(type_::LABEL)
-                .color(theme.text_secondary),
+            text(format!(
+                "{} {}",
+                state.entries.len(),
+                if state.tab == Tab::Secrets {
+                    "secrets"
+                } else {
+                    "commands"
+                }
+            ))
+            .font(type_::LABEL)
+            .color(theme.text_secondary),
         )
-        .child(keycap("footer-hint", "Ctrl+1 / Ctrl+2 to switch tabs", theme))
+        .child(keycap(
+            "footer-hint",
+            "Ctrl+1 / Ctrl+2 to switch tabs",
+            theme,
+        ))
 }
 
 /// Draws the Finder window: query field, context chip, candidates and the keyboard footer.
@@ -256,8 +301,13 @@ fn query_field(state: &Finder, theme: rune::tok::Theme) -> El {
 }
 
 fn context_chip(state: &Finder, theme: rune::tok::Theme) -> El {
+    // No detected project folder: emit an unkeyed, zero-sized spacer, not a `finder-context`
+    // element. A keyed-but-empty chip would put an accessible node that announces nothing into the
+    // tree, and the scripted checks read the presence of `finder-context` as "a folder was detected"
+    // (`an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip`). The unkeyed spacer keeps
+    // the column's gap and layout identical; only the misleading identity is gone.
     if state.context.is_empty() {
-        return el().key("finder-context").size(0.0, 0.0);
+        return el().size(0.0, 0.0);
     }
     row()
         .key("finder-context")
@@ -268,17 +318,20 @@ fn context_chip(state: &Finder, theme: rune::tok::Theme) -> El {
         .fill(theme.card)
         .border(1.0, theme.card_border)
         .label(format!("Project {}", state.context))
-        .child(text(state.context.clone()).font(type_::MONO_CAPTION).color(theme.text_secondary))
+        .child(
+            text(state.context.clone())
+                .font(type_::MONO_CAPTION)
+                .color(theme.text_secondary),
+        )
 }
 
 fn result_rows(state: &Finder, theme: rune::tok::Theme) -> El {
     if state.rows.is_empty() {
-        return col()
-            .key("finder-empty")
-            .w_full()
-            .h_full()
-            .center()
-            .child(text("Type to search").font(type_::BODY).color(theme.text_secondary));
+        return col().key("finder-empty").w_full().h_full().center().child(
+            text("Type to search")
+                .font(type_::BODY)
+                .color(theme.text_secondary),
+        );
     }
     col()
         .key("finder-rows")
@@ -305,7 +358,11 @@ fn result_rows(state: &Finder, theme: rune::tok::Theme) -> El {
                 .on_press_tx(move |state: &mut Finder, _| {
                     state.select(index);
                 })
-                .child(text(row_text.clone()).font(type_::BODY).color(if selected { theme.text } else { theme.text_secondary }))
+                .child(text(row_text.clone()).font(type_::BODY).color(if selected {
+                    theme.text
+                } else {
+                    theme.text_secondary
+                }))
         }))
 }
 
@@ -319,7 +376,11 @@ fn finder_footer(state: &Finder, theme: rune::tok::Theme) -> El {
         .child(keycap("footer-open", "↵ open", theme))
         .child(keycap("footer-copy", "⌥⌘C copy", theme))
         .child(keycap("footer-dismiss", "esc", theme))
-        .child(text(format!("{} of {}", state.selected + 1, state.rows.len())).font(type_::LABEL).color(theme.text_secondary))
+        .child(
+            text(format!("{} of {}", state.selected + 1, state.rows.len()))
+                .font(type_::LABEL)
+                .color(theme.text_secondary),
+        )
 }
 
 /// A keyboard hint chip. `Keycap` in the current UI; the milestone-4 pass adds the real glyph set.
@@ -332,5 +393,9 @@ fn keycap(key: &'static str, label: &str, theme: rune::tok::Theme) -> El {
         .radius(radius::SM)
         .fill(theme.control_off)
         .label(label.to_owned())
-        .child(text(label.to_owned()).font(type_::MONO_CAPTION).color(theme.text_secondary))
+        .child(
+            text(label.to_owned())
+                .font(type_::MONO_CAPTION)
+                .color(theme.text_secondary),
+        )
 }

@@ -9,7 +9,7 @@
 use dev_console_desktop::identity::{FINDER_SIZE, LIBRARY_MIN_SIZE, LIBRARY_SIZE};
 use dev_console_desktop::ui::{Finder, Library, Tab};
 use dev_console_ui_tests::{
-    FINDER_KEYS, LIBRARY_KEYS, Stage, finder_with_rows, library_with_entries,
+    finder_with_rows, library_with_entries, Stage, FINDER_KEYS, LIBRARY_KEYS,
 };
 
 #[test]
@@ -18,8 +18,14 @@ fn an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip() {
     let present = stage.present_from(FINDER_KEYS);
     assert!(present.contains(&"finder-window"));
     assert!(present.contains(&"finder-query"));
-    assert!(present.contains(&"finder-empty"), "a Finder with no candidates still needs a body");
-    assert!(!present.contains(&"finder-rows"), "no candidates, no result list");
+    assert!(
+        present.contains(&"finder-empty"),
+        "a Finder with no candidates still needs a body"
+    );
+    assert!(
+        !present.contains(&"finder-rows"),
+        "no candidates, no result list"
+    );
     assert!(
         !present.contains(&"finder-context"),
         "an undetected project folder must not draw an empty chip"
@@ -34,16 +40,29 @@ fn a_finder_with_candidates_lists_exactly_those_rows() {
     assert!(stage.has("finder-context"));
     assert!(!stage.has("finder-empty"));
     for index in 0..3 {
-        assert!(stage.has(&format!("finder-row-{index}")), "row {index} is missing");
+        assert!(
+            stage.has(&format!("finder-row-{index}")),
+            "row {index} is missing"
+        );
     }
-    assert!(!stage.has("finder-row-3"), "the tree must not invent a fourth row");
+    assert!(
+        !stage.has("finder-row-3"),
+        "the tree must not invent a fourth row"
+    );
 }
 
 #[test]
 fn pressing_a_result_selects_it() {
     let mut stage = Stage::finder(finder_with_rows());
-    assert_eq!(stage.state().selected, 0, "the first candidate starts highlighted");
-    assert!(stage.press("finder-row-2"), "the row has to be pressable where it is drawn");
+    assert_eq!(
+        stage.state().selected,
+        0,
+        "the first candidate starts highlighted"
+    );
+    assert!(
+        stage.press("finder-row-2"),
+        "the row has to be pressable where it is drawn"
+    );
     assert_eq!(stage.state().selected, 2);
 
     // And the highlight follows the state on the next frame: press row 0 back.
@@ -69,7 +88,9 @@ fn the_finder_measures_the_surface_it_was_asked_to_fill() {
     // root fills the viewport, not that the compositor mapped the window at that size. The second
     // number is the scale the runtime measured the tree at.
     let stage = Stage::finder(finder_with_rows());
-    let ([_, _, width, height], _) = stage.box_of("finder-window").expect("the window root is laid out");
+    let ([_, _, width, height], _) = stage
+        .box_of("finder-window")
+        .expect("the window root is laid out");
     assert!(
         (width - FINDER_SIZE.0).abs() < 1.0 && (height - FINDER_SIZE.1).abs() < 1.0,
         "the Finder root should fill the {FINDER_SIZE:?} it was built for, got {width}x{height}"
@@ -105,7 +126,10 @@ fn a_library_with_entries_lists_exactly_those_rows() {
 fn switching_tabs_changes_the_state_the_list_is_built_from() {
     let mut stage = Stage::library(library_with_entries());
     assert_eq!(stage.state().tab, Tab::Commands);
-    assert!(stage.press("tab-Secrets"), "the tab has to be reachable where it is drawn");
+    assert!(
+        stage.press("tab-Secrets"),
+        "the tab has to be reachable where it is drawn"
+    );
     assert_eq!(stage.state().tab, Tab::Secrets);
     assert!(stage.press("tab-Commands"));
     assert_eq!(stage.state().tab, Tab::Commands);
@@ -136,7 +160,9 @@ fn pressing_a_row_reaches_that_rows_handler() {
 #[test]
 fn the_library_measures_the_surface_it_was_asked_to_fill() {
     let stage = Stage::library(library_with_entries());
-    let ([_, _, width, height], _) = stage.box_of("library-window").expect("the window root is laid out");
+    let ([_, _, width, height], _) = stage
+        .box_of("library-window")
+        .expect("the window root is laid out");
     assert!(
         (width - LIBRARY_SIZE.0).abs() < 1.0 && (height - LIBRARY_SIZE.1).abs() < 1.0,
         "the Library root should fill {LIBRARY_SIZE:?}, got {width}x{height}"
@@ -152,18 +178,37 @@ fn the_library_measures_the_surface_it_was_asked_to_fill() {
 /// would add a reveal button to, so the guard is written against them.
 #[test]
 fn no_finder_element_offers_a_secret_capability() {
-    let forbidden: &[&str] = &["reveal", "secret-value", "copy-secret", "edit", "execute", "run", "archive", "recover", "vault"];
+    let forbidden: &[&str] = &[
+        "reveal",
+        "secret-value",
+        "copy-secret",
+        "edit",
+        "execute",
+        "run",
+        "archive",
+        "recover",
+        "vault",
+    ];
     for key in FINDER_KEYS {
         let lowered = key.to_lowercase();
         for word in forbidden {
-            assert!(!lowered.contains(word), "the Finder exposes {key}, which reads like a {word} capability");
+            assert!(
+                !lowered.contains(word),
+                "the Finder exposes {key}, which reads like a {word} capability"
+            );
         }
     }
     // The two states a Finder can be in, checked the same way.
-    for stage in [Stage::finder(Finder::default()), Stage::finder(finder_with_rows())] {
+    for stage in [
+        Stage::finder(Finder::default()),
+        Stage::finder(finder_with_rows()),
+    ] {
         for word in forbidden {
             assert!(
-                !stage.present_from(FINDER_KEYS).iter().any(|key| key.to_lowercase().contains(word)),
+                !stage
+                    .present_from(FINDER_KEYS)
+                    .iter()
+                    .any(|key| key.to_lowercase().contains(word)),
                 "a Finder state exposes a {word}-shaped control"
             );
         }
@@ -179,8 +224,18 @@ fn the_control_channel_knows_only_two_intents() {
     assert_eq!(Intent::ALL.len(), 2);
     assert!(matches!(Intent::ALL[0], Intent::Library));
     assert!(matches!(Intent::ALL[1], Intent::Finder));
-    for flag in ["--reveal", "--execute", "--unlock", "--import", "--lock", "--copy"] {
-        assert!(Intent::from_flag(flag).is_none(), "{flag} must not be a wakeup intent");
+    for flag in [
+        "--reveal",
+        "--execute",
+        "--unlock",
+        "--import",
+        "--lock",
+        "--copy",
+    ] {
+        assert!(
+            Intent::from_flag(flag).is_none(),
+            "{flag} must not be a wakeup intent"
+        );
     }
 }
 
@@ -201,10 +256,16 @@ fn no_window_state_can_hold_a_secret_value() {
 
     // A Library is a tab, entry *titles* and a lock flag. Nothing in either type can carry a value,
     // a key or command output, so `Debug`-formatting a state cannot print one either.
-    let library = Library { entries: vec!["synthetic command".into()], ..Library::default() };
+    let library = Library {
+        entries: vec!["synthetic command".into()],
+        ..Library::default()
+    };
     let debug = format!("{library:?} {finder:?}");
     for marker in ["BEGIN PRIVATE", "password=", "token", "vault-key"] {
-        assert!(!debug.to_lowercase().contains(&marker.to_lowercase()), "a state carries {marker:?}");
+        assert!(
+            !debug.to_lowercase().contains(&marker.to_lowercase()),
+            "a state carries {marker:?}"
+        );
     }
     // And the only secret-adjacent field is the *status* of the lock, never a value.
     assert!(!library.vault_unlocked);

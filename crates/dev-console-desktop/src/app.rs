@@ -8,7 +8,8 @@
 use rune::{App, AppHandle, WindowSpec};
 
 use crate::identity::{
-    FINDER_LABEL, FINDER_SIZE, FINDER_TITLE, LIBRARY_MIN_SIZE, LIBRARY_SIZE, LIBRARY_TITLE, finder_options, library_options,
+    finder_options, library_options, FINDER_LABEL, FINDER_SIZE, FINDER_TITLE, LIBRARY_MIN_SIZE,
+    LIBRARY_SIZE, LIBRARY_TITLE,
 };
 use crate::instance::{self, Intent};
 use crate::tray;
@@ -57,13 +58,21 @@ const USAGE: &str = "usage: dev-console [--finder | --library]\n\
 pub fn library_spec() -> rune::AppSpec<Library> {
     rune::AppSpec::<Library> {
         min_size: Some(LIBRARY_MIN_SIZE),
-        ..rune::AppSpec::new(LIBRARY_TITLE, LIBRARY_SIZE, Library::default, ui::library_view)
+        ..rune::AppSpec::new(
+            LIBRARY_TITLE,
+            LIBRARY_SIZE,
+            Library::default,
+            ui::library_view,
+        )
     }
 }
 
 /// The Library app: the resident process's primary window, hidden at start, surviving a close.
 pub fn library_app() -> App<Library> {
-    App::new(library_spec()).window_options(library_options()).windowless().keep_running()
+    App::new(library_spec())
+        .window_options(library_options())
+        .windowless()
+        .keep_running()
 }
 
 /// The Finder's `AppSpec`. `scenes` are the named states `--scene` selects for a snapshot, so the
@@ -72,8 +81,15 @@ pub fn finder_spec() -> rune::AppSpec<Finder> {
     rune::AppSpec::<Finder> {
         scenes: &[
             ("empty", |finder| *finder = Finder::default()),
-            ("rows", |finder| *finder = Finder::with_rows(&["git status", "cargo test"])),
-            ("context", |finder| *finder = Finder { context: "dev-console".into(), ..Finder::with_rows(&["just build"]) }),
+            ("rows", |finder| {
+                *finder = Finder::with_rows(&["git status", "cargo test"])
+            }),
+            ("context", |finder| {
+                *finder = Finder {
+                    context: "dev-console".into(),
+                    ..Finder::with_rows(&["just build"])
+                }
+            }),
         ],
         ..rune::AppSpec::new(FINDER_TITLE, FINDER_SIZE, Finder::default, ui::finder_view)
     }
@@ -100,7 +116,11 @@ pub fn run(args: &[String]) -> i32 {
         Ok(intent) => intent,
         Err(message) => {
             eprintln!("{message}");
-            return if message.starts_with("usage:") { EXIT_OK } else { EXIT_USAGE };
+            return if message.starts_with("usage:") {
+                EXIT_OK
+            } else {
+                EXIT_USAGE
+            };
         }
     };
 
@@ -109,20 +129,29 @@ pub fn run(args: &[String]) -> i32 {
     // Second launch: hand the intent to the resident process and leave. An error here is the normal
     // case for the first launch, so it is not reported.
     if instance::send_intent(&socket, intent.unwrap_or(Intent::Library)).is_ok() {
-        println!("dev-console: asked the running instance for the {} window", describe(intent));
+        println!(
+            "dev-console: asked the running instance for the {} window",
+            describe(intent)
+        );
         return EXIT_OK;
     }
 
     // From here on this process is the resident one, so the lock it takes is held for its lifetime.
     let Some(_lock) = take_instance_lock() else {
-        eprintln!("dev-console: another instance holds the lock but is not answering on {}; exiting", socket.display());
+        eprintln!(
+            "dev-console: another instance holds the lock but is not answering on {}; exiting",
+            socket.display()
+        );
         return EXIT_ERROR;
     };
 
     let server = match instance::Server::bind(&socket) {
         Ok(server) => server,
         Err(error) => {
-            eprintln!("dev-console: cannot listen on {}: {error}", socket.display());
+            eprintln!(
+                "dev-console: cannot listen on {}: {error}",
+                socket.display()
+            );
             return EXIT_ERROR;
         }
     };
@@ -169,7 +198,10 @@ fn take_instance_lock() -> Option<instance::InstanceLock> {
     match instance::InstanceLock::acquire(&path) {
         Ok(lock) => lock,
         Err(error) => {
-            eprintln!("dev-console: cannot take the instance lock at {}: {error}", path.display());
+            eprintln!(
+                "dev-console: cannot take the instance lock at {}: {error}",
+                path.display()
+            );
             None
         }
     }
@@ -198,10 +230,20 @@ mod tests {
     #[test]
     fn flags_parse_into_at_most_one_intent() {
         assert_eq!(parse_args(&[]).unwrap(), None);
-        assert_eq!(parse_args(&["--finder".into()]).unwrap(), Some(Intent::Finder));
-        assert_eq!(parse_args(&["--library".into()]).unwrap(), Some(Intent::Library));
-        assert!(parse_args(&["--finder".into(), "--library".into()]).unwrap_err().contains("at most one"));
-        assert!(parse_args(&["--reveal".into()]).unwrap_err().starts_with("unknown argument"));
+        assert_eq!(
+            parse_args(&["--finder".into()]).unwrap(),
+            Some(Intent::Finder)
+        );
+        assert_eq!(
+            parse_args(&["--library".into()]).unwrap(),
+            Some(Intent::Library)
+        );
+        assert!(parse_args(&["--finder".into(), "--library".into()])
+            .unwrap_err()
+            .contains("at most one"));
+        assert!(parse_args(&["--reveal".into()])
+            .unwrap_err()
+            .starts_with("unknown argument"));
     }
 
     #[test]
@@ -210,7 +252,9 @@ mod tests {
         assert!(error.starts_with("usage:"), "{error}");
         assert!(error.contains("--finder"));
         // `run` turns a usage string into a clean exit rather than a failure.
-        assert!(parse_args(&["--help".into()]).unwrap_err().starts_with("usage:"));
+        assert!(parse_args(&["--help".into()])
+            .unwrap_err()
+            .starts_with("usage:"));
     }
 
     #[test]
@@ -221,7 +265,10 @@ mod tests {
         assert_eq!(library.min_size, Some(LIBRARY_MIN_SIZE));
 
         let options = library_options();
-        assert!(!options.visible, "the resident app starts with no window mapped");
+        assert!(
+            !options.visible,
+            "the resident app starts with no window mapped"
+        );
         assert!(options.resizable);
 
         let finder = finder_spec();
@@ -273,12 +320,22 @@ mod tests {
 
     #[test]
     fn an_intent_with_no_running_instance_is_reported_rather_than_retried_forever() {
-        // `send_intent` against a path nothing listens on fails with ECONNREFUSED, which is what
-        // lets `run` decide "I am the first instance" without a timeout.
+        // `send_intent` against a socket no one listens on fails with ECONNREFUSED rather than
+        // blocking, which is what lets `run` decide "I am the first instance" without a timeout.
+        // A path that never existed gives ENOENT instead, so leave a real (unlinked) socket file
+        // behind, exactly as a killed resident process would: binding a listener and dropping it
+        // removes the listener but not the file.
         let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("nothing-here.sock");
-        let error = instance::send_intent(&missing, Intent::Finder).unwrap_err();
+        let dead = dir.path().join("nothing-here.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&dead).unwrap();
+        drop(listener);
+        assert!(
+            dead.exists(),
+            "dropping a `UnixListener` leaves its socket file in place, as a killed instance does"
+        );
+
+        let error = instance::send_intent(&dead, Intent::Finder).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::ConnectionRefused);
-        assert!(!instance::instance_running(&missing));
+        assert!(!instance::instance_running(&dead));
     }
 }

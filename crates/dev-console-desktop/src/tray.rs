@@ -123,12 +123,16 @@ pub fn attach(library: &AppHandle<Library>, finder: &AppHandle<Finder>) -> Optio
             None
         }
         Err(error @ TrayError::Backend(_)) => {
-            eprintln!("dev-console: tray registration failed ({error}); the app still runs resident");
+            eprintln!(
+                "dev-console: tray registration failed ({error}); the app still runs resident"
+            );
             None
         }
         // `TrayError` is `#[non_exhaustive]`: a failure mode added upstream is reported too.
         Err(error) => {
-            eprintln!("dev-console: tray registration failed ({error}); the app still runs resident");
+            eprintln!(
+                "dev-console: tray registration failed ({error}); the app still runs resident"
+            );
             None
         }
     }
@@ -149,13 +153,17 @@ mod tests {
         // Straight, not premultiplied: a covered texel must carry a colour for the watcher to tint.
         let centre = ((ICON_SIZE / 2) * ICON_SIZE + ICON_SIZE / 2) as usize * 4;
         assert_eq!(pixels[centre + 3], 255, "the disc centre is opaque");
-        assert_eq!(pixels[0 + 3], 0, "the corner outside the disc is transparent");
+        assert_eq!(pixels[3], 0, "the corner outside the disc is transparent");
     }
 
     #[test]
     fn an_outside_texel_carries_no_colour_so_it_cannot_haloe() {
         let pixels = icon_rgba(8);
-        assert_eq!(&pixels[0..4], &[0, 0, 0, 0], "a transparent tray texel is fully zeroed");
+        assert_eq!(
+            &pixels[0..4],
+            &[0, 0, 0, 0],
+            "a transparent tray texel is fully zeroed"
+        );
     }
 
     #[test]
@@ -209,6 +217,10 @@ mod tests {
 
     #[test]
     fn the_tray_id_is_the_application_identity() {
-        assert_eq!(TRAY_ID, crate::APP_ID, "the tray entry, the app id and the desktop file must agree");
+        assert_eq!(
+            TRAY_ID,
+            crate::APP_ID,
+            "the tray entry, the app id and the desktop file must agree"
+        );
     }
 }
