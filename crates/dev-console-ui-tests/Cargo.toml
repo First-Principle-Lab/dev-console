@@ -1,0 +1,17 @@
+[package]
+name = "dev-console-ui-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Scripted non-render checks over the Rune element trees and state transitions of the Dev Console desktop shell."
+publish = false
+
+# The crate is fixtures and scripted helpers; the suites that use them are in `tests/`.
+[lib]
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+dev-console-desktop = { path = "../dev-console-desktop" }
+rune = { workspace = true }
