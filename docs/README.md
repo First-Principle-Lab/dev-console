@@ -12,6 +12,7 @@ to test it, and how to tell it is complete.
 - [`project-scripts.md`](plans/project-scripts.md)
 - [`env-file-import.md`](plans/env-file-import.md)
 - [`project-aware-ranking.md`](plans/project-aware-ranking.md)
+- [`rune-migration.md`](plans/rune-migration.md): Arch Linux migration from Tauri/Svelte to Rune, component rendering, desktop integrations, updates, and acceptance checks
 
 ## design/
 
