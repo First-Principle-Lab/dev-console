@@ -215,21 +215,22 @@ src/
   lib/events.ts
   lib/finder-state.ts         selection and completion behavior
   styles/tokens.css
-src-tauri/src/
-  lib.rs                     application setup
+crates/dev-console-core/src/
   state.rs                   shared AppState
-  windows.rs                 show/hide/focus and launch intent
-  tray.rs                    native menu
-  ipc.rs                     Tauri command registration
   repository.rs              SQLite and migrations
   vault.rs                   encryption and lock lifecycle
   keyring.rs                 Secret Service adapter
-  authentication.rs          verified native authentication adapter
+  auth.rs                    verified native authentication adapter
   search.rs                  shared metadata ranking
   clipboard.rs               copy, exclusion, conditional expiry
   execution.rs               terminal execution
+  backup.rs                  sealed archives and recovery journal support
+src-tauri/src/
+  lib.rs                     application setup
+  windows.rs                 show/hide/focus and launch intent
+  tray.rs                    native menu
+  ipc.rs                     Tauri command registration
   control.rs                 CLI response channel
-  backup.rs
 src-tauri/capabilities/
   finder.json
   library.json

@@ -380,7 +380,10 @@ fn project_scan_import_and_rescan_use_real_persistent_records() {
     std::fs::create_dir(&project).unwrap();
     std::fs::write(
         project.join("package.json"),
-        include_str!("fixtures/projects/package.json"),
+        // One copy of the scanner fixture: it lives with the crate that owns the scanner
+        // (`crates/dev-console-core/tests/fixtures/projects`), and this suite reads the same file
+        // rather than keeping a second copy that could drift.
+        include_str!("../../crates/dev-console-core/tests/fixtures/projects/package.json"),
     )
     .unwrap();
     let path = project.to_str().unwrap();

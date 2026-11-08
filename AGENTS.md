@@ -36,7 +36,7 @@ git switch -c feat/<name> origin/dev
 
 ## Versioning
 
-You don't edit version numbers by hand. The `build` job picks the next `v0.0.N` tag and stamps it into `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `Cargo.lock` at build time (`scripts/set-release-version.py`). The repo files stay at their committed value.
+You don't edit version numbers by hand. The `build` job picks the next `v0.0.N` tag and stamps it into `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `Cargo.lock`, and the root workspace's `Cargo.toml` (`[workspace.package] version`, which the `crates/*` members inherit) and root `Cargo.lock`, at build time (`scripts/set-release-version.py`). The repo files stay at their committed value. `dev-console-core` stamps that version into the sealed-backup header, so both trees must carry the same number.
 
 ## Local checks
 

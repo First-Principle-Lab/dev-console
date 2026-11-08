@@ -1,22 +1,52 @@
 //! Dev Console's domain layer, free of any desktop runtime.
 //!
-//! Status: **scaffold**. This crate holds nothing yet, on purpose.
-//!
-//! Plan section 3 ("Reuse the existing domain behavior") moves the proven code from the Tauri
-//! backend into here unchanged in behaviour: models, the `rusqlite` repository, the age vault, the
+//! Plan section 3 ("Reuse the existing domain behavior") moves the proven code out of the Tauri
+//! backend here, unchanged in behaviour: models, the `rusqlite` repository, the age vault, the
 //! keyring adapter (`dev-console` / `vault-key`), polkit authentication, search, imports, project
-//! scanners, history, environment snapshots, recovery and backups. Its home today is
-//! `src-tauri/src/{models,repository,vault,keyring,auth,search,import,projects,project_history,
-//! environment,recovery,backup,paths,control}.rs`.
+//! scanners, shell history, environment snapshots, recovery, backups, the clipboard owner, and the
+//! [`state::AppState`] container that owns them all. Each module kept its own tests during the
+//! move, so the same test set is the evidence that nothing was lost (plan section 3: "Refactor
+//! dependencies on desktop runtime types without rewriting established storage or security
+//! behavior").
 //!
-//! Deliberately *not* done here yet: re-typing any of that into a "core" shape. Duplicating a
-//! storage or security rule in two places during a migration is how the two copies drift, and the
-//! existing modules keep their own tests while they move (plan section 3, "Refactor dependencies on
-//! desktop runtime types without rewriting established storage or security behavior"). Milestone 2
-//! of plan section 4 moves them together with their test set, so the moved tests stay the evidence
-//! that nothing was lost; XDG paths, filenames, the database schema, the encrypted archive format,
-//! the keyring service/account, manual-lock semantics, approval rules, the 120s execution timeout
-//! and the output limits all keep their current behaviour.
+//! Unchanged on purpose, and asserted by the tests that came with this code:
 //!
-//! Until that move happens, the running application reads and writes its data only through the
-//! Tauri backend, so there is exactly one implementation of every rule at all times.
+//! - XDG data/config locations and filenames ([`paths`]) and the database schema ([`repository`]).
+//! - The encrypted archive format ([`backup`]) and the keyring service `dev-console` with account
+//!   `vault-key` ([`keyring`], [`vault`]).
+//! - Persistent manual lock, authenticated unlock, and the vault generation checks ([`vault`],
+//!   [`state`]).
+//! - Command approval rules, the 120-second execution timeout, and the output limits
+//!   ([`execution`]).
+//! - The shell hook protocol installed into the user's zsh ([`project_history`]).
+//!
+//! This crate depends on no desktop runtime: no Tauri, no windowing, no renderer, no tray. The
+//! crates that do touch a window - the Tauri app still in `src-tauri` and, later,
+//! `crates/dev-console-desktop` - reach the domain only through [`state::AppState`], which owns the
+//! repository, the vault, settings, the clipboard owner, backups, and the recovery journal. The
+//! control socket, the tray, the CLI, and window handling stay with the desktop runtime because
+//! they wake or move a window; their request grammar and exit codes are unchanged.
+
+pub mod auth;
+pub mod backup;
+pub mod clipboard;
+pub mod context;
+pub mod environment;
+pub mod error;
+pub mod execution;
+pub mod history;
+pub mod import;
+pub mod keyring;
+pub mod models;
+pub mod paths;
+pub mod project_history;
+pub mod projects;
+pub mod recovery;
+pub mod repository;
+pub mod search;
+pub mod settings;
+pub mod state;
+pub mod vault;
+
+pub use error::{AppError, AppResult};
+pub use state::AppState;

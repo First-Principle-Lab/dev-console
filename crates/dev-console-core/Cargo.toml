@@ -8,3 +8,17 @@ description = "Domain layer for the native Dev Console: models, storage, vault, 
 publish = false
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_norway = { workspace = true }
+libc = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+age = { workspace = true }
+keyring = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

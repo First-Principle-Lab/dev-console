@@ -31,10 +31,16 @@ bun run build:frontend
 echo "== browser E2E (runs against the IPC test double: proves UI behaviour only) =="
 bunx playwright test
 echo "== cargo fmt --check =="
+# The domain layer moved to the root Cargo workspace (`crates/dev-console-core`), so the gate covers
+# both trees: the workspace and the standalone desktop package in `src-tauri`. `-p dev-console-core`
+# is what runs the storage/vault/backup unit tests that used to live inside `src-tauri`.
+cargo fmt --all -- --check
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 echo "== clippy (warnings denied) =="
+cargo clippy -p dev-console-core --all-targets --locked -- -D warnings
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 echo "== cargo test =="
+cargo test -p dev-console-core --locked
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 echo "== zsh environment directory hook =="
