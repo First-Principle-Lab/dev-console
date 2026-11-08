@@ -43,18 +43,16 @@
 //! message, which is the difference between asserting a copy happened and printing what it copied.
 
 use dev_console_core::models::CopyRequest;
+use dev_console_desktop::app::library_spec;
 use dev_console_desktop::copy::CopySource;
-use dev_console_desktop::ui::{finder_view, library_view, Candidate, Finder, Library};
+use dev_console_desktop::ui::{finder_view, Candidate, Finder, Library};
 use rune::clipboard::MemoryClipboard;
-use rune::{Cx, El, Env, Key, KeyEvent, Mods, Runtime};
+use rune::{AppSpec, Cx, El, Env, Key, KeyEvent, Mods, Runtime, Tx};
 
 /// The Finder viewport, in logical points. The same constant the window asks the compositor for
 /// (`dev_console_desktop::identity::FINDER_SIZE`); duplicated deliberately so a scripted test still
 /// measures the tree at the size the shell intended even if the identity constant drifts.
 pub const FINDER_VIEWPORT: (f32, f32) = (680.0, 420.0);
-
-/// The Library viewport, in logical points.
-pub const LIBRARY_VIEWPORT: (f32, f32) = (1040.0, 700.0);
 
 /// Synthetic query text. Never a real secret, a real path or real command output (AGENTS.md).
 pub const SYNTHETIC_QUERY: &str = "synthetic-query-token";
@@ -87,7 +85,9 @@ pub const SYNTHETIC_SECRET_VALUE: &str = "synthetic-vault-value-never-displayed"
 /// The draft a `command-*` id resolves to: what the palette copies for a command row.
 pub const SYNTHETIC_COMMAND_DRAFT: &str = "git status --short";
 
-/// Keys the Library's tree is expected to carry.
+/// Every key the Library's tree is expected to carry, checked against the live tree rather than
+/// against a hand-picked few, so a new element cannot opt out of the surface checks by not being
+/// thought of.
 pub const LIBRARY_KEYS: &[&str] = &[
     "library-window",
     "library-header",
@@ -125,7 +125,26 @@ pub struct Stage<S: 'static> {
 }
 
 impl<S: 'static> Stage<S> {
-    /// Builds a stage, lays out one frame at `t = 0`, and leaves the state settled.
+    /// A stage running `view` over `state` at `viewport`, with no window-level key handler. Use
+    /// [`Stage::from_spec`] for a window the shell actually opens; this is for a stage that is not a
+    /// shipped window at all (the harness's own editor probe in `mod tests`).
+    pub fn new(state: S, view: fn(&S, &mut Cx<S>) -> El, viewport: (f32, f32)) -> Self {
+        Self::build(state, view, None, viewport)
+    }
+
+    /// A stage wired the way the window is: its view, its size and its window-level key router all
+    /// come from the same [`AppSpec`] the desktop entry point hands Rune
+    /// ([`dev_console_desktop::app::library_spec`] and friends).
+    ///
+    /// This exists so a keyboard script cannot test a lookalike. A stage that assembled its own view
+    /// and handler would still pass if the shipped window asked for no router at all - and the
+    /// wiring is precisely the half a scripted test otherwise assumes. Reading `spec.size` rather
+    /// than a viewport constant here is the same refusal applied to geometry.
+    pub fn from_spec(state: S, spec: &AppSpec<S>) -> Self {
+        Self::build(state, spec.view, spec.on_key, spec.size)
+    }
+
+    /// Lays out one frame at `t = 0` over `state` and leaves it settled.
     ///
     /// The runtime is put in the keyboard state the real window has on this target, rather than in
     /// Rune's headless default: `window.rs` calls `set_full_keyboard_access` with the platform
@@ -133,8 +152,14 @@ impl<S: 'static> Stage<S> {
     /// With the flag off, Rune's Tab traversal visits only text fields and list groups (it is
     /// modelling macOS's "Full Keyboard Access" setting), so a script of a button's Tab order would
     /// be measuring a macOS accommodation that the Arch target this shell ships to never has.
-    pub fn new(state: S, view: fn(&S, &mut Cx<S>) -> El, viewport: (f32, f32)) -> Self {
+    fn build(
+        state: S,
+        view: fn(&S, &mut Cx<S>) -> El,
+        on_key: Option<fn(&mut S, &KeyEvent, &mut Tx) -> bool>,
+        viewport: (f32, f32),
+    ) -> Self {
         let mut runtime = Runtime::new(state, view, viewport, Env::new(true, 1.0));
+        runtime.on_key = on_key;
         runtime.set_full_keyboard_access(true);
         // Before the first frame, so a copy issued by a handler laid out in frame zero already has
         // somewhere to go: `Runtime::use_clipboard` swaps the OS board for an in-memory one, which on
@@ -357,6 +382,24 @@ impl<S: 'static> Stage<S> {
         self.runtime.frame(1.0 / 60.0);
     }
 
+    /// Sends a Ctrl+`c` chord in the shape this platform's window actually reports it in.
+    ///
+    /// Off macOS the toolkit maps the control key onto `Mods::cmd` - the *primary* modifier - as
+    /// well as `Mods::ctrl`, and the chorded character arrives as `Key::Command(c)` rather than
+    /// `Key::Text` (`window/keys.rs::map_mods`/`map_key`). A script that invented its own shape
+    /// would be handing the router a key no window ever sends, and a chord matcher could be wrong
+    /// and still pass.
+    pub fn press_ctrl(&mut self, c: char) {
+        self.send_key(KeyEvent {
+            key: Key::Command(c),
+            mods: Mods {
+                cmd: true,
+                ctrl: true,
+                ..Mods::default()
+            },
+        });
+    }
+
     /// Injects Tab, optionally Shift+Tab - the pair a focus trap is defined by, spelled out here so
     /// a script cannot accidentally test the forward direction twice.
     pub fn press_tab(&mut self, shift: bool) {
@@ -393,9 +436,10 @@ impl Stage<Finder> {
 }
 
 impl Stage<Library> {
-    /// The Library shell with `state`.
+    /// The Library shell with `state`, wired from the same [`AppSpec`] the resident process builds
+    /// its primary window from - view, size and window-level key router included.
     pub fn library(state: Library) -> Stage<Library> {
-        Stage::new(state, library_view, LIBRARY_VIEWPORT)
+        Stage::from_spec(state, &library_spec())
     }
 }
 

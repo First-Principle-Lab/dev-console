@@ -54,10 +54,14 @@ const USAGE: &str = "usage: dev-console [--finder | --library]\n\
      With no flag, the resident instance is asked to show the Library, or a new resident\n\
      instance starts with no window mapped and waits for the tray, a shortcut or a second launch.";
 
-/// The Library's `AppSpec`: title, size and minimum come from [`crate::identity`].
+/// The Library's `AppSpec`: title, size and minimum come from [`crate::identity`], and `on_key` is
+/// the router that stands in for the shipped window's `<svelte:window onkeydown>` listener. Setting
+/// it here rather than in a test is the point: the scripted keyboard tests build their stage from
+/// this same spec, so a stage cannot route a chord the shipped window forgot to ask for.
 pub fn library_spec() -> rune::AppSpec<Library> {
     rune::AppSpec::<Library> {
         min_size: Some(LIBRARY_MIN_SIZE),
+        on_key: Some(Library::route_key),
         ..rune::AppSpec::new(
             LIBRARY_TITLE,
             LIBRARY_SIZE,
@@ -281,6 +285,31 @@ mod tests {
         assert!(window.options.borderless);
         assert!(!window.options.resizable);
         assert!(!window.options.visible);
+    }
+
+    #[test]
+    fn the_library_spec_hands_the_window_a_key_router_and_the_finder_does_not() {
+        // `tests/library_keys.rs` builds every one of its stages from `library_spec()`, so the
+        // assertion that *which* handler is wired is the right one is made behaviourally there: a
+        // spec with no router, or with one that routes the wrong chords, fails those tests. What
+        // only a test here can say is that the spec carries a handler at all - a `Library::route_key`
+        // that exists but is never installed would otherwise leave the shipped window deaf.
+        //
+        // Deliberately not a function-pointer comparison against `Library::route_key`: the addresses
+        // of the same function can differ between codegen units (that is what clippy's
+        // `unpredictable_function_pointer_comparisons` is for), so an identity assert here would be a
+        // flake with a green tick next to it.
+        assert!(
+            library_spec().on_key.is_some(),
+            "the Library window must carry the app-level key router"
+        );
+        // The palette keeps its bindings on the query field (`El::on_input_key`), so it asks the
+        // window for none: a second, window-level table for the Finder would be a second owner of
+        // the same keys.
+        assert!(
+            finder_spec().on_key.is_none(),
+            "the Finder must not grow a second, window-level key table"
+        );
     }
 
     #[test]

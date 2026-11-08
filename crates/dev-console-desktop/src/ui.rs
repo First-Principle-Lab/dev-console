@@ -32,10 +32,12 @@
 //! milestone 2 hands the seam a `dev-console-core` state.
 //!
 //! Still unbuilt, and not faked: `Space` copy (see below), `Ctrl+O` details and `Ctrl+P`
-//! ignore-context (need the details panel), the Library's `Ctrl+1`/`Ctrl+2` tab chords, the
-//! command-output panel and the SVG icon set. Destructive confirmation is no longer on that list:
-//! [`Library::request_delete`] opens [`crate::dialog`]'s shared shell, which owns the focus trap, the
-//! initial focus and the restore. `Space` is deliberately left unbound rather than bound imperfectly:
+//! ignore-context (need the details panel), the Library's `Ctrl+N`/`Ctrl+S` (need an editor), the
+//! command-output panel and the SVG icon set. Two things have come off that list since it was
+//! written: destructive confirmation, because [`Library::request_delete`] opens [`crate::dialog`]'s
+//! shared shell (which owns the focus trap, the initial focus and the restore), and the Library's
+//! `Ctrl+1`/`Ctrl+2` tab chords, routed by [`Library::route_key`] off the same `AppSpec` the real
+//! window is built from. `Space` is deliberately left unbound rather than bound imperfectly:
 //! the shipped handler binds it beside `Enter` behind `shouldCommit` (`src/lib/finder-state.ts`), and
 //! Rune's IME composition flag is `pub(super)`, so a handler cannot honour that guard - `route_key`
 //! holds `Enter`/`Escape` back mid-composition but not `Space`, which a composed space would have to
@@ -55,14 +57,14 @@
 //! views use `rune::tok::theme` to stay token-driven while the palette mapping is a milestone-4
 //! change, and the ported data is what that change will map from - not a second colour source.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use crate::copy::{self, CopyOutcome, CopySource, Unwired};
 use crate::dialog::{self, Dialog};
 use dev_console_core::models::{CopyRequest, Kind};
 use rune::tok::{radius, space, type_};
-use rune::{col, el, row, text, text_input, Cx, El, Key, KeyEvent, TextEdit, Tx};
+use rune::{col, el, row, text, text_input, Chord, Cx, El, Key, KeyEvent, TextEdit, Tx};
 
 /// Which list the Library is showing. Mirrors the Ctrl+1 / Ctrl+2 tabs of the current app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -125,6 +127,33 @@ pub struct Library {
     pub pending_delete: Option<PendingDelete>,
 }
 
+/// The two tab chords the Library window owns, in the order the shipped handler tests them:
+/// `Ctrl+1` for Commands, `Ctrl+2` for Secrets.
+///
+/// Parsed once and matched with [`Chord`] rather than compared by hand, because the toolkit's own
+/// matcher knows two things a hand-written `mods.ctrl && key == Command('1')` comparison quietly
+/// drops: off macOS a window's Ctrl chord arrives as `Key::Command` with `cmd` *and* `ctrl` set
+/// (`window/keys.rs` maps the control key onto the primary modifier), and a chord on a non-Latin
+/// layout's key falls back to the US key in that place. The digit itself is the same either way, so
+/// this is the difference between a binding that works on the owner's keyboard and one that only
+/// works in a test.
+static TAB_CHORDS: [(LazyLock<Chord>, Tab); 2] = [
+    (
+        LazyLock::new(|| Chord::parse("ctrl+1").expect("`ctrl+1` is a valid chord")),
+        Tab::Commands,
+    ),
+    (
+        LazyLock::new(|| Chord::parse("ctrl+2").expect("`ctrl+2` is a valid chord")),
+        Tab::Secrets,
+    ),
+];
+
+/// The footer's promise about those two chords - stated once, next to them, and checked against
+/// them by `every_library_footer_chip_names_a_binding_the_window_routes`, which parses the digits
+/// out of this string and drives each one. A footer that advertises a binding the shell does not
+/// route is worse than no footer at all, and the Finder already has a test holding that line.
+pub const TAB_HINT: &str = "Ctrl+1 / Ctrl+2 to switch tabs";
+
 impl Library {
     /// A Library showing `entries` on `tab`, for tests and for the headless scenes.
     pub fn with_entries(tab: Tab, entries: &[&str]) -> Library {
@@ -175,6 +204,45 @@ impl Library {
         self.pending_delete
             .as_ref()
             .map(|pending| Dialog::delete(&pending.name, pending.kind))
+    }
+
+    /// Shows `tab`: the port of `selectTab` in `src/windows/Library.svelte`. False when that tab is
+    /// already showing, because the shipped handler's first line is `if (tab === next) return` and
+    /// the rest of it (clearing `selectedId`, dropping `details`, reloading the list) has no native
+    /// twin until the shell has a selection, a details pane and a repository behind the list.
+    pub fn select_tab(&mut self, tab: Tab) -> bool {
+        if self.tab == tab {
+            return false;
+        }
+        self.tab = tab;
+        true
+    }
+
+    /// The Library window's app-level key router: the native mirror of
+    /// `<svelte:window onkeydown={onGlobalKeydown}>`, reached through [`rune::AppSpec::on_key`] which
+    /// [`crate::app::library_spec`] sets, so the window and the scripted tests route the same table
+    /// rather than two lookalikes.
+    ///
+    /// Rune consults this for every key the focused control leaves alone, and first of all when
+    /// nothing has focus (`runtime/input/keys.rs`), which is the shape of the shipped window handler:
+    /// the chords work from the list, from a focused tab or row, and from an empty window alike.
+    ///
+    /// Of the shipped handler's five branches only the two tab chords are here. `Ctrl+N` (new entry)
+    /// and `Ctrl+S` (save the open edit) wait on an editor the shell has not built; the two `Escape`
+    /// branches need no twin, because [`crate::dialog`]'s modal dismisses itself on Escape - that is
+    /// the whole of `Escape && pendingDelete`, and there is no `pendingRun` yet.
+    ///
+    /// A matched chord is consumed whether or not it moved the tab, as the shipped handler calls
+    /// `preventDefault()` before `selectTab`'s "already showing" return: the Library owns that key
+    /// either way, and reporting it unhandled would only invite something else to act on it.
+    pub fn route_key(&mut self, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+        TAB_CHORDS
+            .iter()
+            .find(|(chord, _)| chord.matches(ev))
+            .is_some_and(|(_, tab)| {
+                self.select_tab(*tab);
+                true
+            })
     }
 }
 
@@ -636,11 +704,7 @@ fn footer(state: &Library, theme: rune::tok::Theme) -> El {
             .font(type_::LABEL)
             .color(theme.text_secondary),
         )
-        .child(keycap(
-            "footer-hint",
-            "Ctrl+1 / Ctrl+2 to switch tabs",
-            theme,
-        ))
+        .child(keycap("footer-hint", TAB_HINT, theme))
 }
 
 /// Draws the Finder window: query field, context chip, candidates and the keyboard footer.
