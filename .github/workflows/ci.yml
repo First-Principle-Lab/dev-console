@@ -96,12 +96,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zsh dbus-x11 xvfb xclip xdotool x11-utils gnome-keyring \
-            desktop-file-utils python3-dbus libsecret-tools libwebkit2gtk-4.1-dev \
+            desktop-file-utils minisign python3-dbus libsecret-tools libwebkit2gtk-4.1-dev \
             libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             libappindicator3-dev librsvg2-dev libsqlite3-dev pkg-config
       - run: bun install --frozen-lockfile
       - name: environment directory hook
         run: python3 scripts/test-environment-hook.py
+      - name: standalone AppImage installer
+        run: python3 scripts/test-appimage-installer.py
       - name: keyring adapter
         run: bash scripts/test-keyring.sh || test "$?" = 77
       - name: clipboard behaviour
