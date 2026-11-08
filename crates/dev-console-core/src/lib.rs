@@ -26,7 +26,18 @@
 //! repository, the vault, settings, the clipboard owner, backups, and the recovery journal. The
 //! control socket, the tray, the CLI, and window handling stay with the desktop runtime because
 //! they wake or move a window; their request grammar and exit codes are unchanged.
+//!
+//! The UI logic that only ever existed in TypeScript is here too, because the Rune views in
+//! `crates/dev-console-desktop` will need it and it has to be testable without a renderer (plan §3:
+//! "port TypeScript-only drafts, validation, argument parsing, formatting, and Finder selection
+//! logic into Rust"): [`validation`] (the editor's Save check), [`argv`] (the terminal-command
+//! word splitting), [`time_format`] (the row timestamps) and [`finder_state`] (palette selection and
+//! completion). Each ports one file in `src/lib`, and its test names are the ported vitest `it`
+//! titles from `tests/unit/*.test.ts`, so a removed case is visible in the test list. The
+//! TypeScript stays until the cutover (plan §4.6): both apps are alive, and this is how they are
+//! kept from growing two answers to one question.
 
+pub mod argv;
 pub mod auth;
 pub mod backup;
 pub mod clipboard;
@@ -34,6 +45,7 @@ pub mod context;
 pub mod environment;
 pub mod error;
 pub mod execution;
+pub mod finder_state;
 pub mod history;
 pub mod import;
 pub mod keyring;
@@ -46,6 +58,8 @@ pub mod repository;
 pub mod search;
 pub mod settings;
 pub mod state;
+pub mod time_format;
+pub mod validation;
 pub mod vault;
 
 pub use error::{AppError, AppResult};
