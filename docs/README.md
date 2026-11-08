@@ -26,6 +26,7 @@ to test it, and how to tell it is complete.
 
 ## project/
 
+- [`development-guide.md`](project/development-guide.md): running, verification, CI, visual review, and README screenshot sources
 - [`PLAN.md`](project/PLAN.md): product plan
 - [`IMPLEMENTATION.md`](project/IMPLEMENTATION.md): implementation notes
 - [`COMPLETION_CHECKLIST.md`](project/COMPLETION_CHECKLIST.md): the acceptance contract (C01 to C24)
@@ -45,3 +46,7 @@ The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9
 - [`project-environments.md`](project/project-environments.md): encrypted local environment file versions and recovery
 
 - [`release-0.0.10-review.md`](project/release-0.0.10-review.md): environment sync review and release validation
+
+## assets/
+
+Product documentation images. `assets/screenshots/` contains the selected demo screenshots used by the main README.
