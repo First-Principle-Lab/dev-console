@@ -34,6 +34,10 @@ to test it, and how to tell it is complete.
 - [`native-feasibility-ledger.md`](project/native-feasibility-ledger.md): which native-shell checks
   this container decides, which only the owner's Hyprland/NVIDIA session can, and the command that
   settles each one - gated by `cargo test -p dev-console-desktop --lib ledger_tests`
+- [`native-capability-matrix.md`](project/native-capability-matrix.md): every user-visible behaviour
+  the shipped app has, mapped to the native test that decides it or to the seam that is missing -
+  the honest gap list behind plan milestone 4, gated by
+  `cargo test -p dev-console-desktop --lib matrix_tests`
 - [`PROGRESS.md`](project/PROGRESS.md): progress log
 - [`HANDOFF.md`](project/HANDOFF.md): handoff notes
 - [`CLOUD_AGENT_PROMPT.md`](project/CLOUD_AGENT_PROMPT.md): the original agent brief

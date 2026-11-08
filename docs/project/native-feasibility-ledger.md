@@ -86,3 +86,8 @@ Then the AGENTS.md Finder checklist: open and dismiss repeatedly, move the point
 and out and back in, type a query, drive selection from the keyboard, press Escape, and confirm the
 Library and the tiled windows around it keep their layout. Nothing in this file claims any of that
 has happened; the rows say which command would make each one true.
+
+This ledger answers *what can be checked here*. Its companion,
+[`native-capability-matrix.md`](native-capability-matrix.md), answers the other question - *which
+shipped behaviours the native shell has at all* - one Playwright and vitest title at a time, and it
+is gated alongside this file.

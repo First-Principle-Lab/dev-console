@@ -42,6 +42,13 @@ mod source_scan;
 #[cfg(test)]
 mod ledger_tests;
 
+/// The gate over `docs/project/native-capability-matrix.md`, the artefact checkpoint C6's evidence
+/// clause asks for: every shipped behaviour mapped to the native test that decides it or to an
+/// explicit statement of the seam that is missing. The ledger above says what this host cannot
+/// *decide*; this matrix says what the native shell has not *built*, one shipped behaviour at a time.
+#[cfg(test)]
+mod matrix_tests;
+
 /// Application identity: the Wayland `app_id`, the StatusNotifierItem id, and the name the owner's
 /// Hyprland rules and `.desktop` file use. The window *title* is separate, and for the Finder it is
 /// `dev-console-finder` (see [`identity`]).
