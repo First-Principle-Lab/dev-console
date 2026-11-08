@@ -226,7 +226,10 @@ crates/dev-console-core/src/
   execution.rs               terminal execution
   backup.rs                  sealed archives and recovery journal support
   services/mod.rs            the two surfaces a UI may call, and the Effects they return
-  services/library.rs        the privileged surface (everything the library window may do)
+  services/library/          the privileged surface (everything the library window may do): mod.rs
+                             carries the shared read model and window commands, and entries.rs,
+                             execution.rs, settings.rs, projects.rs and archive.rs each hold an
+                             `impl LibraryActions` block for one seam of the library's own UI
   services/finder.rs         the palette surface (no reveal, edit, execute, archive, recovery)
   freshness.rs               the ledger of which request is current, and the three guards an
                              asynchronous answer has to pass before a window paints it

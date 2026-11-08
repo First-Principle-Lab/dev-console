@@ -871,7 +871,12 @@ mod tests {
         for (name, source) in [
             ("mod.rs", include_str!("mod.rs")),
             ("finder.rs", include_str!("finder.rs")),
-            ("library.rs", include_str!("library.rs")),
+            ("library/mod.rs", include_str!("library/mod.rs")),
+            ("library/archive.rs", include_str!("library/archive.rs")),
+            ("library/entries.rs", include_str!("library/entries.rs")),
+            ("library/execution.rs", include_str!("library/execution.rs")),
+            ("library/projects.rs", include_str!("library/projects.rs")),
+            ("library/settings.rs", include_str!("library/settings.rs")),
             ("events.rs", include_str!("events.rs")),
             ("../testing.rs", include_str!("../testing.rs")),
         ] {
