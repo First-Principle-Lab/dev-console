@@ -36,6 +36,11 @@
 //! titles from `tests/unit/*.test.ts`, so a removed case is visible in the test list. The
 //! TypeScript stays until the cutover (plan §4.6): both apps are alive, and this is how they are
 //! kept from growing two answers to one question.
+//!
+//! The last piece of plan §3 is the [`services`] module: [`LibraryActions`] and [`FinderActions`],
+//! the two surfaces a window is allowed to talk to. They are separate types rather than a mode flag,
+//! so "the palette can decrypt nothing" is a property of the program; each surface declares its
+//! operations as a const, and a compile-time check refuses a privileged name on the palette's list.
 
 pub mod argv;
 pub mod auth;
@@ -56,6 +61,7 @@ pub mod projects;
 pub mod recovery;
 pub mod repository;
 pub mod search;
+pub mod services;
 pub mod settings;
 pub mod state;
 pub mod time_format;
@@ -63,4 +69,5 @@ pub mod validation;
 pub mod vault;
 
 pub use error::{AppError, AppResult};
+pub use services::{AppEvent, Effects, FinderActions, LibraryActions, Surface, WindowCommand};
 pub use state::AppState;
