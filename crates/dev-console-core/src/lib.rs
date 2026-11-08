@@ -37,6 +37,12 @@
 //! TypeScript stays until the cutover (plan §4.6): both apps are alive, and this is how they are
 //! kept from growing two answers to one question.
 //!
+//! Plan §3's third requirement - "retain request IDs, revision checks, and vault generations so
+//! obsolete results cannot restore stale or sensitive state" - is [`freshness`]: the ledger of which
+//! request is still current, and the three guards a background answer has to pass before a window may
+//! apply it. Its rules are the ones `src/windows/Finder.svelte` has applied since before this crate
+//! existed, ported rather than reinvented, so the two apps cannot disagree about what "stale" means.
+//!
 //! The last piece of plan §3 is the [`services`] module: [`LibraryActions`] and [`FinderActions`],
 //! the two surfaces a window is allowed to talk to. They are separate types rather than a mode flag,
 //! so "the palette can decrypt nothing" is a property of the program; each surface declares its
@@ -51,6 +57,7 @@ pub mod environment;
 pub mod error;
 pub mod execution;
 pub mod finder_state;
+pub mod freshness;
 pub mod history;
 pub mod import;
 pub mod keyring;
@@ -64,6 +71,8 @@ pub mod search;
 pub mod services;
 pub mod settings;
 pub mod state;
+#[doc(hidden)]
+pub mod testing;
 pub mod time_format;
 pub mod validation;
 pub mod vault;

@@ -3,11 +3,12 @@
 //! This crate is the desktop half of the plan in `docs/plans/rune-migration.md`. It owns windows,
 //! tray, CLI, single-instance and wakeups. It deliberately owns **no** domain logic: models, the
 //! SQLite repository, the age vault, the keyring adapter, polkit, search, imports, project scanners,
-//! history, environment snapshots, recovery and backups belong to `dev-console-core` (plan §1), and
-//! none of them has moved yet - milestone 2 moves them out of `src-tauri/src` with their tests. Until
-//! then this shell shows placeholder views with no real data, and nothing here reads or writes a
-//! profile, a database or a keyring, so it cannot disagree with the running Tauri app about user
-//! data.
+//! history, environment snapshots, recovery and backups all live in `dev-console-core` (plan §1), and
+//! this shell reaches them only through that crate's types. The one place it has to hold one is
+//! [`off_thread`], the stream that runs a blocking call on a Rune worker and has the answer judged by
+//! `dev_console_core::freshness` before a window may paint it. The views in [`ui`] are still
+//! placeholder trees with no profile behind them, so nothing here reads or writes a real user profile,
+//! a database or a keyring, and it cannot disagree with the running Tauri app about user data.
 //!
 //! ## What this crate can prove on a headless host, and what it cannot
 //!
@@ -26,6 +27,7 @@
 pub mod app;
 pub mod identity;
 pub mod instance;
+pub mod off_thread;
 pub mod tray;
 pub mod ui;
 

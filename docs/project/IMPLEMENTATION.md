@@ -228,6 +228,14 @@ crates/dev-console-core/src/
   services/mod.rs            the two surfaces a UI may call, and the Effects they return
   services/library.rs        the privileged surface (everything the library window may do)
   services/finder.rs         the palette surface (no reveal, edit, execute, archive, recovery)
+  freshness.rs               the ledger of which request is current, and the three guards an
+                             asynchronous answer has to pass before a window paints it
+  testing.rs                 the scratch-profile fixture the workspace tests share
+crates/dev-console-desktop/src/
+  app.rs, identity.rs        window specs, titles, sizes, scene names, exit codes
+  off_thread.rs              a blocking call on a Rune worker; the answer is judged by
+                             dev_console_core::freshness before a view may paint it
+  instance.rs, tray.rs, ui.rs control socket and lock, native menu, the view state
 src-tauri/src/
   lib.rs                     application setup
   windows.rs                 show/hide/focus, launch intent, relaunch

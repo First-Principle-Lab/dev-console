@@ -18,6 +18,7 @@ name = "dev-console"
 path = "src/main.rs"
 
 [dependencies]
+dev-console-core = { path = "../dev-console-core" }
 rune = { workspace = true }
 rune-kit = { workspace = true }
 serde = { workspace = true }

@@ -603,8 +603,8 @@ pub struct SavedRow(pub SavedEntry);
 mod tests {
     use super::*;
     use crate::models::{DeleteRequest, GetRequest, PinRequest, SaveRequest};
-    use crate::services::fixtures::Fixture;
     use crate::services::Delivery;
+    use crate::testing::Fixture;
 
     #[test]
     fn the_library_surface_declares_every_method_it_has() {

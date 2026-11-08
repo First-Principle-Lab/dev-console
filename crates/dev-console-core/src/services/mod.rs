@@ -21,9 +21,6 @@ mod events;
 mod finder;
 mod library;
 
-#[cfg(test)]
-pub(crate) mod fixtures;
-
 pub use events::{AppEvent, Delivery, UpdatePhase, UpdateProgress};
 pub use finder::{FinderActions, FINDER_OPERATIONS};
 pub use library::{LibraryActions, LIBRARY_OPERATIONS};
@@ -876,7 +873,7 @@ mod tests {
             ("finder.rs", include_str!("finder.rs")),
             ("library.rs", include_str!("library.rs")),
             ("events.rs", include_str!("events.rs")),
-            ("fixtures.rs", include_str!("fixtures.rs")),
+            ("../testing.rs", include_str!("../testing.rs")),
         ] {
             let code = strip_comments(source);
             for needle in &forbidden {

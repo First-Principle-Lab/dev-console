@@ -134,8 +134,8 @@ impl FinderActions {
 mod tests {
     use super::*;
     use crate::models::{CopyRequest, SearchRequest};
-    use crate::services::fixtures::Fixture;
     use crate::services::Delivery;
+    use crate::testing::Fixture;
 
     #[test]
     fn the_finder_surface_declares_every_method_it_has() {

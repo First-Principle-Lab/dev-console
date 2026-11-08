@@ -164,8 +164,15 @@ crates/              Cargo workspace: the domain layer and the native Rune port
                      auth (polkit), backup, recovery, clipboard, context, environment, execution,
                      history, import, project_history, projects (task scan), search, settings,
                      state (the `AppState` service container), services (the two typed surfaces a
-                     UI calls - `LibraryActions` / `FinderActions` - and the `Effects` they return)
-  dev-console-desktop/  Rune app windows, tray, control socket, CLI (not the shipped app yet)
+                     UI calls - `LibraryActions` / `FinderActions` - and the `Effects` they return),
+                     freshness (the ledger a background answer is checked against before a window
+                     may paint it) and testing (the scratch-profile fixture the workspace tests
+                     share)
+  dev-console-desktop/  Rune app windows, tray, control socket, CLI (not the shipped app yet):
+                        app/identity (window specs, titles, sizes, exit codes), off_thread (a
+                        blocking call on a Rune worker, its answer guarded by core's `freshness`),
+                        instance (single-instance lock + control socket), tray, ui (the state the
+                        views draw - still placeholders until plan milestone 4)
   dev-console-ui-tests/ scripted element-tree and state-transition tests for the Rune views
 src-tauri/src/       Tauri desktop runtime around the core crate: lib (app setup), windows
                      (show/hide/focus, launch intent, relaunch), tray (native menu), ipc (one thin

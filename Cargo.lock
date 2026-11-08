@@ -1070,6 +1070,7 @@ dependencies = [
 name = "dev-console-desktop"
 version = "0.0.1"
 dependencies = [
+ "dev-console-core",
  "libc",
  "rune",
  "rune-kit",
