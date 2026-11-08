@@ -25,7 +25,9 @@
 //!
 //! Still unbuilt, and not faked: `Enter`/`Space` copy (needs the clipboard seam the service port
 //! brings), `Ctrl+O` details and `Ctrl+P` ignore-context (need the details panel), the Library's
-//! `Ctrl+1`/`Ctrl+2` tab chords, the focus trap, output panels and the SVG icon set. `Space` is
+//! `Ctrl+1`/`Ctrl+2` tab chords, the command-output panel and the SVG icon set. Destructive
+//! confirmation is no longer on that list: [`Library::request_delete`] opens [`crate::dialog`]'s
+//! shared shell, which owns the focus trap, the initial focus and the restore. `Space` is
 //! deliberately left unbound rather than bound imperfectly: the shipped handler binds it beside
 //! `Enter` behind `shouldCommit` (`src/lib/finder-state.ts`), and Rune's IME composition flag is
 //! `pub(super)`, so a handler cannot honour that guard - `route_key` holds `Enter`/`Escape` back
@@ -45,6 +47,7 @@
 //! views use `rune::tok::theme` to stay token-driven while the palette mapping is a milestone-4
 //! change, and the ported data is what that change will map from - not a second colour source.
 
+use crate::dialog::{self, Dialog};
 use rune::tok::{radius, space, type_};
 use rune::{col, el, row, text, text_input, Cx, El, Key, KeyEvent, TextEdit, Tx};
 
@@ -66,6 +69,29 @@ impl Tab {
             Tab::Secrets => "Secrets",
         }
     }
+
+    /// The same choice in the word a confirmation sentence uses - `the saved command` /
+    /// `the saved secret`, matching `{pendingDelete.kind}` in the shipped delete dialog.
+    pub const fn kind(self) -> &'static str {
+        match self {
+            Tab::Commands => "command",
+            Tab::Secrets => "secret",
+        }
+    }
+}
+
+/// The record a delete confirmation is waiting on.
+///
+/// It holds the *name* and the kind, not a row index, and that is the whole point: the shipped
+/// app keeps `pendingDelete` as the entry it was asked about, so a confirmation that named one
+/// record removes that record even if the list has been reordered or shortened underneath it.
+/// An index would be a deletion bug waiting for the first asynchronous reload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDelete {
+    /// The row's display name - metadata only, never a secret value.
+    pub name: String,
+    /// `command` or `secret`, from the tab the row was on.
+    pub kind: &'static str,
 }
 
 /// The Library window's state.
@@ -79,6 +105,64 @@ pub struct Library {
     /// True when the vault is unlocked. Only the *status* crosses into the UI; the key and any
     /// secret value never reach this struct.
     pub vault_unlocked: bool,
+    /// The record a delete confirmation is open on, `None` while no dialog is showing. The
+    /// shipped app holds the same thing as `pendingDelete`, and it is state rather than a view
+    /// detail for the same reason: what the confirmation *names* has to be decided when the press
+    /// lands, not when the panel is drawn.
+    pub pending_delete: Option<PendingDelete>,
+}
+
+impl Library {
+    /// A Library showing `entries` on `tab`, for tests and for the headless scenes.
+    pub fn with_entries(tab: Tab, entries: &[&str]) -> Library {
+        Library {
+            tab,
+            entries: entries.iter().map(|entry| (*entry).to_owned()).collect(),
+            vault_unlocked: true,
+            pending_delete: None,
+        }
+    }
+
+    /// Asks whether to remove row `index` - the shipped row's `onDelete` hop, and the only way a
+    /// deletion starts. Names the record it found at `index` rather than remembering `index`, so
+    /// [`Library::confirm_delete`] cannot remove a different row if the list has moved. False when
+    /// there is no such row, which leaves no dialog open to cancel.
+    pub fn request_delete(&mut self, index: usize) -> bool {
+        let Some(entry) = self.entries.get(index) else {
+            return false;
+        };
+        self.pending_delete = Some(PendingDelete {
+            name: entry.clone(),
+            kind: self.tab.kind(),
+        });
+        true
+    }
+
+    /// Goes ahead with the confirmation: removes the named record and closes the dialog. A record
+    /// that is no longer in the list is simply not removed - the dialog says which one it meant,
+    /// and it is that one or nothing.
+    pub fn confirm_delete(&mut self) {
+        let Some(pending) = self.pending_delete.take() else {
+            return;
+        };
+        if let Some(position) = self.entries.iter().position(|entry| *entry == pending.name) {
+            self.entries.remove(position);
+        }
+    }
+
+    /// Backs out of the confirmation - the Cancel button, Escape, and a press off the panel all
+    /// arrive here, exactly as the shipped `oncancel` serves all three. Nothing is removed.
+    pub fn cancel_delete(&mut self) {
+        self.pending_delete = None;
+    }
+
+    /// The confirmation to draw, built from the pending record. `None` means no dialog, and the
+    /// view function turns on it.
+    pub fn delete_dialog(&self) -> Option<Dialog> {
+        self.pending_delete
+            .as_ref()
+            .map(|pending| Dialog::delete(&pending.name, pending.kind))
+    }
 }
 
 /// The Finder window's state.
@@ -224,6 +308,9 @@ impl Finder {
 /// Draws the Library window.
 pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let theme = rune::tok::theme(cx.system_dark());
+    // Drawn from the same state the confirmation acts on, and last so it is the top of the tree:
+    // `El::modal` is what makes everything before it inert, not an ordering trick here.
+    let pending = state.delete_dialog();
     col()
         .key("library-window")
         .w_full()
@@ -236,6 +323,14 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
         .child(tabs(state))
         .child(entry_list(state, theme))
         .child(footer(state, theme))
+        .children(pending.iter().map(|dialog| {
+            dialog::confirm::<Library>(
+                dialog,
+                theme,
+                Library::cancel_delete,
+                Library::confirm_delete,
+            )
+        }))
 }
 
 fn header(state: &Library, theme: rune::tok::Theme) -> El {
@@ -341,10 +436,11 @@ fn entry_list(state: &Library, theme: rune::tok::Theme) -> El {
                 .center_y()
                 .radius(radius::MD)
                 .on_press_tx(move |state: &mut Library, _| {
-                    // Placeholder for opening the entry in the inspector; the milestone-4
-                    // screen owns that. Removing the row keeps the press wired to a handler the
-                    // scripted test can observe, instead of pretending the inspector exists.
-                    state.entries.remove(index);
+                    // Asking to delete is the shipped row action's destructive half (`onDelete` →
+                    // `pendingDelete`), and it goes through the confirmation rather than removing
+                    // anything here: the real deletion is a repository call at a known revision, so
+                    // this shell's honest half is the gate in front of a placeholder.
+                    state.request_delete(index);
                 })
                 .child(text(entry.clone()).font(type_::BODY))
         }))

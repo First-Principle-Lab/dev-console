@@ -54,6 +54,7 @@ const AREAS: &[&str] = &[
     "single instance",
     "residency",
     "keyboard",
+    "modal dialogs",
     "opaque Finder rendering",
     "portal folder selection",
     "secret hygiene",

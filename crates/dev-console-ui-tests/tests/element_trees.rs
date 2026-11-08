@@ -2,9 +2,11 @@
 //!
 //! Everything here runs `rune::Runtime` without a display. It settles *structure* and *transitions*:
 //! which keys exist for a state, whether a press reaches the handler that changes state, and whether a
-//! state can produce elements it should not. It does not settle appearance - hover, focus rings, the
-//! focus trap, Escape, text rasterisation, shadows, or the mapped size on Hyprland - all of which plan
-//! §5 reserves for a real session and which stay UNVERIFIED here.
+//! state can produce elements it should not. It does not settle appearance - hover, whether a focus
+//! ring is drawn, text rasterisation, shadows, or the mapped size on Hyprland - all of which plan §5
+//! reserves for a real session and which stay UNVERIFIED here. Keyboard *focus* is a different thing
+//! from a focus *ring*, and the trap, the initial focus and the restore a dialog owes are settled in
+//! `tests/dialog.rs`.
 
 use dev_console_desktop::identity::{FINDER_SIZE, LIBRARY_MIN_SIZE, LIBRARY_SIZE};
 use dev_console_desktop::ui::{Finder, Library, Tab};
@@ -145,16 +147,34 @@ fn a_tab_switch_keeps_the_list_present() {
     assert!(stage.has("entry-0"));
 }
 
-/// The placeholder row handler removes the row it is pressed on; the scripted test pins that a press
-/// reaches *the* row, so a milestone-4 handler that opens the wrong entry fails here rather than on a
-/// desktop.
+/// The row handler opens the confirmation naming the row it was pressed on; the scripted test pins
+/// that a press reaches *the* row, so a milestone-4 handler that opens the wrong entry fails here
+/// rather than on a desktop. The removal itself - and the focus the dialog takes and gives back - is
+/// `tests/dialog.rs`.
 #[test]
 fn pressing_a_row_reaches_that_rows_handler() {
     let mut stage = Stage::library(library_with_entries());
     assert!(stage.press("entry-1"));
-    assert_eq!(stage.state().entries, vec!["synthetic command one"]);
-    assert!(!stage.has("entry-1"), "the tree must drop the removed row");
+    assert!(
+        stage.has("dialog"),
+        "the row's handler is the confirmation, so pressing has to open it"
+    );
+    assert_eq!(
+        stage.state().entries,
+        vec!["synthetic command one", "synthetic command two"],
+        "a press asks; it does not remove"
+    );
+    assert_eq!(
+        stage
+            .state()
+            .pending_delete
+            .as_ref()
+            .map(|pending| pending.name.as_str()),
+        Some("synthetic command two"),
+        "the confirmation has to name the row that was pressed, not the first one"
+    );
     assert!(stage.has("entry-0"));
+    assert!(stage.has("entry-1"));
 }
 
 #[test]

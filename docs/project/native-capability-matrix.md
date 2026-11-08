@@ -8,12 +8,15 @@ gap list rather than as a score.
 
 **Read the summary before anything else.** Of the 169 behaviours inventoried below:
 **24 are decided by a native test** (every one of them is ported pure logic - argv parsing,
-draft validation, Finder selection, the token tables and the contrast audit), **6 are
-partially decided** (the keyboard behaviour inside the palette's own field, plus its footer), and
-**139 are not decided anywhere in the native shell.** The Playwright suite describes
-187 browser runs of a shipped app whose screens - entry list from the repository, editor,
-inspector, settings, project import, history suggestions, environment, updater, and every painted
-pixel of all of them - the Rune shell does not have. Checkpoint C6 is therefore **not earned**, and
+draft validation, Finder selection, the token tables and the contrast audit), **9 are
+partially decided** (the keyboard behaviour inside the palette's own field and its footer, plus -
+since the first real modal landed - the shared confirmation's focus trap, its Escape routes and its
+focus restore, and the delete gate that removes the record it named), and **136 are not decided
+anywhere in the native shell.** The Playwright suite describes 187 browser runs of a shipped app
+whose screens - entry list from the repository, editor, inspector, settings, project import, history
+suggestions, environment, updater, and every painted pixel of all of them - the Rune shell does not
+have. One shared dialog is not a screen: it is the surface four of the app's confirmations sit on,
+and three of those four still have no native view. Checkpoint C6 is therefore **not earned**, and
 nothing in this file should be quoted as if it were.
 
 ## Why a document this blunt is a gate rather than a confession
@@ -138,11 +141,11 @@ Behaviour titles are quoted exactly as the spec file writes them, so `grep` find
 | `creating a command persists through the backend and refreshes the list` | NOT COVERED | no editor to type into and no list built from the repository, so a save has neither an origin nor a visible result. Seam: editor, library-list, events. The persistence and its announcement are ported and tested: `saving_a_new_entry_reports_created_and_a_change_reports_updated`, `a_saved_command_survives_closing_and_reopening_the_database` |
 | `a newly saved ordinary command shows stdout, stderr and its exit code in the app` | NOT COVERED | no output panel exists and no run is reachable from the shell. Seam: run-output, dialog. Execution, its bounds and its timeout are ported and tested: `ordinary_commands_capture_output_and_exit_status`, `in_app_command_output_is_bounded_and_interactive_waits_time_out`, `command_output_is_capped_at_what_execution_was_allowed_to_capture` |
 | `error-only command output can be copied and clipboard failures stay visible` | NOT COVERED | no output panel to show it in and no clipboard write to fail - the two seams this row needs are the ones every other copy row waits on. What is decided about output is its bound, not its display: `in_app_command_output_is_bounded_and_interactive_waits_time_out`, `command_output_is_capped_at_what_execution_was_allowed_to_capture`. Seam: run-output, clipboard |
-| `Escape closes confirmation, output, and unsaved changes dialogs` | NOT COVERED | the shell has no dialog at all: no shared shell, no Escape stack, no focus trap, so there is nothing for Escape to close. The only Escape the shell honours is the palette dismissal on the query field. Seam: dialog, focus-management. `escape_clears_the_palette_without_taking_focus_out_of_the_field` is the whole of the shell's Escape handling today |
+| `Escape closes confirmation, output, and unsaved changes dialogs` | PARTIAL | the shell's one real modal honours the shipped branch: Escape, the Cancel button and a press off the panel all reach the same cancel handler, and none of them removes anything (`escape_backs_out_of_the_confirmation_without_touching_the_list`, `cancelling_removes_nothing`, `a_press_off_the_panel_backs_out_of_the_confirmation_too`). Two of the three dialogs this title names have no native surface at all, so their Escape is not a half-decided thing but a missing screen. Seam: run-output, editor |
 | `sudo commands use the configured terminal after confirmation` | NOT COVERED | no confirmation card and no terminal launch. Seam: run-output, dialog, settings. The terminal argv parsing is ported and tested: `discovered_terminals_pass_the_shell_as_argv`, `metadata_never_reaches_the_argv`, `missing_working_directory_is_an_error_not_a_fallback` |
 | `a cancelled edit leaves the saved record untouched` | NOT COVERED | no editor, so no draft to cancel; the revision conflict a cancel avoids is ported and tested. Seam: editor, library-list. `a_draft_the_store_refuses_produces_no_event`, `deleting_with_a_stale_revision_is_refused_and_keeps_the_record` |
 | `a failed write keeps the draft on screen` | NOT COVERED | no draft state exists in the shell at all. Seam: editor, dialog. The freshness rule for a record that moved underneath the draft is ported: `a_draft_loaded_before_someone_else_saved_is_not_painted_over_their_record`, `a_record_that_vanished_while_the_work_ran_is_reported_as_gone` |
-| `pin, copy and delete confirmation all act on the intended record` | NOT COVERED | none of the three actions has a native control: no list rows, no clipboard write, no confirmation. Seam: library-list, clipboard, dialog. The identity and revision rules they lean on are ported: `pinning_or_deleting_at_a_stale_revision_conflicts_and_says_nothing`, `a_pinned_row_and_a_deleted_row_both_announce_themselves` |
+| `pin, copy and delete confirmation all act on the intended record` | PARTIAL | the destructive one is decided, including the half that matters: the confirmation removes the record it *named*, not the slot it was pressed on, so a list that reloaded underneath the dialog cannot point it at somebody else's row (`a_record_that_moved_in_the_list_is_still_the_record_that_gets_removed`, `confirming_removes_the_named_record_and_closes_the_confirmation`). Pin and copy have no native control at all, and the removal that does happen is `Vec::remove` on a placeholder rather than the revision-checked service call, so "the intended record" is decided at the gate, not yet at the store. Seam: library-list, clipboard. The identity and revision rules the last half leans on are ported: `pinning_or_deleting_at_a_stale_revision_conflicts_and_says_nothing`, `a_pinned_row_and_a_deleted_row_both_announce_themselves` |
 | `sidebar actions target their row without selecting it, including secret pinning` | NOT COVERED | no sidebar, no rows, and the placeholder list has no per-row actions. Seam: library-list, details, vault-state |
 | `secrets are masked in details and only appear through an explicit reveal` | NOT COVERED | no details panel. The shell does hold the stronger structural rule: no window state can hold a value and no Finder element offers a secret capability. Seam: details, vault-state, clipboard. `a_reveal_is_the_only_call_that_carries_the_value`, `a_reveal_is_the_only_call_that_hands_over_the_value`, `no_window_state_can_hold_a_secret_value` |
 | `a new secret needs only name, value and notes` | NOT COVERED | no editor and no required-field gate in the shell, though the rules are ported and tested. Seam: editor, details, library-list. `requires_name_type_and_command_text`, `requires_a_secret_value_so_an_empty_reveal_cannot_wipe_a_stored_secret` |
@@ -182,7 +185,7 @@ Behaviour titles are quoted exactly as the spec file writes them, so `grep` find
 | `cancelling writes nothing` | NOT COVERED | no dialog and no reviewed selection to discard. Seam: dialog, project-import. `an_empty_selection_is_refused_and_a_stale_one_is_reported` |
 | `the action is not offered while the secrets tab is showing` | NOT COVERED | the tabs exist and switch state, but nothing gates an import action on the tab because there is no action. Seam: project-import, library-list. `switching_tabs_changes_the_state_the_list_is_built_from` |
 | `a folder with far more tasks than fit on screen scrolls instead of growing` | NOT COVERED | a rasterised property of a dialog that does not exist. Seam: project-import, dialog, paint |
-| `keeps keyboard focus inside the modal and restores it on close` | NOT COVERED | the shell has no focus trap, no initial-focus request and no restore-on-close anywhere: focus is only ever observed (a scripted press focuses the query field), never placed. Seam: dialog, focus-management. `focus_starts_empty_and_a_press_puts_it_in_the_field`, `an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip` |
+| `keeps keyboard focus inside the modal and restores it on close` | PARTIAL | decided on the shell's one real modal, and it is the native twin of the rules `Dialog.svelte` hand-rolls: opening moves the keyboard to the first footer action, Tab and Shift+Tab cycle the two actions and never reach the inert window behind, and cancelling hands the keyboard back to the row that asked (`the_confirmation_takes_the_keyboard_to_its_first_action`, `tab_cycles_the_confirmations_actions_and_never_leaves_it`, `closing_the_confirmation_puts_the_keyboard_back_where_it_came_from`). Two halves are outstanding and both are named rather than waved through. The shipped guard `if (trigger?.isConnected) trigger.focus()` has no native twin while list rows are keyed by index: after a deletion the restore lands on whichever record now sits in that slot, which `a_removed_record_leaves_the_focus_on_the_row_key_that_now_holds_someone_else` pins as the shell's behaviour and does not endorse. And whether a user can *see* where the keyboard is is a focus ring, which is paint. Seam: paint, library-list |
 | `reports a partially vanished selection and rescans the saved rows` | NOT COVERED | no dialog to report into. Seam: project-import, dialog. `partially_stale_selections_report_each_missing_task` |
 | `long-list footer stays fully visible in ${theme} at ${width}` | NOT COVERED | one row standing for 12 runs: no import dialog, no palette selection, and no rasterised footer to measure. Seam: dialog, theme-switch, paint, responsive-layout |
 | `Browse selects and scans a folder without typing or importing` | NOT COVERED | the shell opens no file dialog at all - plan §3 schedules the XDG portal replacement for the Tauri dialog plugin, and until it lands neither this host nor the desktop can check it (the feasibility ledger carries the row). Seam: folder-picker, project-import |
@@ -214,7 +217,7 @@ Behaviour titles are quoted exactly as the spec file writes them, so `grep` find
 | `the finder footer presents keyboard hints as keycaps` | PARTIAL | the footer draws labelled hint chips and a gate reads their accessible names and fails on any binding the shell does not honour (`the_footer_advertises_only_bindings_that_exist`), so the honest subset is enforced; it is not the shipped set. Seam: keyboard-delivery, a11y-semantics - `Enter` copy and `Ctrl+O` details chips are absent because those bindings are absent, and no keycap element semantics exist in the tree |
 | `narrow windows keep one pane with an explicit way back to the list` | NOT COVERED | no breakpoint behaviour and no second pane to leave. Seam: responsive-layout, library-list, details. The size invariants that are decided are the window specs themselves: `the_two_window_specs_match_the_tauri_shell`, `the_library_opens_hidden_and_cannot_be_shrunk_below_the_tauri_minimum` |
 | `a locked vault is presented as a state, never as an error` | NOT COVERED | no lock state reaches a view; the header text is the only vault surface. Seam: vault-state, library-list. `the_palette_sees_the_same_shared_read_model_as_the_library`, `a_search_carries_the_request_id_and_generation_it_must_be_rendered_at` |
-| `minimal list rows show names and actions without overflowing` | NOT COVERED | the rows the tree does build carry exactly the entries in state and one press target each (`a_library_with_entries_lists_exactly_those_rows`, `pressing_a_row_reaches_that_rows_handler`), but overflow is a painted property. Seam: paint, library-list |
+| `minimal list rows show names and actions without overflowing` | NOT COVERED | the rows the tree does build carry exactly the entries in state and one press target each, and that press now opens a confirmation instead of touching the list (`a_library_with_entries_lists_exactly_those_rows`, `pressing_a_row_reaches_that_rows_handler`, `the_list_behind_an_open_confirmation_cannot_act`), but overflow is a painted property and the rows are placeholder names, not repository records. Seam: paint, library-list |
 | `a fresh editor offers an optional project folder before saving` | NOT COVERED | no editor. Seam: editor, folder-picker. The folder rules a save would apply are ported and tested: `tilde_folder_paths_expand_to_home`, `spaces_in_working_directory_are_preserved` |
 | `a copied confirmation does not describe the next search` | NOT COVERED | no copy and no status surface, so the lifecycle of a confirmation cannot be tested; the equivalent guard for a stale answer is ported and tested. Seam: clipboard, events. `an_answer_for_a_query_the_user_replaced_is_not_applied`, `clearing_the_query_invalidates_an_answer_that_never_had_a_successor` |
 | `the selected finder row is perceivable without colour alone, and hover is not selection` | NOT COVERED | selection is drawn from a token fill and no non-colour marker or aria-selected state is wired, so neither half is decided; the state behind it is (`pressing_a_result_selects_it`, `the_highlight_clamps_at_both_ends_instead_of_wrapping`). Seam: a11y-semantics, paint |
@@ -225,7 +228,7 @@ Behaviour titles are quoted exactly as the spec file writes them, so `grep` find
 | `keyboard focus draws the ring from --focus-ring` | NOT COVERED | the token is ported and structurally pinned, but no native view requests focus, draws a ring, or reads the palette at all. Seam: theme-switch, focus-management, paint. `focus_starts_empty_and_a_press_puts_it_in_the_field` is the whole of what is decidable about focus today |
 | `the inspector keeps every metadata value but only one chip` | NOT COVERED | no details or inspector surface exists in either native window, so the metadata the shipped inspector keeps has nowhere to be laid out and no chip to be reduced to. Seam: details, library-list |
 | `the action area stays put at the minimum window and keyboard focus lands on it` | NOT COVERED | the minimum size is asserted as a spec (`the_library_opens_hidden_and_cannot_be_shrunk_below_the_tauri_minimum`) and the view fills whatever surface it is given (`the_library_measures_the_surface_it_was_asked_to_fill`); painted position and focus placement are undecided here. Seam: paint, focus-management |
-| `settings, the delete dialog and the palette draw one shared shell frame` | NOT COVERED | one of the three surfaces exists and none of them shares a frame primitive. Seam: dialog, settings, theme-switch, paint |
+| `settings, the delete dialog and the palette draw one shared shell frame` | NOT COVERED | two of the three surfaces exist and neither shares a frame primitive with the other: the delete confirmation now builds a real panel from the card/fill/border/radius tokens, but the palette has no matching surface call and the settings view does not exist. Whether any of it is the *same* frame is a painted question anyway. Seam: dialog, settings, theme-switch, paint |
 | `the empty library and populated inspector use the same icon style and chips` | NOT COVERED | the empty state exists as text only and there is no inspector; the SVG set the shipped UI uses is not ported. Seam: details, paint, library-list. `an_empty_library_shows_the_empty_state_and_no_list` covers the empty state's structure |
 
 ### tests/e2e/screenshots.spec.ts
@@ -334,15 +337,15 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 | Status | Rows |
 | --- | --- |
 | NATIVE-TEST | 24 |
-| PARTIAL | 6 |
-| NOT COVERED | 139 |
+| PARTIAL | 9 |
+| NOT COVERED | 136 |
 | **Total** | **169** |
 
 | Missing seam | Rows waiting on it | What has to be built for the rows to move |
 | --- | --- | --- |
-| `dialog` | 31 | the shared dialog shell: focus trap, Escape stack, initial and restored focus |
-| `library-list` | 30 | an entry list built from the repository instead of a placeholder of names |
-| `paint` | 28 | nothing this host can decide: rasterised appearance, and the owner-desktop rows in the feasibility ledger |
+| `dialog` | 28 | one shared shell exists and the delete confirmation sits on it; the import review, the restore review and the unsaved-changes prompt still have no native surface |
+| `library-list` | 31 | an entry list built from the repository instead of a placeholder of names |
+| `paint` | 29 | nothing this host can decide: rasterised appearance, and the owner-desktop rows in the feasibility ledger |
 | `settings` | 27 | the settings view and its save/error round trip |
 | `search-ranking` | 26 | wiring the ported ranker behind the palette field so typing searches |
 | `project-import` | 21 | the project scan/import review and its selection round trip |
@@ -351,15 +354,15 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 | `vault-state` | 15 | the lock/unlock interaction in a view, on top of the vault rules already ported |
 | `details` | 14 | the inspector/details panel: metadata rows, extra fields, reveal |
 | `clipboard` | 13 | the clipboard write seam (the copy service call plus a hygiene-tested status line) |
-| `editor` | 13 | the entry editor: draft state, validation gate, save and cancel |
+| `editor` | 14 | the entry editor: draft state, validation gate, save and cancel |
 | `a11y-semantics` | 11 | combobox/listbox/tab/option semantics on native elements (Rune exposes no `selected`) |
 | `theme-switch` | 11 | handing `dev_console_core::theme` to Rune instead of the built-in palette |
 | `responsive-layout` | 10 | one-pane and breakpoint behaviour in the native views |
 | `keyboard-delivery` | 9 | bindings the shell does not route yet (Enter, Space, Ctrl+O, Ctrl+P, Delete) |
 | `backups` | 6 | the encrypted backup/export/restore round trip in a view |
-| `focus-management` | 6 | placing focus: initial focus, focus restore, focus follows activation |
+| `focus-management` | 4 | placing focus: initial focus, focus restore, focus follows activation |
 | `folder-picker` | 6 | the XDG portal folder picker that replaces the Tauri dialog plugin |
-| `run-output` | 6 | the command runner and its output, stderr and exit-code panel |
+| `run-output` | 7 | the command runner and its output, stderr and exit-code panel |
 | `environment` | 4 | the project environment view: dated versions, copy, pause |
 | `recovery` | 4 | the recovery credential surface: reveal, restore steps, clearing on lock |
 | `updates` | 4 | the updater, which still lives only on the shipped side |
@@ -371,9 +374,9 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 | `tests/e2e/environment.spec.ts` | 4 | 0 | 0 | 4 |
 | `tests/e2e/finder.spec.ts` | 24 | 0 | 5 | 19 |
 | `tests/e2e/history.spec.ts` | 14 | 0 | 0 | 14 |
-| `tests/e2e/library.spec.ts` | 20 | 0 | 0 | 20 |
+| `tests/e2e/library.spec.ts` | 20 | 0 | 2 | 18 |
 | `tests/e2e/omarchy-themes.spec.ts` | 4 | 0 | 0 | 4 |
-| `tests/e2e/project-import.spec.ts` | 20 | 0 | 0 | 20 |
+| `tests/e2e/project-import.spec.ts` | 20 | 0 | 1 | 19 |
 | `tests/e2e/projects.spec.ts` | 6 | 0 | 0 | 6 |
 | `tests/e2e/redesign.spec.ts` | 23 | 0 | 1 | 22 |
 | `tests/e2e/screenshots.spec.ts` | 12 | 0 | 0 | 12 |
@@ -401,11 +404,20 @@ The seam counts above are not independent: a handful of builds move dozens of ro
 3. **A repository-backed entry list, then the details panel, then the editor** - in that order,
    because the editor's validation rules and the details panel's masking rules are already ported
    and only need a surface.
-4. **The shared dialog shell** - focus trap, Escape stack, initial and restored focus. It is the
-   single biggest seam count here, and almost nothing else can be exercised without it: the import
-   review, the restore review, the delete confirmation, the unsaved-changes prompt.
-5. **The focus-management gap that goes with it** - nothing in the shell places focus today; a
-   scripted press is the only way the field gets it. Focus trap and focus restore are the same build.
+4. **The shared dialog shell - started, not finished.** `crate::dialog` is the one modal the shell
+   has; it owns the focus trap, the initial focus, the Escape/Cancel/press-off-panel routes and the
+   restore, and the delete confirmation is the screen standing on it. What still waits on it is the
+   other three confirmations the app shows - the import review, the restore review and the
+   unsaved-changes prompt - and whatever the settings panel needs it for.
+5. **The focus-management gap that goes with it - halved.** A modal now places focus, keeps it inside
+   itself and hands it back. What the shell still cannot do is place it *by identity*: list rows are
+   keyed `entry-{index}`, so the restore after a deletion lands on whichever record now occupies that
+   slot instead of dropping it the way the shipped guard does (`if (trigger?.isConnected)
+   trigger.focus()`). The divergence is named in the `keeps keyboard focus inside the modal` row, kept
+   as a `NOT BUILT` line in the feasibility ledger, and pinned by
+   `a_removed_record_leaves_the_focus_on_the_row_key_that_now_holds_someone_else` - asserted as
+   behaviour to replace, not behaviour to keep. The same identity-keying is what the `library-list`
+   seam asks for, so it is one build and not two.
 6. **Settings, then backups and the recovery credential**, then **project import**, **history
    suggestions** and **the environment view**. Each is a view on top of rules that already have
    tests, which is why their rows quote those tests: the port is done, the screen is not.

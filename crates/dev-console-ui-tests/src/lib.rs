@@ -14,9 +14,13 @@
 //! handler that changes state, and that an out-of-range or empty state cannot produce elements it
 //! should not have.
 //!
-//! It is not enough for hover, focus rings, initial focus, the focus trap, Escape handling, text
-//! rasterisation, shadows, or whether the mapped window really is 680×420 on Hyprland. Plan §5 keeps
-//! those for a real session; they stay UNVERIFIED in this container.
+//! It is not enough for hover, focus rings, text rasterisation, shadows, or whether the mapped
+//! window really is 680×420 on Hyprland: those are what the frame *looks* like, and plan §5 keeps
+//! them for a real session. What it does settle, because Rune keeps it as runtime state rather than
+//! as paint, is *which* element holds keyboard focus and what the keyboard does to it - so initial
+//! focus, the Tab order, a modal's focus trap and its restore on close are all asserted here (see
+//! `tests/dialog.rs`). A focus *ring* is still paint: these tests can say which element is focused,
+//! never that the user can see it.
 //!
 //! ## Fixtures are synthetic
 //!
@@ -69,6 +73,19 @@ pub const LIBRARY_KEYS: &[&str] = &[
     "footer-hint",
 ];
 
+/// Keys the shared dialog's tree carries while it is open, in focus order. The scrim is first
+/// because it is the modal host - the element `El::modal` puts on the tree - and the panel is its
+/// child; the last two are the only Tab stops, in the order the shipped footer renders them.
+pub const DIALOG_KEYS: &[&str] = &[
+    "dialog-scrim",
+    "dialog",
+    "dialog-title",
+    "dialog-body",
+    "dialog-footer",
+    "dialog-cancel",
+    "dialog-confirm",
+];
+
 /// A runtime driven without a display, with the assertions the suites share.
 pub struct Stage<S: 'static> {
     runtime: Runtime<S>,
@@ -76,8 +93,16 @@ pub struct Stage<S: 'static> {
 
 impl<S: 'static> Stage<S> {
     /// Builds a stage, lays out one frame at `t = 0`, and leaves the state settled.
+    ///
+    /// The runtime is put in the keyboard state the real window has on this target, rather than in
+    /// Rune's headless default: `window.rs` calls `set_full_keyboard_access` with the platform
+    /// preference at startup, and `platform/preferences.rs` reports `true` on every OS but macOS.
+    /// With the flag off, Rune's Tab traversal visits only text fields and list groups (it is
+    /// modelling macOS's "Full Keyboard Access" setting), so a script of a button's Tab order would
+    /// be measuring a macOS accommodation that the Arch target this shell ships to never has.
     pub fn new(state: S, view: fn(&S, &mut Cx<S>) -> El, viewport: (f32, f32)) -> Self {
         let mut runtime = Runtime::new(state, view, viewport, Env::new(true, 1.0));
+        runtime.set_full_keyboard_access(true);
         runtime.frame(0.0);
         Self { runtime }
     }
@@ -163,6 +188,17 @@ impl<S: 'static> Stage<S> {
             .and_then(|element| element.label)
     }
 
+    /// The visible text an element shows, as opposed to [`Stage::label_of`]'s accessible name. For a
+    /// dialog that is the difference between the heading a user reads and the name a screen reader
+    /// resolves, and a shell that promises both has to be checked on both.
+    pub fn text_of(&self, key: &str) -> Option<String> {
+        self.runtime
+            .elements()
+            .into_iter()
+            .find(|element| element.key.as_deref() == Some(key))
+            .and_then(|element| element.text)
+    }
+
     /// Every accessible name under `prefix`, sorted, so a "nothing else advertises itself" check
     /// names what it looked at instead of trusting a key list.
     pub fn labels_starting_with(&self, prefix: &str) -> Vec<String> {
@@ -203,6 +239,18 @@ impl<S: 'static> Stage<S> {
     pub fn send_key(&mut self, ev: KeyEvent) {
         self.runtime.key(ev);
         self.runtime.frame(1.0 / 60.0);
+    }
+
+    /// Injects Tab, optionally Shift+Tab - the pair a focus trap is defined by, spelled out here so
+    /// a script cannot accidentally test the forward direction twice.
+    pub fn press_tab(&mut self, shift: bool) {
+        self.send_key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods {
+                shift,
+                ..Mods::default()
+            },
+        });
     }
 
     /// Types literal text the way a confirmed keystroke arrives: one `Key::Text` event, which is
