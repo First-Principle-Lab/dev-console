@@ -25,6 +25,7 @@
 //! to the owner's desktop check.
 
 pub mod app;
+pub mod copy;
 pub mod dialog;
 pub mod identity;
 pub mod instance;

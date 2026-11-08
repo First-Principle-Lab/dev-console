@@ -1083,6 +1083,7 @@ dependencies = [
 name = "dev-console-ui-tests"
 version = "0.0.1"
 dependencies = [
+ "dev-console-core",
  "dev-console-desktop",
  "rune",
 ]

@@ -181,6 +181,64 @@ fn tab_replaces_the_whole_query_when_the_match_is_fuzzy() {
 }
 
 #[test]
+fn completing_with_tab_never_copies_anything() {
+    // The shipped `acceptCompletion` writes the field and re-runs the search, and touches no
+    // clipboard: completion and copying are separate promises, and a palette that wrote the field's
+    // new text to the clipboard on the way would be silently exfiltrating whatever was highlighted -
+    // including a secret's name, which is the kind of thing a clipboard manager keeps. Now that the
+    // shell has a clipboard seam at all, "Tab does not use it" is checkable rather than assumed.
+    let mut stage = palette();
+    stage.type_text("git");
+    stage.press_key(Key::Tab);
+    assert_eq!(
+        stage.state().query.text,
+        "git status",
+        "the field completed"
+    );
+    assert!(
+        stage.clipboard_is_empty(),
+        "and the clipboard is untouched: completion is not copying"
+    );
+    assert!(
+        stage.state().copy_status.is_none(),
+        "no status line either, because nothing was reported about a copy"
+    );
+}
+
+#[test]
+fn tab_and_enter_do_nothing_when_there_is_nothing_to_act_on() {
+    // The two `if (!entry) return` / `if (!current) return` guards at the top of the shipped
+    // `acceptCompletion` and `activate`. With an empty result list both keys stay consumed (the
+    // bindings run `preventDefault` first) and leave the query, the clipboard and the window exactly
+    // as they were: the failure mode this rules out is a completion or a copy that invents a value
+    // when there is no candidate - which, for the clipboard, would mean writing the user's query text
+    // out of nowhere.
+    let mut stage = Stage::finder(Finder::default());
+    assert!(stage.press_until_focused("finder-query"));
+    stage.type_text("nothing matches this");
+
+    stage.press_key(Key::Tab);
+    assert_eq!(
+        stage.state().query.text,
+        "nothing matches this",
+        "Tab completes nothing and inserts no tab character"
+    );
+
+    stage.press_key(Key::Enter);
+    let state = stage.state();
+    assert_eq!(
+        state.query.text, "nothing matches this",
+        "Enter inserts no newline: the key is consumed even with nothing to copy"
+    );
+    assert!(state.copy_status.is_none(), "and nothing is reported");
+    assert!(!state.dismissed, "the palette stays up");
+    assert!(
+        stage.clipboard_is_empty(),
+        "the clipboard keeps whatever was on it before, rather than the query text"
+    );
+}
+
+#[test]
 fn escape_clears_the_palette_without_taking_focus_out_of_the_field() {
     let mut stage = palette();
     stage.type_text("git");
@@ -238,31 +296,90 @@ fn keys_the_palette_does_not_bind_stay_with_the_editor() {
 }
 
 #[test]
-fn the_footer_advertises_only_bindings_that_exist() {
-    let stage = Stage::finder(finder_with_rows());
-    let mut hints = stage.labels_starting_with("footer-");
-    hints.sort();
+fn every_footer_chip_describes_a_binding_the_palette_actually_honours() {
+    // The footer is a promise, so the check runs in both directions. Forward: each chip that is drawn
+    // has to be a binding this palette honours, proved by honouring it here rather than by string
+    // matching a constant. Backward: the shipped chips whose seams do not exist yet (`Ctrl+O`
+    // details, `Ctrl+P` ignore-context) must not be drawn, and neither may a Space chip - Space is
+    // the one shipped binding this port declines to make, for the IME reason in `ui.rs`.
+    //
+    // `Enter copy` is here because `Enter` is bound: it routes to `Finder::activate`, which makes the
+    // request and reports the outcome either way. What the shell's *own* resolver answers today is
+    // "nothing" (`copy::Unwired`), so a real binary shows `Copy failed. Nothing was copied.` - the
+    // shipped failure line, not a fabricated success. The chip promises the key, the ledger and the
+    // matrix both say the resolver is unwired, and `tests/finder_copy.rs` pins both outcomes.
+    let chips = |stage: &Stage<Finder>| {
+        ["footer-move", "footer-tab", "footer-copy", "footer-dismiss"]
+            .iter()
+            .filter_map(|key| stage.label_of(key))
+            .collect::<Vec<_>>()
+    };
+
+    let mut stage = palette();
     assert_eq!(
-        hints,
+        chips(&stage),
         vec![
+            "Up+Down select".to_owned(),
+            "Tab complete".to_owned(),
+            "Enter copy".to_owned(),
+            "Esc dismiss".to_owned()
+        ],
+        "the four hints the shell honours, in the shipped order and the shipped words"
+    );
+    // The same surface, read the other way round: *every* labelled `footer-*` element, so a fifth chip
+    // for a binding that does not exist fails here even if it were inserted in the middle of the four
+    // above (which the ordered check alone would let through).
+    let mut all_chips = stage.labels_starting_with("footer-");
+    all_chips.sort();
+    assert_eq!(
+        all_chips,
+        vec![
+            "Enter copy".to_owned(),
             "Esc dismiss".to_owned(),
             "Tab complete".to_owned(),
             "Up+Down select".to_owned()
         ],
-        "every hint in the footer has to be a binding the palette honours, in the shipped palette's \
-         words"
+        "the footer advertises exactly the bindings the palette routes, and nothing else"
     );
-    let joined = hints.join(" ");
-    for advertised in [
-        "Enter", "Space", "Ctrl+O", "Ctrl+P", "copy", "details", "open",
-    ] {
+
+    for absent in ["footer-details", "footer-context-ignore", "footer-space"] {
         assert!(
-            !joined.contains(advertised),
-            "the footer offers {advertised:?}, which this shell does not bind: `Enter`/`Space` copy \
-             waits on the clipboard seam and `Ctrl+O` details on the details panel, and a hint is a \
-             promise the window has to keep"
+            !stage.has(absent),
+            "{absent} would advertise a binding the palette does not make"
         );
     }
+    let joined = chips(&stage).join(" ");
+    for unbound in ["Ctrl+O", "Ctrl+P", "details", "Space"] {
+        assert!(
+            !joined.contains(unbound),
+            "the footer offers {unbound:?}: details waits on the details panel, ignore-context on \
+             the context hop, and Space is declined for the IME reason recorded in `ui.rs`"
+        );
+    }
+
+    // Forward direction, proved by driving each binding once, in the order the palette survives.
+    stage.press_key(Key::Down);
+    assert_eq!(
+        stage.state().selected,
+        1,
+        "`Up+Down select` is drawn, and Down moved the highlight"
+    );
+    stage.press_key(Key::Tab);
+    assert_eq!(
+        stage.state().query.text,
+        "cargo test",
+        "`Tab complete` is drawn, and Tab wrote the highlighted row into the field"
+    );
+    stage.press_key(Key::Enter);
+    assert!(
+        stage.state().copy_status.is_some(),
+        "`Enter copy` is drawn, and Enter reached `activate` with an outcome to report"
+    );
+    stage.press_key(Key::Escape);
+    assert!(
+        stage.state().dismissed,
+        "`Esc dismiss` is drawn, and Escape took the palette out of the way"
+    );
 }
 
 /// Focus, re-read after a frame, so a check cannot pass on a focus change the next commit undid.
