@@ -231,6 +231,18 @@ crates/dev-console-core/src/
                              execution.rs, settings.rs, projects.rs and archive.rs each hold an
                              `impl LibraryActions` block for one seam of the library's own UI
   services/finder.rs         the palette surface (no reveal, edit, execute, archive, recovery)
+  theme/                     the palette the native app paints with, ported out of the stylesheets:
+                             mod.rs resolves a palette against the shared tokens (colour, length,
+                             number, token kind); shared.rs and palettes/ carry the 52 shared tokens
+                             and the 24 palettes (dark, light, 22 Omarchy) as generated tables;
+                             value.rs is the CSS value layer (var() expansion, colour parsing,
+                             WCAG luminance and contrast); contrast.rs is the ported audit - the same
+                             76 pairings, the same 4.5:1 / 3.0:1 thresholds, the same 27 exemptions
+                             with their reasons, and the sweep that fails if a colour token is
+                             neither measured nor exempted; inventory.rs re-reads the stylesheets so
+                             the tables cannot drift from them. The Node script stays the gate for
+                             the shipped app; the Rust audit is held to it by tests that pin every
+                             pairing and the measured minima
   freshness.rs               the ledger of which request is current, and the three guards an
                              asynchronous answer has to pass before a window paints it
   testing.rs                 the scratch-profile fixture the workspace tests share

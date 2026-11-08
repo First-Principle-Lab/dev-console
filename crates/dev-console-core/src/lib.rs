@@ -73,6 +73,7 @@ pub mod settings;
 pub mod state;
 #[doc(hidden)]
 pub mod testing;
+pub mod theme;
 pub mod time_format;
 pub mod validation;
 pub mod vault;
@@ -80,3 +81,4 @@ pub mod vault;
 pub use error::{AppError, AppResult};
 pub use services::{AppEvent, Effects, FinderActions, LibraryActions, Surface, WindowCommand};
 pub use state::AppState;
+pub use theme::{Appearance, Palette, Theme};

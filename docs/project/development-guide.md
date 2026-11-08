@@ -82,6 +82,19 @@ translucent layer over the surface it is painted on and checks 76 real pairings 
 `tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
 contrast fails the gate.
 
+The native app reads the same palette from Rust rather than from CSS.
+`crates/dev-console-core/src/theme/` carries the 52 shared tokens and the 24 palettes as generated
+tables, the same 76 pairings at the same 4.5:1 / 3.0:1 thresholds, and the same 27 exemptions with
+their reasons. `python3 scripts/generate-theme-data.py` regenerates those tables from
+`src/styles/tokens.css`, `src/styles/omarchy.css` and `scripts/contrast-check.mjs` (it fails loudly if
+a block renames or drops a token rather than reporting a palette it cannot check); `--report` prints
+what it parsed without writing. Two rules keep the port honest instead of merely similar:
+`theme::inventory` re-reads both stylesheets in the test run and fails if a generated row no longer
+matches it, and the audit tests pin all 76 pairings and the measured minima against the Node script's
+own numbers, so a pairing cannot quietly vanish from the Rust side. If the CSS palette is retuned,
+regenerate and re-run `bun run check:contrast` in the same change; if they disagree, fix the port, not
+the numbers. The Rust tables are not a second source of truth - the stylesheets stay it.
+
 Settings includes the 22 stock Omarchy themes installed on this host. Their colors are
 snapshotted in `src/styles/omarchy.css` and can be refreshed with
 `python scripts/generate-omarchy-themes.py /path/to/omarchy/themes`. The generated roles retain

@@ -19,12 +19,17 @@
 //!
 //! ## Colour rule
 //!
-//! Every colour comes from `rune::tok::theme` (and spacing/radius/type from `space`/`radius`/
-//! `type_`). AGENTS.md forbids hard-coded colours in view code. The real palette is the CSS token
-//! set in `src/styles/tokens.css` plus the 22 Omarchy palettes, and plan §2/§5 ("Port the contrast
-//! checks to the new theme data") makes that mapping a checkpoint of its own; `rune::tok::theme` is
-//! Rune's built-in default, not Dev Console's theme, and is used here only so these views draw
-//! something without inventing a parallel colour source.
+//! Every colour comes from a token set - `rune::tok::theme` here, and spacing/radius/type from
+//! `space`/`radius`/`type_` - never from a literal written in this file. The gate is a test, not a
+//! promise: `crate::tests::no_view_source_hard_codes_a_colour` greps every source in this crate and
+//! in `dev-console-ui-tests` for a hex triplet or an `rgb`/`hsl` call.
+//!
+//! Dev Console's real palette - the 52 shared tokens and the 24 palettes in `src/styles/tokens.css`
+//! and `src/styles/omarchy.css`, with the same 76 contrast pairings the shipped audit measures - is
+//! ported into `dev_console_core::theme` (checkpoint C5). What is **not** done yet is the last hop:
+//! handing that palette to Rune, whose `tok::theme` still returns its own built-in default. So these
+//! views use `rune::tok::theme` to stay token-driven while the palette mapping is a milestone-4
+//! change, and the ported data is what that change will map from - not a second colour source.
 
 use rune::tok::{radius, space, type_};
 use rune::{col, el, row, text, text_input, Cx, El, TextEdit};
