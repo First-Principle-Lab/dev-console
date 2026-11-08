@@ -273,13 +273,16 @@ pub(crate) fn details_from(
 }
 
 /// The two filter boxes in the list's header, over whatever the store returned for the search box.
-/// `entry_type` and `tag` are prefix matches - that is what typing into those boxes means - while the
-/// free-text query is matched by the store itself, so it is not repeated here.
+/// The two rules are deliberately different, because that is how the command list has always
+/// filtered: the type box names a whole type (the box is completed from the list of types in use,
+/// and the command rows are compared case-insensitively but exactly), while a tag box matches the
+/// start of a tag. The secret list, which is read out of the vault rather than out of SQL, matches
+/// its type box as a prefix - see [`matches_secret`]. The free-text query is matched by the store
+/// itself, so it is not repeated here.
 pub(crate) fn apply_list_filters(entries: Vec<EntryMeta>, request: &ListRequest) -> Vec<EntryMeta> {
     let mut entries = entries;
     if let Some(entry_type) = request.entry_type.as_deref() {
-        let needle = entry_type.to_lowercase();
-        entries.retain(|entry| entry.entry_type.to_lowercase().starts_with(&needle));
+        entries.retain(|entry| entry.entry_type.eq_ignore_ascii_case(entry_type));
     }
     if let Some(tag) = request.tag.as_deref() {
         let needle = tag.to_lowercase();
@@ -294,7 +297,10 @@ pub(crate) fn apply_list_filters(entries: Vec<EntryMeta>, request: &ListRequest)
 }
 
 /// The same three rules over decrypted metadata, which only exists while the vault is open, so an
-/// absent box means "no filter" here rather than "match nothing".
+/// absent box means "no filter" here rather than "match nothing". The vault list has always matched
+/// its type box as a prefix where the command list matches it exactly - see [`apply_list_filters`] -
+/// and both are kept, because a user who has one list filtered by `sh` and switches to secrets is
+/// used to what each of them does.
 pub(crate) fn matches_secret(entry: &EntryMeta, query: &str, entry_type: &str, tag: &str) -> bool {
     let query_matches = query.is_empty()
         || entry.name.to_lowercase().contains(query)
@@ -378,7 +384,10 @@ pub(crate) fn lock_vault(state: &Arc<AppState>, effects: &mut Effects) -> AppRes
 pub(crate) fn unlock_vault(state: &Arc<AppState>, effects: &mut Effects) -> AppResult<VaultState> {
     state.vault.unlock()?;
     match state.reconcile_interrupted_replacement() {
-        Ok(Some(_report)) => {
+        Ok(Some(report)) => {
+            // The same line the runtime printed before this layer existed: the owner has to be able
+            // to tell, from the log, that a replacement was settled rather than silently lost.
+            eprintln!("dev-console: {}", report.message());
             // The library has to refetch: what it listed may have just been replaced.
             reload_all(state, effects);
         }
@@ -396,6 +405,18 @@ pub(crate) fn unlock_vault(state: &Arc<AppState>, effects: &mut Effects) -> AppR
     effects.emit(AppEvent::VaultStateChanged(vault.clone()));
     effects.refresh_tray();
     Ok(vault)
+}
+
+/// Closing a window, from either window. The rule is shared because the shipped handler never
+/// looked at which window asked: a close answered for *while the app is quitting* finishes that
+/// quit whichever window it came from, and only otherwise is it a plain hide. Keeping one
+/// implementation is what stops the palette's `Escape` from leaving a quit hanging in the air.
+pub(crate) fn allow_close(state: &AppState, surface: Surface) -> WindowCommand {
+    if state.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+        WindowCommand::FinishQuit
+    } else {
+        WindowCommand::Hide { surface }
+    }
 }
 
 /// One refresh signal after a bulk operation (a backup restore or an archive import): the reload goes
@@ -636,7 +657,11 @@ mod tests {
     }
 
     #[test]
-    fn the_two_filter_boxes_are_prefixes_over_what_the_store_matched() {
+    fn the_command_type_box_names_a_whole_type_while_a_tag_box_names_its_start() {
+        // Shipped asymmetry, kept deliberately: the command list's type box is completed from the
+        // types already in use and compared exactly (case-insensitively), while a tag box matches
+        // the start of a tag. `the_secret_list_matches_its_type_box_as_a_prefix` covers the other
+        // half of the pair, which is the vault list and does prefix-match its type box.
         let entries = vec![
             entry("cargo-build", "Shell", &["rust", "ci"]),
             entry("git-push", "Alias", &["git"]),
@@ -658,11 +683,11 @@ mod tests {
             2,
             "the free-text box is the store's job, not this filter's"
         );
-        assert_eq!(names(filters(None, Some("sh"), None)), ["cargo-build"]);
+        assert_eq!(names(filters(None, Some("Shell"), None)), ["cargo-build"]);
         assert_eq!(names(filters(None, Some("ALIAS"), None)), ["git-push"]);
         assert!(
-            names(filters(None, Some("wil"), None)).is_empty(),
-            "the type box is a prefix too"
+            names(filters(None, Some("sh"), None)).is_empty(),
+            "the command type box names a whole type, not the start of one"
         );
         assert_eq!(names(filters(None, None, Some("ci"))), ["cargo-build"]);
         assert_eq!(names(filters(None, None, Some("ru"))), ["cargo-build"]);
@@ -670,6 +695,20 @@ mod tests {
             names(filters(None, None, Some("ust"))).is_empty(),
             "a tag box matches the start of a tag, never the middle of one"
         );
+    }
+
+    #[test]
+    fn the_secret_list_matches_its_type_box_as_a_prefix() {
+        // The other half of the pair: `matches_secret` is the vault list, and it has always
+        // prefix-matched the type box. Asserted next to the command rule so the asymmetry is a
+        // decision on the record rather than two files disagreeing by accident.
+        let entry = entry("aws", "API key", &["cloud"]);
+        // The needles arrive lowercased, as `list_entries` lowers them once per request.
+        assert!(
+            matches_secret(&entry, "", "api", ""),
+            "a prefix is enough here"
+        );
+        assert!(!matches_secret(&entry, "", "", "nope"));
     }
 
     #[test]

@@ -102,11 +102,12 @@ impl FinderActions {
         WindowCommand::Hide { surface }
     }
 
-    /// Closing the palette is always a hide, because the palette has nothing to answer for: unsaved
-    /// edits only exist in the library's editor. A palette closed while the app is quitting still only
-    /// hides - the library is what has to answer for its edits.
+    /// Closing the palette. While the resident app is quitting, the close is the last step of that
+    /// quit - the shipped handler never asked which window answered, and a palette that hid instead
+    /// would leave a quit with nothing left to finish it. Otherwise it is a plain hide: the palette
+    /// has nothing to answer for, because unsaved edits only exist in the library's editor.
     pub fn allow_close(&self, surface: Surface) -> WindowCommand {
-        WindowCommand::Hide { surface }
+        super::allow_close(&self.state, surface)
     }
 
     /// The keyboard-less way to leave the resident app. The quit is still answered for: the desktop
@@ -180,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_or_hiding_the_palette_never_quits() {
+    fn closing_or_hiding_the_palette_leaves_the_resident_app_running() {
         let fixture = Fixture::new("hide");
         let actions = FinderActions::new(fixture.state.clone(), "9.9.9");
         assert_eq!(
@@ -193,9 +194,29 @@ mod tests {
             actions.allow_close(Surface::Finder),
             WindowCommand::Hide {
                 surface: Surface::Finder
-            }
+            },
+            "a resident app is not quit by dismissing its palette"
         );
         assert_eq!(actions.quit_app(), WindowCommand::Quit);
+
+        // A quit that is already under way is a different question, and the palette is not what
+        // holds it open: the shipped `allow_close` finished the quit whichever window called it.
+        fixture
+            .state
+            .quitting
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            actions.allow_close(Surface::Finder),
+            WindowCommand::FinishQuit,
+            "the last window to answer for a quit is what ends it"
+        );
+        assert_eq!(
+            actions.hide_self(Surface::Finder),
+            WindowCommand::Hide {
+                surface: Surface::Finder
+            },
+            "an `Escape` is still only a hide, quitting or not"
+        );
     }
 
     #[test]

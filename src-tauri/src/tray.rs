@@ -1,9 +1,11 @@
 use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
+use crate::effects;
 use crate::error::{AppError, AppResult};
 use crate::models::Kind;
+use crate::services::AppEvent;
 use crate::windows;
 
 pub const TRAY_ID: &str = "main-tray";
@@ -87,19 +89,20 @@ pub fn build(app: &AppHandle) -> AppResult<()> {
                     };
                     match result {
                         Ok(vault) => {
-                            let _ = app.emit("vault-state-changed", vault);
+                            let _ = effects::deliver(app, &AppEvent::VaultStateChanged(vault));
                             let _ = refresh_menu(app);
                         }
                         Err(error) => {
-                            let _ = app.emit("vault-message", error.to_string());
+                            let _ =
+                                effects::deliver(app, &AppEvent::VaultMessage(error.to_string()));
                         }
                     }
                 }
                 ID_SETTINGS => {
-                    if let Ok(()) = windows::show_library(app) {
-                        if let Some(window) = app.get_webview_window(windows::LIBRARY) {
-                            let _ = window.emit("open-settings", ());
-                        }
+                    if windows::show_library(app).is_ok() {
+                        // `Delivery::Library`: the palette has no settings panel to open, so the
+                        // variant itself keeps this from going to both windows.
+                        let _ = effects::deliver(app, &AppEvent::OpenSettings);
                     }
                 }
                 ID_QUIT => {

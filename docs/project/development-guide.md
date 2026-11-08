@@ -163,13 +163,15 @@ crates/              Cargo workspace: the domain layer and the native Rune port
   dev-console-core/  Rust domain: models, paths, repository (SQLite), vault (age), keyring,
                      auth (polkit), backup, recovery, clipboard, context, environment, execution,
                      history, import, project_history, projects (task scan), search, settings,
-                     state (the `AppState` service container)
+                     state (the `AppState` service container), services (the two typed surfaces a
+                     UI calls - `LibraryActions` / `FinderActions` - and the `Effects` they return)
   dev-console-desktop/  Rune app windows, tray, control socket, CLI (not the shipped app yet)
   dev-console-ui-tests/ scripted element-tree and state-transition tests for the Rune views
 src-tauri/src/       Tauri desktop runtime around the core crate: lib (app setup), windows
-                     (show/hide/focus and launch intent), tray (native menu), ipc (command
-                     registration), control (Unix socket + CLI replies), cli (intents),
-                     autostart, desktop_icons
+                     (show/hide/focus, launch intent, relaunch), tray (native menu), ipc (one thin
+                     adapter per command: guard the window, call the service, dispatch the effects),
+                     effects (the only place an event is emitted or a window action performed),
+                     control (Unix socket + CLI replies), cli (intents), autostart, desktop_icons
 src-tauri/tests/     native backend integration tests (no test doubles)
 scripts/             verification harnesses (each exits 77 when the environment is missing)
 packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD

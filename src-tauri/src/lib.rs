@@ -7,20 +7,23 @@ pub mod autostart;
 pub mod cli;
 pub mod control;
 pub mod desktop_icons;
+pub mod effects;
 pub mod ipc;
 pub mod tray;
 pub mod windows;
 
 pub use dev_console_core::{
     auth, backup, clipboard, context, environment, error, execution, history, import, keyring,
-    models, paths, project_history, projects, recovery, repository, search, settings, state, vault,
+    models, paths, project_history, projects, recovery, repository, search, services, settings,
+    state, vault,
 };
 
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::cli::Intent;
+use crate::services::AppEvent;
 use crate::state::AppState;
 
 pub fn run() {
@@ -199,7 +202,9 @@ fn build(argv: Vec<String>) {
                         let _ = windows::finish_quit(window.app_handle());
                     }
                     _ => {
-                        let _ = window.emit("close-requested", ());
+                        // The library is the window with something to answer for, and the event's
+                        // own variant says so (`Delivery::Library`) rather than this call site.
+                        let _ = effects::deliver(window.app_handle(), &AppEvent::CloseRequested);
                     }
                 }
             }

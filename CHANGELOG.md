@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+
+- Closing the finder while Dev Console is quitting finishes the quit at once instead of waiting out the five-second grace period.
+
 ## 0.0.11 — 2026-11-08
 
 - Refresh the product README with demo screenshots, installation steps, and keyboard shortcuts; move detailed development notes into the documentation.

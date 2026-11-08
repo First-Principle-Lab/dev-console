@@ -225,11 +225,15 @@ crates/dev-console-core/src/
   clipboard.rs               copy, exclusion, conditional expiry
   execution.rs               terminal execution
   backup.rs                  sealed archives and recovery journal support
+  services/mod.rs            the two surfaces a UI may call, and the Effects they return
+  services/library.rs        the privileged surface (everything the library window may do)
+  services/finder.rs         the palette surface (no reveal, edit, execute, archive, recovery)
 src-tauri/src/
   lib.rs                     application setup
-  windows.rs                 show/hide/focus and launch intent
+  windows.rs                 show/hide/focus, launch intent, relaunch
   tray.rs                    native menu
-  ipc.rs                     Tauri command registration
+  ipc.rs                     one adapter per command: guard the window, call the service
+  effects.rs                 the single place an event is emitted or a window action performed
   control.rs                 CLI response channel
 src-tauri/capabilities/
   finder.json

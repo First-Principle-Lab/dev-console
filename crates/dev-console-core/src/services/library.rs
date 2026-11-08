@@ -126,20 +126,11 @@ impl LibraryActions {
         WindowCommand::Hide { surface }
     }
 
-    /// Closing the library while the app is quitting is the last step of that quit; while it is
-    /// resident, it is only a hide and the webview gets a `close-requested` event to answer for
-    /// unsaved edits first. The decision is here rather than in the window layer so it can be
-    /// tested without one.
+    /// Closing a window: while the app is quitting this finishes the quit, otherwise it is a hide.
+    /// The rule is the shared one in [`super::allow_close`], so the palette and the library cannot
+    /// grow different answers to the same close.
     pub fn allow_close(&self, surface: Surface) -> WindowCommand {
-        if self
-            .state
-            .quitting
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            WindowCommand::FinishQuit
-        } else {
-            WindowCommand::Hide { surface }
-        }
+        super::allow_close(&self.state, surface)
     }
 
     pub fn quit_app(&self) -> WindowCommand {
@@ -175,15 +166,11 @@ impl LibraryActions {
         }
     }
 
-    /// The type-ahead list for the filter row: every type in use across both stores.
-    pub fn types_for(&self, request: KindRequest) -> AppResult<Vec<String>> {
-        let mut types = self.state.repo.types(request.kind)?;
-        if request.kind == Kind::Secret {
-            types.extend(self.state.vault.types()?);
-        }
-        types.sort_by_key(|entry_type| entry_type.to_lowercase());
-        types.dedup();
-        Ok(types)
+    /// The type-ahead list for the filter row: every type in use across both stores. Delegates to
+    /// [`AppState::types`], which is the reader the runtime has always used - including its choice
+    /// that a store which cannot be read contributes no types rather than failing the request.
+    pub fn types_for(&self, request: KindRequest) -> Vec<String> {
+        self.state.types(request.kind)
     }
 
     /// The inspector. Never carries the secret value - that is [`LibraryActions::reveal_secret`].
@@ -574,26 +561,37 @@ impl LibraryActions {
         WindowCommand::Restart
     }
 
+    /// Collecting an archive for a backup or an export. Delegates to [`AppState::build_archive`]
+    /// rather than reading the two stores itself, because the authorisation at the top of that
+    /// reader is the point: an archive of a closed vault would look like a successful backup while
+    /// containing no secrets at all.
     fn build_archive(&self) -> AppResult<backup::Archive> {
-        let commands = self
-            .state
-            .repo
-            .all_command_records()?
-            .into_iter()
-            .map(|(record, _, _)| record)
-            .collect();
-        let secrets = self.state.vault.snapshot()?;
-        Ok(backup::Archive::new(commands, secrets))
+        self.state.build_archive()
     }
 }
 
 /// The recovery credential and where it lives. Named here rather than reused from the Tauri layer so
 /// the core has no wire type: the JSON shape the settings panel reads is built by the desktop layer
-/// from these two fields.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// from these two fields - and the value itself never gets a `Debug` that could print it, because it
+/// decrypts every archive this profile has ever sealed. A `{:?}` in a log line or a failing
+/// assertion's panic message would be the leak, so this says *that* a credential is held, never what
+/// it says.
+#[derive(Clone, PartialEq, Eq)]
 pub struct RecoveryCredential {
     pub secret: String,
     pub path: String,
+}
+
+impl std::fmt::Debug for RecoveryCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecoveryCredential")
+            .field(
+                "secret",
+                &format_args!("<{} chars, redacted>", self.secret.chars().count()),
+            )
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 /// `save_entry`'s return: the saved row plus the operation the list needs, which is why it is not
@@ -811,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn the_filter_boxes_are_prefixes_over_what_the_store_matched() {
+    fn the_command_type_box_names_a_whole_type() {
         let fixture = Fixture::new("filters");
         fixture.seed_command("cargo-build", "Shell", "cargo build", &["rust", "ci"]);
         fixture.seed_command("git-push", "Alias", "git push", &["git"]);
@@ -828,7 +826,7 @@ mod tests {
         let shells = actions
             .list_entries(ListRequest {
                 kind: Kind::Command,
-                entry_type: Some("sh".into()),
+                entry_type: Some("shell".into()),
                 ..Default::default()
             })
             .expect("filtered");
@@ -837,7 +835,19 @@ mod tests {
                 .iter()
                 .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>(),
-            ["cargo-build"]
+            ["cargo-build"],
+            "the box is completed from the types in use, so the comparison is a whole type"
+        );
+        assert!(
+            actions
+                .list_entries(ListRequest {
+                    kind: Kind::Command,
+                    entry_type: Some("sh".into()),
+                    ..Default::default()
+                })
+                .expect("partial type")
+                .is_empty(),
+            "a fragment of a type name matches no command row"
         );
         // The query reaches the store, which matches any of name, type, description or tags.
         let by_tag = actions
@@ -888,16 +898,59 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_vault_is_refused_as_a_backup_and_as_an_export_rather_than_written_empty() {
+        // The whole point of going through `AppState::build_archive` for both of them: reading the
+        // two stores directly would produce a *successful*-looking sealed archive containing no
+        // secrets at all, and a restore of it would then quietly empty the library.
+        let fixture = Fixture::new("locked-archive");
+        fixture.seed_command("git-push", "Alias", "git push", &["git"]);
+        let actions = LibraryActions::new(fixture.state.clone(), "9.9.9");
+        actions
+            .lock_vault(&mut Effects::default())
+            .expect("manual lock");
+
+        let mut effects = Effects::default();
+        assert_eq!(
+            actions.create_backup().unwrap_err().to_string(),
+            "the vault is locked",
+            "a backup of a closed vault must be a refusal, not an empty archive"
+        );
+        // And a refusal tells the windows nothing: an archive that was never read must not make
+        // every library refetch its list as if something had been restored.
+        assert!(actions
+            .restore_backup("no-such-backup.age".into(), &mut effects)
+            .is_err());
+        assert!(effects.is_empty(), "a refused restore announces nothing");
+        assert!(actions
+            .import_archive("/nonexistent/archive.age".into(), &mut effects)
+            .is_err());
+        assert!(effects.is_empty(), "a refused import announces nothing");
+        let destination = std::env::temp_dir().join(format!(
+            "dev-console-locked-export-{}.age",
+            std::process::id()
+        ));
+        assert_eq!(
+            actions
+                .export_archive(destination.to_string_lossy().to_string(), Some(true))
+                .unwrap_err()
+                .to_string(),
+            "the vault is locked"
+        );
+        assert!(
+            !destination.exists(),
+            "a refused export must leave no half-written archive behind"
+        );
+    }
+
+    #[test]
     fn the_type_list_spans_both_stores_and_ignores_case_when_ordering() {
         let fixture = Fixture::new("types");
         fixture.seed_command("one", "Shell", "echo one", &[]);
         fixture.seed_command("two", "alias", "echo two", &[]);
         let actions = LibraryActions::new(fixture.state.clone(), "9.9.9");
-        let types = actions
-            .types_for(KindRequest {
-                kind: Kind::Command,
-            })
-            .expect("types");
+        let types = actions.types_for(KindRequest {
+            kind: Kind::Command,
+        });
         assert_eq!(types, vec!["alias".to_string(), "Shell".to_string()]);
     }
 

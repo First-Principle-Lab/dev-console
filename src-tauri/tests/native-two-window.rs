@@ -15,7 +15,8 @@
 //!   * secret operations are authorised per calling window and refused outright while the vault
 //!     is locked, and no command response, event or search row ever carries a secret value
 //!     (C05, C14),
-//!   * a failed unlock leaves the manual lock in place all the way up to the IPC surface (C13).
+//!   * a failed unlock leaves the manual lock in place all the way up to the IPC surface (C13),
+//!   * the runtime spells no event name and emits nothing outside `effects::deliver` (C03).
 //!
 //! What it does not prove: that a WebKit webview's JavaScript `invoke()` reaches these handlers
 //! (`scripts/smoke-native.sh` drives the compiled binary for that), nor anything about the tray,
@@ -1131,4 +1132,96 @@ fn project_history_client_counts_real_socket_requests_and_respects_disabled_sett
     } else {
         std::env::remove_var("DEV_CONSOLE_RUNTIME_DIR");
     }
+}
+
+/// Every event name the frontend can listen for, as one list. Kept here rather than derived from
+/// `AppEvent` because the point of the test is that a *name* is written in exactly one module of the
+/// desktop runtime; deriving the list from the core would let a runtime module keep a name and this
+/// check pass without noticing.
+const EVENT_NAMES: &[&str] = &[
+    "clipboard-copied",
+    "close-requested",
+    "entries-changed",
+    "finder-context",
+    "finder-shown",
+    "open-settings",
+    "settings-saved",
+    "theme-changed",
+    "update-progress",
+    "vault-message",
+    "vault-state-changed",
+    "window-intent",
+];
+
+/// The runtime's event vocabulary is one file's business (plan section 3).
+///
+/// Every other test here would keep passing if someone added `window.emit("vault-stat-changed", ..)`
+/// to a handler: it compiles, runs, and tells nobody anything, because the typo is invisible on both
+/// sides. So the check is on the source. Two rules, both cheap and both exactly true today:
+///
+///   * no module in this crate writes an event *name* as a string - names live in
+///     `dev_console_core::services::AppEvent::name`;
+///   * `effects::deliver` is the only code that calls `emit`, in two arms: the broadcast and the
+///     single-window send. A third arm would have to be a reason, not an accident.
+#[test]
+fn the_runtime_emits_events_in_exactly_one_place() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders: Vec<String> = Vec::new();
+    let mut emit_sites = 0;
+    for path in rust_files(&src) {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        let source = std::fs::read_to_string(&path).expect("a readable source file");
+        // Comments are where a name legitimately appears in prose ("see `entries-changed`"), so the
+        // scan looks at code.
+        for (index, line) in source.lines().enumerate().filter(|(_, line)| {
+            let text = line.trim_start();
+            !text.starts_with("//") && !text.starts_with("///") && !text.starts_with("//!")
+        }) {
+            let where_ = format!("{name}:{}", index + 1);
+            if line.contains(".emit(") {
+                if name == "effects.rs" {
+                    emit_sites += 1;
+                } else {
+                    offenders.push(format!("{where_} emits an event by hand"));
+                }
+            }
+            if line.contains(".emit(\"") || line.contains(".emit(&\"") {
+                offenders.push(format!("{where_} names an event in an emit call"));
+            }
+            for event in EVENT_NAMES {
+                if line.contains(&format!("\"{event}\"")) {
+                    offenders.push(format!(
+                        "{where_} names the {event} event in a runtime module"
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        emit_sites, 2,
+        "`effects::deliver` is the broadcast arm and the single-window arm, nothing else"
+    );
+    assert!(
+        offenders.is_empty(),
+        "an event name belongs to `services::AppEvent` and an emit to `effects::deliver`: {offenders:?}"
+    );
+}
+
+/// Every `.rs` file under `dir`, recursively. This crate's `src/` is flat today; walking means the
+/// scan keeps covering new submodules instead of silently skipping them.
+fn rust_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).expect("a readable source directory") {
+            let path = entry.expect("a readable entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
 }

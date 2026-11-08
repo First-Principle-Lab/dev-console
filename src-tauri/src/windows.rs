@@ -1,10 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
-use crate::context::FinderContext;
+use crate::effects;
 use crate::error::{AppError, AppResult};
+use crate::services::AppEvent;
 use crate::state::AppState;
 
 pub const LIBRARY: &str = "library";
@@ -68,8 +69,12 @@ pub fn show_library_with<R: Runtime>(
     entry_id: Option<String>,
 ) -> AppResult<()> {
     show_library(app)?;
-    if let Some(window) = app.get_webview_window(LIBRARY) {
-        let intent = crate::models::WindowIntent {
+    // The handoff the library reads to decide whether to open an entry or start a new one. The
+    // event names its own target (`Delivery::Library`), so this cannot accidentally reach the
+    // palette that asked for it.
+    effects::deliver(
+        app,
+        &AppEvent::WindowIntent(crate::models::WindowIntent {
             action: if entry_id.is_some() {
                 "open-entry"
             } else {
@@ -77,12 +82,8 @@ pub fn show_library_with<R: Runtime>(
             },
             kind,
             entry_id,
-        };
-        window
-            .emit("window-intent", intent)
-            .map_err(|e| AppError::Other(e.to_string()))?;
-    }
-    Ok(())
+        }),
+    )
 }
 
 pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
@@ -96,10 +97,7 @@ pub fn show_finder<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     // Asking again once the window is mapped is honoured for floating windows.
     let _ = window.set_size(tauri::LogicalSize::new(FINDER_SIZE.0, FINDER_SIZE.1));
     // The frontend clears its query and refocuses the input on every appearance.
-    window
-        .emit("finder-shown", ())
-        .map_err(|e| AppError::Other(e.to_string()))?;
-    Ok(())
+    effects::deliver(app, &AppEvent::FinderShown)
 }
 
 /// Works out which project the terminal belongs to.
@@ -119,7 +117,7 @@ fn detect_context<R: Runtime>(app: &AppHandle<R>) {
     // palette must never be shown ranked against a project it did not come from. The token is what
     // makes a reply that arrives after this open is history get dropped instead of applied.
     let token = state.begin_finder_detection();
-    let _ = app.emit("finder-context", Option::<FinderContext>::None);
+    let _ = effects::deliver(app, &AppEvent::FinderContext(None));
     if !enabled {
         // Off means off: no compositor query and no `/proc` walk at all.
         return;
@@ -127,7 +125,9 @@ fn detect_context<R: Runtime>(app: &AppHandle<R>) {
     let focused = crate::context::focused_now();
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
-        .name("finder-context".into())
+        // Named after what the thread does, not after the event it sends: the event names live in
+        // `services::AppEvent` and nowhere else in this crate (`the_runtime_emits_events_in_exactly_one_place`).
+        .name("finder-detection".into())
         .spawn(move || {
             let context = focused
                 .or_else(crate::context::focused_via_hyprctl)
@@ -136,7 +136,7 @@ fn detect_context<R: Runtime>(app: &AppHandle<R>) {
                 .try_state::<Arc<AppState>>()
                 .is_some_and(|state| state.finish_finder_detection(token, context.clone()));
             if applied {
-                let _ = handle.emit("finder-context", context);
+                let _ = effects::deliver(&handle, &AppEvent::FinderContext(context));
             }
         });
     if spawned.is_err() {
@@ -180,10 +180,12 @@ pub fn request_quit<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     app.state::<Arc<AppState>>()
         .quitting
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let Some(window) = app.get_webview_window(LIBRARY) else {
+    if app.get_webview_window(LIBRARY).is_none() {
         return finish_quit(app);
-    };
-    let _ = window.emit("close-requested", ());
+    }
+    // The library is the window with something to answer for, and `AppEvent::CloseRequested` says
+    // so itself (`Delivery::Library`) instead of relying on this call site to target it.
+    let _ = effects::deliver(app, &AppEvent::CloseRequested);
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(5000));
@@ -218,4 +220,29 @@ pub fn is_quitting<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.state::<Arc<AppState>>()
         .quitting
         .load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Relaunch into a visible library, which is how an installed update is entered.
+///
+/// Detached into its own process group and started with a beat's delay, so this process has time to
+/// exit and release the single-instance lock before the new one asks for it - and so a shell that
+/// started the old process cannot take the new one down with it. The window actions in
+/// [`crate::effects`] end up here, which is the only place in this crate that starts a process.
+pub fn restart<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
+    use std::os::unix::process::CommandExt;
+
+    let binary = tauri::process::current_binary(&app.env())
+        .map_err(|error| AppError::Other(format!("could not locate the app: {error}")))?;
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg("sleep 1; exec \"$0\" --library")
+        .arg(binary)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| AppError::Other(format!("could not relaunch: {error}")))?;
+    app.exit(0);
+    Ok(())
 }
