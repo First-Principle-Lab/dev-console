@@ -61,6 +61,33 @@ Importing saves commands without running them.
 
 ## Get started
 
+### Install with one command
+
+On Linux x86_64, download the latest signed AppImage and set up the command,
+application launcher, and icon:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/First-Principle-Lab/dev-console/main/install.sh | sh
+```
+
+The installer needs `curl`, Python 3, and `minisign`. On Arch Linux, install them with
+`sudo pacman -S --needed curl python minisign`.
+
+It installs into `~/.local/share/dev-console/app` and adds `~/.local/bin/dev-console`.
+Open **Dev Console** from your application launcher, or run `dev-console` if
+`~/.local/bin` is on your `PATH`. Rerunning the same command installs the latest
+release. Signed updates are also available inside the app.
+
+To also install the system polkit helper needed for authenticated vault unlock:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/First-Principle-Lab/dev-console/main/install.sh | sh -s -- --with-auth-helper
+```
+
+This option uses `sudo` for the helper and policy only. Run the installer as your
+normal user. See the [installer details](docs/packaging/packaging.md#standalone-appimage-installer)
+for dependencies, paths, and removal instructions.
+
 ### Download the AppImage
 
 Download **Dev-Console.AppImage** from the [latest release](https://github.com/First-Principle-Lab/dev-console/releases/latest),
