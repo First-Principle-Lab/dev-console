@@ -250,7 +250,13 @@ crates/dev-console-desktop/src/
   app.rs, identity.rs        window specs, titles, sizes, scene names, exit codes
   off_thread.rs              a blocking call on a Rune worker; the answer is judged by
                              dev_console_core::freshness before a view may paint it
-  instance.rs, tray.rs, ui.rs control socket and lock, native menu, the view state
+  instance.rs, tray.rs, ui.rs control socket and lock, native menu, the view state; the tray's
+                             menu ids reach their behaviour through tray::menu_action, which a
+                             test holds against the menu the host is shown
+  ledger_tests.rs            the gate over docs/project/native-feasibility-ledger.md: every
+                             container-settled row must cite a test that still exists, every
+                             UNVERIFIED row must name the command the owner runs
+  source_scan.rs             the one source walk shared by the gates that read this repository
 src-tauri/src/
   lib.rs                     application setup
   windows.rs                 show/hide/focus, launch intent, relaunch

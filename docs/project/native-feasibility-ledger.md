@@ -1,0 +1,82 @@
+# Native feasibility ledger: what this container decides, and what it cannot
+
+Plan [`../plans/rune-migration.md`](../plans/rune-migration.md) §1 and §4 milestone 1 ask for a
+native two-window app with tray, background residency, control-socket wakeups, portal folder
+selection, keyboard input and opaque Finder rendering, "tested repeatedly on the real
+Hyprland/NVIDIA desktop". This host has no GPU (`/dev/dri` is absent), no Vulkan ICD, no Wayland or
+X11 session, no compositor, no tray host, no D-Bus portal and no Secret Service. Some of those
+checks can therefore be settled here, and some cannot be settled here *at all* - no amount of green
+in CI says what Hyprland paints.
+
+This ledger names which is which, row by row. It is a gate, not a note:
+`cargo test -p dev-console-desktop --lib ledger_tests` parses this file and fails when a row names a
+test that no longer exists, when a row's status leaves the vocabulary below, or when an UNVERIFIED
+row arrives without the command the owner has to run. A row can only be moved to a
+container-settled status by re-running the thing it names, not by remembering it.
+
+## Vocabulary
+
+| Status | What it claims |
+| --- | --- |
+| `HEADLESS-TEST` | A `#[test]` in this repository asserts it, on this host, with no display. |
+| `HEADLESS-RUN` | The real `dev-console` binary was executed on this host and the recorded output is what it printed. |
+| `UNVERIFIED (owner desktop)` | Undecidable here. The named command settles it on the Hyprland/NVIDIA session. |
+| `NOT BUILT` | The Rune shell has no such capability yet, so nobody can check it - not here, not on the desktop. |
+
+Nothing in the `UNVERIFIED` or `NOT BUILT` rows is claimed as passed anywhere. `scripts/verify.sh`
+reads exit 77 as UNVERIFIED rather than as a pass, which is why `app::EXIT_NO_DISPLAY` is 77: a gate
+that runs this binary on a host with no display is supposed to report "undecided", not "green".
+
+## The ledger
+
+| Area | Check | Status | Evidence (this container) | Owner-desktop command |
+| --- | --- | --- | --- | --- |
+| two windows | The Library spec is 1040x700 with a 760x520 minimum, hidden at start, resizable and not borderless | HEADLESS-TEST | `the_two_window_specs_match_the_tauri_shell`, `the_library_opens_hidden_and_cannot_be_shrunk_below_the_tauri_minimum`, `the_sizes_match_the_windows_the_tauri_shell_opened` | - |
+| two windows | The Finder spec is 680x420, opaque, borderless, non-resizable, always-on-top and hidden until something asks for it | HEADLESS-TEST | `the_finder_asks_for_an_opaque_borderless_fixed_size_window`, `the_finder_identity_is_the_string_the_compositor_rule_matches`, `the_sizes_match_the_windows_the_tauri_shell_opened` | - |
+| two windows | Both windows build a real element tree and measure the surface they were asked to fill | HEADLESS-TEST | `the_finder_measures_the_surface_it_was_asked_to_fill`, `the_library_measures_the_surface_it_was_asked_to_fill`, `an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip`, `a_library_with_entries_lists_exactly_those_rows` | - |
+| two windows | What the compositor really reports for the mapped Finder: title `dev-console-finder`, its class, floating, and 680x420 after the post-map size request | UNVERIFIED (owner desktop) | The spec is asserted here; `Window::on_created` cannot be reached with no display. | `hyprctl -j clients \| jq -r '.clients[] \| select(.title=="dev-console-finder") \| [.title,.class,(.floating\|tostring),.size]'` |
+| two windows | The Library stays tiled and the windows around it keep their layout when the Finder appears and disappears | UNVERIFIED (owner desktop) | No compositor to tile anything. | `hyprctl -j clients > /tmp/a.json; dev-console --finder; hyprctl -j clients > /tmp/b.json; diff <(jq -S . /tmp/a.json) <(jq -S . /tmp/b.json)` |
+| two windows | Opaque Finder on NVIDIA/Wayland: the palette survives the pointer entering, crossing rows and leaving (the bug AGENTS.md records) | UNVERIFIED (owner desktop) | Nothing is rasterised here; the option set that avoids the bug is asserted. | `dev-console --finder` then move the pointer across the rows, out and back in, repeatedly |
+| two windows | Activation: clicking the tray or a second launch raises the window and focus follows it | UNVERIFIED (owner desktop) | `AppHandle::open`/`activate` are reached only from a running event loop. | `dev-console --library` from a Hyprland terminal, then `hyprctl -j activewindow \| jq -r '.title'` |
+| tray | The menu the host would be shown: Library, Finder, separator, vault, Settings, separator, Quit, with the two unwired items disabled | HEADLESS-TEST | `the_menu_keeps_the_current_apps_order_and_gates_the_unwired_actions`, `menu_ids_are_unique_and_match_their_labels_purpose` | - |
+| tray | Every item the menu offers has a behaviour behind it, and no behaviour waits behind an item the host is not shown | HEADLESS-TEST | `every_enabled_menu_item_has_an_action_and_every_disabled_one_is_pending`, `the_menu_action_mapping_names_the_wired_ids`, `the_menu_keeps_the_current_apps_order_and_gates_the_unwired_actions` | - |
+| tray | The icon buffer is a disc of the size the watcher asked for, with zeroed texels outside it | HEADLESS-TEST | `the_icon_buffer_matches_its_own_dimensions`, `an_outside_texel_carries_no_colour_so_it_cannot_haloe` | - |
+| tray | The tray entry's StatusNotifierItem id and the Wayland `app_id` are the same string | HEADLESS-TEST | `the_app_id_is_the_tray_id`, `the_tray_id_is_the_application_identity` | - |
+| tray | Which identity strings a compositor or watcher rule can match on, asserted as constants: the Finder title this repo uses, the two window labels, and the Library title | HEADLESS-TEST | `the_finder_identity_is_the_string_the_compositor_rule_matches` - what Hyprland and a tray watcher report alongside those strings is the two rows above | - |
+| tray | Absence of a tray host does not stop the app: registration fails, the reason is printed, and the process still reaches the point where the display is missing | HEADLESS-RUN | `target/debug/dev-console --finder` on this host printed `dev-console: tray registration failed (failed to connect to … /run/user/0/bus: No such file or directory (os error 2)); the app still runs resident` (the path itself is back-quoted in the real line, elided here) and then exited 77 | - |
+| tray | A real StatusNotifierItem host lists the entry, renders the icon and the separators, and delivers the primary click as `TrayEvent::Activate` | UNVERIFIED (owner desktop) | No session bus and no watcher on this host, which is what the row above observed. | `busctl --user call org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems` |
+| control socket | One JSON request per connection, one JSON reply line, a known kebab-case intent, and nothing else | HEADLESS-TEST | `an_intent_round_trips_over_the_socket`, `the_wire_shape_is_a_stable_kebab_case_intent_and_nothing_else`, `a_request_can_carry_nothing_but_a_window_name`, `the_control_channel_knows_only_two_intents` | - |
+| control socket | A confused or hostile local caller cannot end the wakeup path: bad, unknown-shaped and over-long requests are skipped and the next intent still arrives | HEADLESS-TEST | `an_unknown_intent_is_rejected_without_ending_the_wakeup_path`, `an_oversized_request_is_capped_and_the_next_intent_still_arrives` | - |
+| control socket | Access control is the filesystem: the runtime directory is 0700 and the socket 0600, and no bus daemon is involved | HEADLESS-TEST | `the_runtime_directory_holds_the_private_permissions` | - |
+| control socket | Same, seen from the shipped binary rather than a unit test | HEADLESS-RUN | `stat -c '%a %n' "$RT" "$RT"/rune-instance.sock` after `DEV_CONSOLE_RUNTIME_DIR=$RT target/debug/dev-console --finder` reported `700` for the directory, `600` for the socket, and the process exited 77 | - |
+| control socket | A control-socket wakeup actually wakes a running UI loop and maps the window it names | UNVERIFIED (owner desktop) | The listener thread and `AppHandle::open` both exist and are unit-tested apart; only a mapped window can show the hand-off. | Terminal A: `dev-console`. Terminal B, after A is resident: `dev-console --finder` - the Finder must appear in A's session and B must print `asked the running instance for the Finder window` and exit 0 |
+| single instance | Two mechanisms, because they fail differently: an `flock` the kernel drops when the holder dies, and the exclusive `AF_UNIX` bind on the socket name | HEADLESS-TEST | `the_second_holder_of_the_lock_is_told_to_forward_instead`, `binding_a_socket_a_live_instance_listens_on_fails`, `a_socket_file_left_by_a_dead_instance_is_replaced` | - |
+| single instance | A launch with nowhere to forward to does not hang: it is told so and becomes the resident process | HEADLESS-TEST | `an_intent_with_no_running_instance_is_reported_rather_than_retried_forever` | - |
+| single instance | The shell knows only the two intents, so no capability can be smuggled in as a window name | HEADLESS-TEST | `flags_name_intents_and_only_the_known_ones`, `the_control_channel_knows_only_two_intents` | - |
+| single instance | Exactly one process ever holds the vault, the windows and the clipboard ownership | UNVERIFIED (owner desktop) | Nothing here owns a vault: the views are placeholders and the services arrive with milestone 2. | `dev-console` twice, then `pgrep -a dev-console` must list one resident pid and `ls -l "$XDG_RUNTIME_DIR/dev-console"` one socket |
+| residency | The exit-code contract: usage is 0 or 2, and "no display, therefore undecided" is 77, the code `scripts/verify.sh` treats as UNVERIFIED | HEADLESS-RUN | `target/debug/dev-console --help` exited 0 with the usage text; `target/debug/dev-console --reveal` exited 2 with `unknown argument "--reveal"`; `target/debug/dev-console --finder` exited 77 with `the native shell could not start: ... neither WAYLAND_DISPLAY nor WAYLAND_SOCKET nor DISPLAY is set` | - |
+| residency | Same rule, asserted rather than observed, so a refactor cannot quietly make "no display" look like a pass | HEADLESS-TEST | `exit_codes_do_not_collide_with_the_repos_unverified_convention`, `flags_parse_into_at_most_one_intent`, `help_is_a_usage_message_not_a_window_request` | - |
+| residency | Closing a window hides it and the resident process keeps running; the tray's Quit ends it after clearing decrypted state and owned clipboard content | UNVERIFIED (owner desktop) | `try_run` never returns here, so no close event and no quit path runs. | Map the Library, close it, `pgrep -a dev-console` still lists it; then tray - Quit and the same command lists nothing |
+| keyboard | The views route keys: Escape dismisses the Finder, arrows move the selection, Ctrl+1/Ctrl+2 switch tabs | NOT BUILT | `ui::Finder` and `ui::Library` declare no `on_key` handler yet, so there is no routing to check on any host. Plan §2 lists these as milestone 3/4 screens. | - |
+| keyboard | Once key routing exists it will be checkable in this container, not only on the desktop: the pinned Rune exposes headless input and focus on `Runtime` | NOT BUILT | Read out of the vendored checkout at the pinned revision: `crates/rune/src/runtime/input/keys.rs:262` `Runtime::key(KeyEvent)`, `:336` `Runtime::has_focus()`, and `input/pointer.rs:168/279` `pointer_down`/`pointer_up` - which is where milestone 3/4 will assert the focus trap, initial focus, Escape and tab order, in this container. Nothing of the kind can be written today. | - |
+| keyboard | Real key delivery: the compositor routes the shortcut to `dev-console --finder`, and typing reaches the focused field on Wayland and on X11 | UNVERIFIED (owner desktop) | No input device, no seat, no focused surface here. | Bind `dev-console --finder` to a Hyprland key in the owner's Lua config, press it, then type into the query field |
+| opaque Finder rendering | Whether anything is actually painted: text rasterisation, shadows, the focus ring, hover, and the palette surviving a pointer crossing | UNVERIFIED (owner desktop) | `/dev/dri` is absent, there is no Vulkan ICD and no session, so no frame is ever composited here. The element trees above settle structure, never appearance. | `./Dev-Console.AppImage --finder`, then look at the mapped window: text, shadows, the focus ring, hover, and the palette as the pointer crosses the rows and leaves them |
+| portal folder selection | Milestone 1 lists portal folder selection as part of native feasibility | NOT BUILT | The Rune shell opens no file dialog at all: plan §3 (“File dialogs”) schedules the XDG portal replacement for the Tauri dialog plugin with the screens that need it, so neither this host nor the desktop can check it yet. | - |
+| portal folder selection | Whether a portal call survives without a portal - cancellation must leave the draft unchanged - and works with one | NOT BUILT | There is no dialog call to make. This row is here so that when the screens land, “cancelling leaves the draft unchanged” is checked rather than assumed, and is not mistaken for something this ledger already settled. | - |
+| secret hygiene | Masked values have nowhere to leak: no secret capability in the Finder's tree, and no field in either window state that can hold a secret value | HEADLESS-TEST | `no_finder_element_offers_a_secret_capability`, `no_window_state_can_hold_a_secret_value`, `fixtures_hold_synthetic_text_only` | - |
+| secret hygiene | The plan §3 early check for real: masked text staying out of accessibility values, element dumps, `Debug`, logs, screenshots and retained undo after dismissal | NOT BUILT | There is no secret editor in the Rune shell yet, and no secure text control is wired, so the guarantee plan §3 demands cannot be exercised on any host until the editor is ported. | - |
+
+## What releasing the UNVERIFIED rows takes
+
+Everything above `UNVERIFIED (owner desktop)` or `NOT BUILT` is settled inside this repository on this
+host. The rest needs the owner's session, with the AppImage this branch's `build` job publishes:
+
+```sh
+./Dev-Console.AppImage --finder
+hyprctl -j clients | jq -r '.clients[] | select(.title=="dev-console-finder") | [.title,.class,(.floating|tostring),.size]'
+```
+
+Then the AGENTS.md Finder checklist: open and dismiss repeatedly, move the pointer across the rows
+and out and back in, type a query, drive selection from the keyboard, press Escape, and confirm the
+Library and the tiled windows around it keep their layout. Nothing in this file claims any of that
+has happened; the rows say which command would make each one true.

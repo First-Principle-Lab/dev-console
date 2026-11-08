@@ -14,10 +14,16 @@
 //!
 //! ## Verified here, and not
 //!
-//! The icon buffer's shape and the menu's contents and ordering are unit-tested: they need no D-Bus.
+//! The icon buffer's shape, the menu's contents and ordering, and the mapping from a menu id to the
+//! behaviour it asks for are unit-tested: they need no D-Bus. That last mapping is [`menu_action`]
+//! rather than a match written inside the event closure precisely so it *can* be tested - a test can
+//! then walk the menu the tray host would be shown and prove every enabled item has a behaviour
+//! behind it, which no on-device check can substitute for and which an inline match would hide.
+//!
 //! Whether a real tray host shows the icon, whether the primary click is delivered as
-//! `TrayEvent::Activate` with a usable XDG activation token, and whether the menu's separators
-//! render as expected are all UNVERIFIED without a session bus with a watcher.
+//! `TrayEvent::Activate` with a usable XDG activation token, whether the menu's separators render as
+//! expected, and whether the host calls back at all are UNVERIFIED without a session bus with a
+//! watcher.
 
 use rune::{AppHandle, Tray, TrayError, TrayEvent, TrayIcon, TrayItem, TraySpec};
 
@@ -87,6 +93,37 @@ pub fn menu() -> Vec<TrayItem> {
     ]
 }
 
+/// What picking a menu id asks the resident process to do.
+///
+/// Plan §3 ("Tray") requires the current app's menu to survive the port, and every live entry in it
+/// to do something. Writing the id-to-behaviour rule as a function instead of a match inside the
+/// event closure is what makes that testable: the test
+/// `every_enabled_menu_item_has_an_action_and_every_disabled_one_is_pending`
+/// walks the menu the tray host would be shown and fails if an offered item has no behaviour, or if
+/// an item that is not offered yet already carries one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    /// Show and focus the Library window.
+    ShowLibrary,
+    /// Show and focus the Finder: what the tray is mostly for.
+    ShowFinder,
+    /// Quit the resident process.
+    Quit,
+    /// No behaviour behind this id yet. The two items milestone 2 has not wired land here, and so does
+    /// any id the host sends that this build does not know - which is reported, never swallowed.
+    Pending,
+}
+
+/// The behaviour a menu id asks for. See [`MenuAction`].
+pub fn menu_action(id: &str) -> MenuAction {
+    match id {
+        MENU_LIBRARY => MenuAction::ShowLibrary,
+        MENU_FINDER => MenuAction::ShowFinder,
+        MENU_QUIT => MenuAction::Quit,
+        _ => MenuAction::Pending,
+    }
+}
+
 /// Registers with the tray host, or explains why it could not and returns `None`.
 ///
 /// The returned `Tray` must be kept alive for as long as the tray should exist; dropping it
@@ -106,12 +143,16 @@ pub fn attach(library: &AppHandle<Library>, finder: &AppHandle<Finder>) -> Optio
             Some(token) => finder_on_event.activate(token),
             None => finder_on_event.open(),
         },
-        TrayEvent::Menu(id) => match id.as_str() {
-            MENU_LIBRARY => library_on_event.open(),
-            MENU_FINDER => finder_on_event.open(),
-            MENU_QUIT => library_on_event.quit(),
-            // Disabled items cannot be chosen; an id added later should not be silently ignored.
-            other => eprintln!("dev-console: unknown tray menu item {other:?}"),
+        TrayEvent::Menu(id) => match menu_action(&id) {
+            MenuAction::ShowLibrary => library_on_event.open(),
+            MenuAction::ShowFinder => finder_on_event.open(),
+            MenuAction::Quit => library_on_event.quit(),
+            // Disabled items cannot be chosen, so reaching this arm means an unknown id arrived:
+            // an item added to `menu` before its behaviour was written, or a host sending something
+            // this build does not know. Either way it is reported, never silently ignored.
+            MenuAction::Pending => {
+                eprintln!("dev-console: tray menu item {id:?} has no action in this build")
+            }
         },
         // `TrayEvent` is `#[non_exhaustive]`: a host event this build does not handle is reported
         // rather than dropped in silence.
@@ -222,5 +263,72 @@ mod tests {
             crate::APP_ID,
             "the tray entry, the app id and the desktop file must agree"
         );
+    }
+
+    /// The dispatcher's rule, spelled out. Plan §3 ("Tray") names the Library, the Finder, the vault
+    /// action, Settings and Quit as the menu; the first three of those have behaviour behind them
+    /// today, and the vault action and Settings wait for the services milestone 2 moves in.
+    #[test]
+    fn the_menu_action_mapping_names_the_wired_ids() {
+        assert_eq!(menu_action(MENU_LIBRARY), MenuAction::ShowLibrary);
+        assert_eq!(menu_action(MENU_FINDER), MenuAction::ShowFinder);
+        assert_eq!(menu_action(MENU_QUIT), MenuAction::Quit);
+        assert_eq!(menu_action(MENU_VAULT), MenuAction::Pending);
+        assert_eq!(menu_action(MENU_SETTINGS), MenuAction::Pending);
+        assert_eq!(
+            menu_action("an-item-this-build-does-not-know"),
+            MenuAction::Pending
+        );
+    }
+
+    /// The two halves of the tray contract have to move together: what the menu *offers*, and what the
+    /// dispatcher can *do*. Writing the mapping as a function is what lets this test cross-check them
+    /// on a host with no tray host at all, which matters because the failure it prevents is invisible
+    /// in every other headless gate - an item the owner sees on their desktop that only writes a line
+    /// to stderr when it is picked, or a behaviour written for an item nobody can pick yet.
+    #[test]
+    fn every_enabled_menu_item_has_an_action_and_every_disabled_one_is_pending() {
+        let mut enabled: Vec<String> = Vec::new();
+        let mut disabled: Vec<String> = Vec::new();
+        for item in menu() {
+            if let TrayItem::Action {
+                id,
+                enabled: is_enabled,
+                ..
+            } = item
+            {
+                if is_enabled {
+                    enabled.push(id);
+                } else {
+                    disabled.push(id);
+                }
+            }
+        }
+        let live: Vec<String> = [MENU_LIBRARY, MENU_FINDER, MENU_QUIT]
+            .iter()
+            .map(|id| (*id).to_owned())
+            .collect();
+        assert_eq!(
+            enabled,
+            live,
+            "plan §3 names Library, Finder and Quit as the tray's live actions; the vault action and \
+             Settings arrive with milestone 2's services, and an item enabled before its behaviour is \
+             written is a menu entry that does nothing"
+        );
+        for id in &enabled {
+            assert_ne!(
+                menu_action(id),
+                MenuAction::Pending,
+                "{id} is offered by the menu but the dispatcher has no behaviour for it"
+            );
+        }
+        for id in &disabled {
+            assert_eq!(
+                menu_action(id),
+                MenuAction::Pending,
+                "{id} is not offered yet, so a behaviour written for it is unreachable; enable the \
+                 item and wire the action in the same change"
+            );
+        }
     }
 }

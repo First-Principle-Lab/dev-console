@@ -31,6 +31,9 @@ to test it, and how to tell it is complete.
 - [`IMPLEMENTATION.md`](project/IMPLEMENTATION.md): implementation notes
 - [`COMPLETION_CHECKLIST.md`](project/COMPLETION_CHECKLIST.md): the acceptance contract (C01 to C24)
 - [`TEST_REPORT.md`](project/TEST_REPORT.md): verdict and evidence for each criterion
+- [`native-feasibility-ledger.md`](project/native-feasibility-ledger.md): which native-shell checks
+  this container decides, which only the owner's Hyprland/NVIDIA session can, and the command that
+  settles each one - gated by `cargo test -p dev-console-desktop --lib ledger_tests`
 - [`PROGRESS.md`](project/PROGRESS.md): progress log
 - [`HANDOFF.md`](project/HANDOFF.md): handoff notes
 - [`CLOUD_AGENT_PROMPT.md`](project/CLOUD_AGENT_PROMPT.md): the original agent brief

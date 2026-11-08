@@ -31,6 +31,17 @@ pub mod off_thread;
 pub mod tray;
 pub mod ui;
 
+/// The one source walk shared by the gates that read this repository's own files, so a walk that
+/// silently found nothing cannot make two of them pass at once.
+#[cfg(test)]
+mod source_scan;
+
+/// The gate over `docs/project/native-feasibility-ledger.md`, which is what checkpoint C1's evidence
+/// clause asks for: a named list of the plan §1 checks this container decides and the ones only the
+/// owner's Hyprland/NVIDIA session can decide.
+#[cfg(test)]
+mod ledger_tests;
+
 /// Application identity: the Wayland `app_id`, the StatusNotifierItem id, and the name the owner's
 /// Hyprland rules and `.desktop` file use. The window *title* is separate, and for the Finder it is
 /// `dev-console-finder` (see [`identity`]).
@@ -49,6 +60,8 @@ pub const USAGE: &str = "usage: dev-console [--finder | --library]";
 
 #[cfg(test)]
 mod tests {
+    use super::source_scan::rust_sources;
+
     /// AGENTS.md forbids hard-coded colours in view code, and checkpoint C5 asks for that rule
     /// to be proven by grep rather than asserted. This is that grep, kept as a test so it cannot
     /// rot: every colour a view paints has to come from a token set - `dev_console_core::theme`
@@ -107,28 +120,6 @@ mod tests {
             "view code must take colours from a token set, not write one out:\n{}",
             offenders.join("\n")
         );
-    }
-
-    /// Every `.rs` file under `root`, sorted, so a new view is covered without anyone
-    /// remembering to add it to a list.
-    fn rust_sources(root: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut queue = vec![root.to_string()];
-        while let Some(dir) = queue.pop() {
-            let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| {
-                panic!("cannot list {dir} (the colour scan needs it): {error}")
-            });
-            for entry in entries {
-                let path = entry.expect("a readable entry").path();
-                if path.is_dir() {
-                    queue.push(path.display().to_string());
-                } else if path.extension().is_some_and(|ext| ext == "rs") {
-                    out.push(path.display().to_string());
-                }
-            }
-        }
-        out.sort();
-        out
     }
 
     /// The first colour literal on a line, if it holds one.
