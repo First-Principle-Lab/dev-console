@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+- Add a standalone installer for the latest signed AppImage, with a user command, desktop launcher, icon, and optional authenticated-unlock helper.
+
 ## 0.0.11 — 2026-11-08
 
 - Refresh the product README with demo screenshots, installation steps, and keyboard shortcuts; move detailed development notes into the documentation.

@@ -1,7 +1,63 @@
 # Packaging and desktop integration
 
-Two installation paths exist, and both install the same five things: the binary, the launcher, the
-polkit policy, the helper the policy authorises, and the icons.
+## Standalone AppImage installer
+
+The root `install.sh` runs without a source checkout. It supports the published Linux
+x86_64 AppImage and requires `curl`, Python 3, and `minisign`. On Arch Linux:
+
+```bash
+sudo pacman -S --needed curl python minisign
+curl -fsSL https://raw.githubusercontent.com/First-Principle-Lab/dev-console/main/install.sh | sh
+```
+
+It discovers the latest version through the release manifest, then downloads the
+AppImage and its signature from that exact release tag. It verifies the signature
+with the application's embedded updater public key and checks the signed version
+before replacing an existing AppImage. Failed downloads or signature checks leave
+the existing installation untouched. The installer does not start the application.
+
+| Installed file | Default location |
+| --- | --- |
+| AppImage | `~/.local/share/dev-console/app/Dev-Console.AppImage` |
+| Command wrapper | `~/.local/bin/dev-console` |
+| Application launcher | `~/.local/share/applications/dev-console.desktop` |
+| Launcher icon | `~/.local/share/icons/hicolor/128x128/apps/dev-console.png` |
+
+`XDG_DATA_HOME` overrides `~/.local/share`. Paths containing spaces are supported.
+The wrapper forwards arguments such as `--finder` and launches the AppImage at its
+permanent path, where the in-app updater can replace it. Add `~/.local/bin` to your
+shell's `PATH` if needed. The desktop launcher uses an absolute command path.
+Rerunning the installer also installs the latest release. Quit and reopen a running
+instance to use the newly installed version.
+
+The default installation needs no administrator access. To install the optional
+authenticated-unlock integration as well:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/First-Principle-Lab/dev-console/main/install.sh | sh -s -- --with-auth-helper
+```
+
+This uses `sudo install` for `/usr/libexec/dev-console-auth-helper` and
+`/usr/share/polkit-1/actions/ai.codemate.devconsole.policy`. It never runs the
+downloaded AppImage as root. The helper and policy come from the same release tag.
+Without them, authenticated vault unlock remains unavailable. Clipboard support
+needs `wl-clipboard` on Wayland or `xclip` on X11. Secrets need a running Secret
+Service provider and authenticated unlock needs a desktop polkit agent.
+
+To remove this user installation, quit the app and remove the AppImage directory,
+command wrapper, desktop entry, and installer icon listed above. Keep the surrounding
+`dev-console` data directory to preserve commands, vault, and backups. Remove the
+two system files only if you installed the optional helper and no other Dev Console
+installation needs it. The app may also have refreshed its other icon sizes during
+normal use.
+
+`scripts/test-appimage-installer.py` runs the piped installer against locally signed
+fixtures in a disposable home directory. It checks repeat installs, release pinning,
+signature and network failures, argument forwarding, custom paths, and the optional
+helper without touching system paths. It requires `minisign`.
+
+Source and distribution package installations include the binary, launcher, polkit
+policy, authentication helper, and icons.
 
 ## Arch Linux
 

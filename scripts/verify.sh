@@ -40,6 +40,13 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 echo "== zsh environment directory hook =="
 python3 scripts/test-environment-hook.py
 
+echo "== standalone AppImage installer =="
+if command -v minisign >/dev/null; then
+  python3 scripts/test-appimage-installer.py
+else
+  echo "UNVERIFIED: minisign is required for the AppImage installer tests"
+fi
+
 echo "== keyring integration against a real Secret Service provider =="
 if [[ "${SKIP_KEYRING_TEST:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_KEYRING_TEST=1)"
