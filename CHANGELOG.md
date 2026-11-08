@@ -5,6 +5,11 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.11 — 2026-11-08
+
+- Refresh the product README with demo screenshots, installation steps, and keyboard shortcuts; move detailed development notes into the documentation.
+- Document the planned Arch Linux migration from Tauri/Svelte to Rune.
+
 ## 0.0.10 — 2026-11-07
 
 - Finder loads the same theme as Library and follows saved theme changes without restarting.
