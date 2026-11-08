@@ -9,6 +9,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 - Closing the finder while Dev Console is quitting finishes the quit at once instead of waiting out the five-second grace period.
 
+### Testing
+
+- `./scripts/verify.sh` now compiles and tests the whole Cargo workspace, so the native shell's headless gates (the runtime harness and the checkpoint gates over the shipped conventions) run in the same entrypoint as the rest instead of depending on a CI job that needs a token this repo cannot issue.
+
 ## 0.0.12 — 2026-11-08
 
 - Add a standalone installer for the latest signed AppImage, with a user command, desktop launcher, icon, and optional authenticated-unlock helper.

@@ -51,6 +51,14 @@ mod ledger_tests;
 #[cfg(test)]
 mod matrix_tests;
 
+/// Checkpoint C7 ("project fit and core principles") as commands rather than adjectives: the
+/// conventions that live in files - the opaque `dev-console-finder` identity, the tiled library, the
+/// WebKit default, the XDG names, the keyring pair, the 120 s and 64 KiB limits, the runtime-free
+/// workspace, typed form buttons, the `## Unreleased` section and the pinned toolkit rev - each
+/// asserted by reading the file a reviewer would open.
+#[cfg(test)]
+mod project_fit_tests;
+
 /// Application identity: the Wayland `app_id`, the StatusNotifierItem id, and the name the owner's
 /// Hyprland rules and `.desktop` file use. The window *title* is separate, and for the Finder it is
 /// `dev-console-finder` (see [`identity`]).

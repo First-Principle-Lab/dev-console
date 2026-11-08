@@ -32,15 +32,19 @@ echo "== browser E2E (runs against the IPC test double: proves UI behaviour only
 bunx playwright test
 echo "== cargo fmt --check =="
 # The domain layer moved to the root Cargo workspace (`crates/dev-console-core`), so the gate covers
-# both trees: the workspace and the standalone desktop package in `src-tauri`. `-p dev-console-core`
-# is what runs the storage/vault/backup unit tests that used to live inside `src-tauri`.
+# both trees: the workspace and the standalone desktop package in `src-tauri`. `--workspace` is what
+# runs the storage/vault/backup unit tests that used to live inside `src-tauri`, and it is what now
+# compiles and tests the native shell too (`dev-console-desktop`, `dev-console-ui-tests`): those
+# gates are headless by construction - the runtime is driven, never rendered - so they belong in the
+# same entrypoint as the rest, and a check nothing runs is a check that can rot. The render harness
+# is a different matter and still exits 77 (UNVERIFIED) on a host with no display.
 cargo fmt --all -- --check
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 echo "== clippy (warnings denied) =="
-cargo clippy -p dev-console-core --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 echo "== cargo test =="
-cargo test -p dev-console-core --locked
+cargo test --workspace --locked
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 echo "== zsh environment directory hook =="
