@@ -26,6 +26,10 @@ pub struct Look {
     pub line: Color,
     pub line_strong: Color,
     pub line_hair: Color,
+    /// The edge of a floating surface: `.surface-shell { border: var(--border-shell) }`.
+    pub line_shell: Color,
+    /// The 1px inner top highlight the floating surfaces carry (`--shell-edge`).
+    pub shell_edge: Color,
     pub fg: Color,
     pub muted: Color,
     pub dim: Color,
@@ -81,6 +85,8 @@ impl Look {
             line: c("--line"),
             line_strong: c("--line-strong"),
             line_hair: c("--line-hair"),
+            line_shell: c("--line-shell"),
+            shell_edge: c("--shell-edge"),
             fg: c("--fg"),
             muted: c("--fg-muted"),
             dim: c("--fg-dim"),
@@ -151,7 +157,10 @@ pub fn choices() -> Vec<(&'static str, String)> {
     out
 }
 
-/// `omarchy-tokyo-night` reads as "Omarchy: Tokyo Night"; `dark` as "Dark".
+/// A palette's display name, exactly as `OMARCHY_THEMES` in `src/lib/models.ts` pairs the slug with
+/// its human name: no brand prefix, title-cased words (`omarchy-tokyo-night` → "Tokyo Night",
+/// `omarchy-last-horizon` → "Last Horizon", `dark` → "Dark"), so both Settings pickers list the
+/// same names for the same palettes.
 pub fn label(name: &str) -> String {
     let title = |words: &str| {
         words
@@ -166,10 +175,7 @@ pub fn label(name: &str) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     };
-    match name.strip_prefix("omarchy-") {
-        Some(rest) => format!("Omarchy: {}", title(rest)),
-        None => title(name),
-    }
+    title(name.strip_prefix("omarchy-").unwrap_or(name))
 }
 
 /// The type scale from `tokens.css` (`--text-xs` .. `--text-xl`, the row and search sizes).
@@ -202,6 +208,8 @@ pub mod size {
     pub const RADIUS: f32 = 6.0;
     pub const RADIUS_LG: f32 = 10.0;
     pub const RADIUS_ROW: f32 = 8.0;
+    /// `--radius-shell`: the arc every floating surface (dialog, Settings sheet, palette) wears.
+    pub const RADIUS_SHELL: f32 = 14.0;
     pub const CONTROL_H: f32 = 30.0;
     pub const CONTROL_H_SM: f32 = 26.0;
     pub const ROW_H: f32 = 40.0;
@@ -244,7 +252,19 @@ mod tests {
     #[test]
     fn labels_read_as_the_settings_picker_shows_them() {
         assert_eq!(label("dark"), "Dark");
-        assert_eq!(label("omarchy-tokyo-night"), "Omarchy: Tokyo Night");
+        assert_eq!(label("light"), "Light");
+        assert_eq!(label("omarchy-tokyo-night"), "Tokyo Night");
+        assert_eq!(label("omarchy-catppuccin-latte"), "Catppuccin Latte");
+        assert_eq!(label("omarchy-last-horizon"), "Last Horizon");
+        assert_eq!(label("omarchy-matte-black"), "Matte Black");
+        assert_eq!(label("omarchy-rose-pine"), "Rose Pine");
+        assert_eq!(label("omarchy-vantablack"), "Vantablack");
+        for (_, text) in choices() {
+            assert!(
+                !text.contains("Omarchy"),
+                "the picker shows palette names, not the brand prefix: {text}"
+            );
+        }
         let choices = choices();
         assert_eq!(choices[0].0, SYSTEM);
         assert_eq!(

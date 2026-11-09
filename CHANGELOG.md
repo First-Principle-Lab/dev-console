@@ -12,6 +12,7 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ### Fixed
 
+- Paint native dialogs and the Settings sheet in the selected palette's shell surface instead of a raised surface, so a theme whose two shades differ (Kanagawa, Tokyo Night) no longer shows a dialog body in one colour and its footer in another. The native Settings theme list drops its `Omarchy: ` prefix and names palettes exactly as the shipped app does.
 - Reject late secret and recovery reveals after closing, cancelling, locking, switching tabs, or reopening Settings. Reload the Secrets tab after unlock and secure its editor before the first frame.
 - Keep modal footers and project actions reachable in narrow native windows, support Enter on history suggestions, and hide project import on the Secrets tab.
 - Preserve unsaved edits when quitting the native shell, and clear decrypted state and owned clipboard content before exit.

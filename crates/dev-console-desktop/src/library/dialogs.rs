@@ -13,6 +13,12 @@ use crate::theme::{size, text as ts, Look};
 use crate::widgets::{self, Tone, Variant};
 
 /// A modal panel over a scrim. `dismiss` is what Escape and a press outside the panel do.
+///
+/// The frame is `.surface-shell` (`Dialog.svelte`, `tokens.css`): `--shell-bg` fill, `--line-shell`
+/// edge, `--radius-shell` arc, the `--shadow-shell` elevation and the `--shell-edge` inner top
+/// highlight. One surface paints the whole panel, so the footer band carries only the hairline rule
+/// `.foot { border-top: var(--border-hair) }` draws - never its own fill, which would read as a
+/// second palette wherever `--bg-panel` and `--shell-bg` differ.
 pub fn shell(
     look: &Look,
     key: &str,
@@ -37,8 +43,7 @@ pub fn shell(
         .gap(size::SP2)
         .center_y()
         .px(size::SP4)
-        .py(size::SP3)
-        .fill(look.panel);
+        .py(size::SP3);
     for child in footer {
         actions = actions.child(child);
     }
@@ -50,11 +55,14 @@ pub fn shell(
         .max_w(if wide { 760.0 } else { 480.0 })
         .min_h(0.0)
         .shrink()
-        .radius(size::RADIUS_LG)
-        .clip_rounded(size::RADIUS_LG)
-        .fill(look.raised)
-        .border(1.0, look.line_strong)
-        .shadow(18.0, 48.0, rune::Color::BLACK.alpha(0.45))
+        .radius(size::RADIUS_SHELL)
+        .clip_rounded(size::RADIUS_SHELL)
+        .fill(look.shell)
+        .border(1.0, look.line_shell)
+        // `--shadow-shell`: 24px down, 60px blur, black at 45%.
+        .shadow(24.0, 60.0, rune::Color::BLACK.alpha(0.45))
+        // The `inset 0 1px 0 var(--shell-edge)` highlight of `.surface-shell`.
+        .child(el().h(1.0).w_full().fill(look.shell_edge))
         .child(
             row()
                 .w_full()
@@ -80,7 +88,7 @@ pub fn shell(
                 })
                 .child(content),
         )
-        .child(el().h(1.0).w_full().fill(look.line))
+        .child(el().h(1.0).w_full().fill(look.line_hair))
         .child(actions)
         .modal(true, dismiss);
     col()

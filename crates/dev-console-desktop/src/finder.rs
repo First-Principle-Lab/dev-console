@@ -663,6 +663,9 @@ fn feedback(state: &Finder, look: &Look) -> Option<El> {
     })
 }
 
+/// The hint row. Finder.svelte gives `footer` no background of its own - the palette's
+/// `--shell-bg` shows through and only `border-top: var(--border-hair)` separates it - so the band
+/// above is drawn by the caller and this row paints nothing.
 fn footer(state: &Finder, look: &Look) -> El {
     row()
         .key("finder-footer")
@@ -671,7 +674,6 @@ fn footer(state: &Finder, look: &Look) -> El {
         .px(size::SP3)
         .gap(size::SP3)
         .center_y()
-        .fill(look.panel)
         .child(widgets::hint(look, &["Up", "Down"], "select"))
         .child(widgets::hint(look, &["Tab"], "complete"))
         .child(widgets::hint(look, &["Enter"], "copy"))
