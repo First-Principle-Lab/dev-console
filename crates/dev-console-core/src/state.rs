@@ -30,7 +30,11 @@ pub struct AppState {
     /// Bumped whenever a detection becomes irrelevant - a new finder open, or a `Ctrl+P`.
     /// Detection runs beside the palette, so its answer can arrive after the thing it was
     /// answering for is gone; a result is only applied while its token is still current.
-    pub finder_detection: std::sync::atomic::AtomicU64,
+    ///
+    /// This is one [`Ledger`](crate::freshness::Ledger) rather than a hand-rolled counter, because
+    /// it is the same question every background answer has to answer ("am I still the newest?"), and
+    /// the general form of it lives in [`crate::freshness`].
+    pub finder_detection: crate::freshness::Ledger,
 }
 
 /// Clipboard owner id for a recovery-credential copy. It identifies *which* copy the app owns
@@ -66,7 +70,7 @@ impl AppState {
             journal: ReplacementJournal::new(crate::paths::interrupted_apply_dir()?)?,
             quitting: std::sync::atomic::AtomicBool::new(false),
             finder_context: Mutex::new(None),
-            finder_detection: std::sync::atomic::AtomicU64::new(0),
+            finder_detection: crate::freshness::Ledger::new(),
         };
         // A replacement that was interrupted between its two writes is settled here, inside
         // bootstrap. Nothing is exposed until this returns: the caller cannot manage the state,
@@ -205,10 +209,7 @@ impl AppState {
     /// Starts a detection round for the finder that is about to open: whatever the last one
     /// decided is dropped, and the returned token is the only one allowed to replace it.
     pub fn begin_finder_detection(&self) -> u64 {
-        let token = self
-            .finder_detection
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
+        let token = self.finder_detection.issue();
         self.set_finder_context(None);
         token
     }
@@ -217,7 +218,7 @@ impl AppState {
     /// True when the value given is now the current one, which is also whether the palette should
     /// hear about it.
     pub fn finish_finder_detection(&self, token: u64, context: Option<FinderContext>) -> bool {
-        if self.current_finder_token() != token {
+        if !self.finder_detection.is_current(token) {
             return false;
         }
         self.set_finder_context(context);
@@ -227,12 +228,8 @@ impl AppState {
     /// Invalidates a detection in flight and forgets the project: what `Ctrl+P` does. The next
     /// open looks again.
     pub fn cancel_finder_detection(&self) {
-        self.begin_finder_detection();
-    }
-
-    fn current_finder_token(&self) -> u64 {
-        self.finder_detection
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.finder_detection.abandon();
+        self.set_finder_context(None);
     }
 
     /// Applies an already-validated archive to both stores.
@@ -481,7 +478,7 @@ mod tests {
                 journal: ReplacementJournal::new(base.join("pending-replace")).expect("journal"),
                 quitting: std::sync::atomic::AtomicBool::new(false),
                 finder_context: Mutex::new(None),
-                finder_detection: std::sync::atomic::AtomicU64::new(0),
+                finder_detection: crate::freshness::Ledger::new(),
             }
         }
 

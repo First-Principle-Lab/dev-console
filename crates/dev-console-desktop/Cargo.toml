@@ -1,0 +1,30 @@
+[package]
+name = "dev-console-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Native Rune shell for Dev Console: Library and Finder windows, tray, single instance and control-socket wakeups."
+publish = false
+
+# The plan (§1) says this crate produces the existing `dev-console` executable. The library target
+# exists so `dev-console-ui-tests` can drive the same views and window specs the binary uses.
+[lib]
+name = "dev_console_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dev-console"
+path = "src/main.rs"
+
+[dependencies]
+dev-console-core = { path = "../dev-console-core" }
+rune = { workspace = true }
+rune-kit = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

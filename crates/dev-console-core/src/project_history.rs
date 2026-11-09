@@ -213,10 +213,13 @@ pub fn refresh_installed_zsh_hook() -> AppResult<()> {
 fn write_zsh_hook() -> AppResult<PathBuf> {
     let config = crate::paths::ensure_dir(&crate::paths::config_dir()?)?;
     let client = config.join("history-client.py");
-    crate::settings::atomic_write(&client, include_bytes!("../../scripts/history-client.py"))?;
+    crate::settings::atomic_write(
+        &client,
+        include_bytes!("../../../scripts/history-client.py"),
+    )?;
     let hook = config.join("shell-history.zsh");
     let quote = |s: &str| format!("'{}'", s.replace('\'', "'\"'\"'"));
-    let source = include_str!("../../scripts/shell-history.zsh")
+    let source = include_str!("../../../scripts/shell-history.zsh")
         .replace("__DEV_CONSOLE_CLIENT__", &quote(&client.to_string_lossy()));
     crate::settings::atomic_write(&hook, source.as_bytes())?;
     Ok(hook)

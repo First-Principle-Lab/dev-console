@@ -82,6 +82,19 @@ translucent layer over the surface it is painted on and checks 76 real pairings 
 `tests/unit/contrast.test.ts` runs it inside `bun run test`, so a token retune that breaks
 contrast fails the gate.
 
+The native app reads the same palette from Rust rather than from CSS.
+`crates/dev-console-core/src/theme/` carries the 52 shared tokens and the 24 palettes as generated
+tables, the same 76 pairings at the same 4.5:1 / 3.0:1 thresholds, and the same 27 exemptions with
+their reasons. `python3 scripts/generate-theme-data.py` regenerates those tables from
+`src/styles/tokens.css`, `src/styles/omarchy.css` and `scripts/contrast-check.mjs` (it fails loudly if
+a block renames or drops a token rather than reporting a palette it cannot check); `--report` prints
+what it parsed without writing. Two rules keep the port honest instead of merely similar:
+`theme::inventory` re-reads both stylesheets in the test run and fails if a generated row no longer
+matches it, and the audit tests pin all 76 pairings and the measured minima against the Node script's
+own numbers, so a pairing cannot quietly vanish from the Rust side. If the CSS palette is retuned,
+regenerate and re-run `bun run check:contrast` in the same change; if they disagree, fix the port, not
+the numbers. The Rust tables are not a second source of truth - the stylesheets stay it.
+
 Settings includes the 22 stock Omarchy themes installed on this host. Their colors are
 snapshotted in `src/styles/omarchy.css` and can be refreshed with
 `python scripts/generate-omarchy-themes.py /path/to/omarchy/themes`. The generated roles retain
@@ -159,9 +172,26 @@ src/                 Svelte 5 frontend (tokens.css is the only source of colour/
                      ExtraFields, Icon, Keycap, ProjectImport, SettingsPanel, StatusLine, Tabs,
                      VaultStatus
   windows/           Library.svelte, Finder.svelte
-src-tauri/src/       Rust: repository (SQLite), vault (age), keyring, auth (polkit), backup,
-                     clipboard, control (Unix socket), execution, ipc, projects (task scan), search,
-                     settings, tray
+crates/              Cargo workspace: the domain layer and the native Rune port
+  dev-console-core/  Rust domain: models, paths, repository (SQLite), vault (age), keyring,
+                     auth (polkit), backup, recovery, clipboard, context, environment, execution,
+                     history, import, project_history, projects (task scan), search, settings,
+                     state (the `AppState` service container), services (the two typed surfaces a
+                     UI calls - `LibraryActions` / `FinderActions` - and the `Effects` they return),
+                     freshness (the ledger a background answer is checked against before a window
+                     may paint it) and testing (the scratch-profile fixture the workspace tests
+                     share)
+  dev-console-desktop/  Rune app windows, tray, control socket, CLI (not the shipped app yet):
+                        app/identity (window specs, titles, sizes, exit codes), off_thread (a
+                        blocking call on a Rune worker, its answer guarded by core's `freshness`),
+                        instance (single-instance lock + control socket), tray, ui (the state the
+                        views draw - still placeholders until plan milestone 4)
+  dev-console-ui-tests/ scripted element-tree and state-transition tests for the Rune views
+src-tauri/src/       Tauri desktop runtime around the core crate: lib (app setup), windows
+                     (show/hide/focus, launch intent, relaunch), tray (native menu), ipc (one thin
+                     adapter per command: guard the window, call the service, dispatch the effects),
+                     effects (the only place an event is emitted or a window action performed),
+                     control (Unix socket + CLI replies), cli (intents), autostart, desktop_icons
 src-tauri/tests/     native backend integration tests (no test doubles)
 scripts/             verification harnesses (each exits 77 when the environment is missing)
 packaging/           desktop entry, polkit policy + helper, install script, arch PKGBUILD

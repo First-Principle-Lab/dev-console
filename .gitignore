@@ -27,3 +27,6 @@ coverage/
 .DS_Store
 *.swp
 *.swo
+
+# Cargo workspace build output (Rune migration workspace)
+/target/

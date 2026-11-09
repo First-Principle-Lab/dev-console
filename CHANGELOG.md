@@ -5,6 +5,22 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+
+- Port Library, Finder, entry editing, project import, environment versions, history suggestions, and Settings to the staged Rune shell. Production continues to use Tauri while the remaining migration milestones are completed.
+- Add native scripted UI tests over disposable encrypted profiles and a live Hyprland check with synthetic entries, repeated Finder opens, hover, keyboard copy, tray Quit, and clipboard cleanup.
+
+### Fixed
+
+- Reject late secret and recovery reveals after closing, cancelling, locking, switching tabs, or reopening Settings. Reload the Secrets tab after unlock and secure its editor before the first frame.
+- Keep modal footers and project actions reachable in narrow native windows, support Enter on history suggestions, and hide project import on the Secrets tab.
+- Preserve unsaved edits when quitting the native shell, and clear decrypted state and owned clipboard content before exit.
+- Closing the finder while Dev Console is quitting finishes the quit at once instead of waiting out the five-second grace period.
+
+### Testing
+
+- Run Cargo workspace formatting, Clippy, and tests in CI alongside the existing Tauri checks. Isolate the native test fixtures' XDG directories as well as their home directory.
+
 ## 0.0.12 — 2026-11-08
 
 - Add a standalone installer for the latest signed AppImage, with a user command, desktop launcher, icon, and optional authenticated-unlock helper.

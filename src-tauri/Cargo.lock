@@ -1067,6 +1067,25 @@ dependencies = [
 name = "dev-console"
 version = "0.0.1"
 dependencies = [
+ "dev-console-core",
+ "libc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tempfile",
+ "time",
+ "uuid",
+]
+
+[[package]]
+name = "dev-console-core"
+version = "0.0.1"
+dependencies = [
  "age",
  "keyring",
  "libc",
@@ -1075,13 +1094,6 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "sha2 0.10.9",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tempfile",
  "thiserror 2.0.21",
  "time",
  "uuid",

@@ -1,87 +1,119 @@
+//! The IPC surface: one thin adapter per command, and nothing else (plan section 3).
+//!
+//! Every handler here does three things, in this order:
+//!
+//!   1. decides which *service surface* the calling window may drive - [`library`] hands over the
+//!      privileged one and refuses everybody else's window with the message naming that window,
+//!      [`palette`] hands over the palette's, which is the whole of what a window other than the
+//!      library may reach;
+//!   2. calls the service, which returns a value plus the [`Effects`] it wants the runtime to carry
+//!      out; and
+//!   3. dispatches those effects ([`crate::effects`]): events to the windows named by their variant,
+//!      window actions, and one tray refresh.
+//!
+//! There is deliberately no business rule in this file. What a call means - the revision check that
+//! makes a stale pin fail, the vault authorisation a backup goes through, the order the reload event
+//! and the vault event go out in - lives in `dev-console_core::services`, so the same answers hold
+//! for the native (Rune) shell that replaces this file, and so there is one implementation of each
+//! rule to audit rather than one per UI. The `#[cfg(test)]` suites in `src-tauri/tests` drive these
+//! commands through Tauri's own invoke path, so what is pinned here is the wire contract: the
+//! command names, the argument names, the response shapes and the error strings the webview reads.
+
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 use crate::error::{AppError, AppResult};
-use crate::models::*;
-use crate::repository::validate_draft;
+use crate::models::{
+    AppStateInfo, BackupOutcome, CopyRequest, CopyResult, DeleteRequest, EntryDetails, EntryMeta,
+    GetRequest, ImportProjectRequest, KindRequest, ListRequest, OpenLibraryRequest, PinRequest,
+    RunRequest, SaveRequest, SavedEntry, ScanProjectRequest, SearchRequest, SearchResponse,
+    Settings, VaultState,
+};
+use crate::services::{Effects, FinderActions, LibraryActions, Surface};
 use crate::state::AppState;
-use crate::{execution, history, search, tray, windows};
-
-/// Frontend windows are untrusted. Every privileged operation is re-checked here against the
-/// calling window label, so the restriction does not depend on hidden buttons or on the
-/// capability file alone.
-fn require_library<R: Runtime>(window: &WebviewWindow<R>) -> AppResult<()> {
-    match window.label() {
-        windows::LIBRARY => Ok(()),
-        other => Err(AppError::Forbidden(other.to_string())),
-    }
-}
+use crate::{autostart, effects};
+use crate::{execution, history, projects};
 
 fn state<R: Runtime>(app: &AppHandle<R>) -> Arc<AppState> {
     app.state::<Arc<AppState>>().inner().clone()
 }
 
-fn emit_entries_changed<R: Runtime>(
-    app: &AppHandle<R>,
-    payload: &SavedEntry,
-    operation: &'static str,
-) {
-    let event = EntriesChanged {
-        kind: payload.kind,
-        id: payload.id.clone(),
-        revision: payload.revision,
-        operation,
-        vault_generation: app.state::<Arc<AppState>>().vault.generation(),
-    };
-    let _ = app.emit("entries-changed", event);
+fn version<R: Runtime>(app: &AppHandle<R>) -> String {
+    app.package_info().version.to_string()
 }
 
-fn emit_vault_state<R: Runtime>(app: &AppHandle<R>) {
-    let vault = state(app).vault.state();
-    let _ = app.emit("vault-state-changed", vault);
+/// Which window is calling, as the services name it. The label is the only identity a webview has
+/// here, and `Surface::from_label` is what turns it into "library", "finder" or "somebody else".
+fn surface<R: Runtime>(window: &WebviewWindow<R>) -> Surface {
+    Surface::from_label(window.label())
 }
+
+/// The privileged surface, or the refusal naming the window that tried.
+///
+/// Every command that can change data, decrypt, execute or export goes through this, so the guard is
+/// one function instead of one `if` per handler - and a handler that forgets it is a visible bug in
+/// the window-permission test rather than a plausible-looking omission.
+fn library<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> AppResult<LibraryActions> {
+    surface(window).require_library()?;
+    Ok(LibraryActions::new(state(app), &version(app)))
+}
+
+/// The palette surface, which is also what answers the commands *both* windows may call: the shared
+/// read model, the copy path, the vault lock, and a window's own hide or quit. Building the palette's
+/// actions rather than the library's for those is what keeps "the palette cannot reach a privileged
+/// operation" true by construction: no handler for a shared command holds a privileged value at all.
+fn palette<R: Runtime>(app: &AppHandle<R>) -> FinderActions {
+    FinderActions::new(state(app), &version(app))
+}
+
+/// Runs a call that produces effects, then applies them whether or not the call succeeded: a refused
+/// unlock has still locked the vault away from the windows and has to say so.
+fn with_effects<T, R: Runtime>(
+    app: &AppHandle<R>,
+    call: impl FnOnce(&mut Effects) -> AppResult<T>,
+) -> AppResult<T> {
+    let mut effects = Effects::default();
+    let value = call(&mut effects);
+    effects::finish(value, effects::dispatch(app, effects))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The read model both windows may use
+// ---------------------------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn app_state<R: Runtime>(app: AppHandle<R>) -> AppStateInfo {
-    AppStateInfo {
-        vault: state(&app).vault.state(),
-        version: app.package_info().version.to_string(),
-        authenticated_unlock_available: crate::auth::mechanism_available(),
-        clipboard_exclusion: crate::clipboard::exclusion_status(),
-        backup_dir: state(&app).backups.dir().to_string_lossy().to_string(),
-        // Also sent to the library, which ignores it: it is the answer to "what is this palette
-        // ranking by?", and a window created after the detection thread answered still needs it.
-        finder_context: state(&app).active_finder_context(),
-    }
+    palette(&app).app_state()
 }
 
 #[tauri::command]
 pub fn search_entries<R: Runtime>(app: AppHandle<R>, request: SearchRequest) -> SearchResponse {
-    let state = state(&app);
-    let entries = state.searchable_metadata(None);
-    let context = state.active_finder_context();
-    let results = search::rank_in_context(
-        &entries,
-        &request.query,
-        request.limit.unwrap_or(search::DEFAULT_LIMIT),
-        context.as_ref(),
-    );
-    SearchResponse {
-        request_id: request.request_id,
-        vault_generation: state.vault.generation(),
-        results,
-    }
+    palette(&app).search_entries(request)
 }
 
-/// Drops the detected project for as long as the palette stays open (`Ctrl+P`, or clicking the
-/// chip). A detection still in flight is invalidated too, so the chip cannot reappear a moment
-/// after the user got rid of it; the next open looks again.
+/// `Ctrl+P`, or clicking the chip: forget the project the palette was ranked against, including a
+/// detection that has not answered yet.
 #[tauri::command]
 pub fn clear_finder_context<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
-    state(&app).cancel_finder_detection();
-    Ok(())
+    palette(&app).clear_finder_context()
 }
+
+#[tauri::command]
+pub fn get_theme<R: Runtime>(app: AppHandle<R>) -> String {
+    palette(&app).get_theme()
+}
+
+/// Copying is allowed from either window; the value never crosses back into a window, so what the
+/// palette may not do - read a secret - stays true.
+#[tauri::command]
+pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppResult<CopyResult> {
+    palette(&app).copy_entry(request)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Entries: library only
+// ---------------------------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn list_entries<R: Runtime>(
@@ -89,72 +121,18 @@ pub fn list_entries<R: Runtime>(
     window: WebviewWindow<R>,
     request: ListRequest,
 ) -> AppResult<Vec<EntryMeta>> {
-    require_library(&window)?;
-    let state = state(&app);
-    match request.kind {
-        Kind::Command => {
-            let mut entries = state
-                .repo
-                .list_commands(&request.query.clone().unwrap_or_default())?;
-            if let Some(entry_type) = &request.entry_type {
-                entries.retain(|e| e.entry_type.eq_ignore_ascii_case(entry_type));
-            }
-            if let Some(tag) = &request.tag {
-                let tag = tag.to_lowercase();
-                entries.retain(|e| e.tags.iter().any(|t| t.to_lowercase().starts_with(&tag)));
-            }
-            Ok(entries)
-        }
-        Kind::Secret => {
-            // Metadata never leaves the vault while it is locked.
-            let all = state.vault.list_secrets()?;
-            let query = request.query.unwrap_or_default().to_lowercase();
-            let entry_type = request.entry_type.unwrap_or_default().to_lowercase();
-            let tag = request.tag.unwrap_or_default().to_lowercase();
-            Ok(all
-                .into_iter()
-                .filter(|e| {
-                    query.is_empty()
-                        || e.name.to_lowercase().contains(&query)
-                        || e.entry_type.to_lowercase().contains(&query)
-                        || e.description.to_lowercase().contains(&query)
-                        || e.tags.iter().any(|t| t.to_lowercase().contains(&query))
-                })
-                .filter(|e| {
-                    entry_type.is_empty() || e.entry_type.to_lowercase().starts_with(&entry_type)
-                })
-                .filter(|e| {
-                    tag.is_empty() || e.tags.iter().any(|t| t.to_lowercase().starts_with(&tag))
-                })
-                .collect())
-        }
-    }
+    library(&app, &window)?.list_entries(request)
 }
 
+/// The type-ahead for the filter row. `AppState::types` decides that a store it cannot read simply
+/// contributes nothing, so the only thing this call can fail with is the window guard.
 #[tauri::command]
 pub fn types_for<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: KindRequest,
 ) -> AppResult<Vec<String>> {
-    require_library(&window)?;
-    Ok(state(&app).types(request.kind))
-}
-
-fn details_from(record: &EntryRecord, approved: bool, include_value: bool) -> EntryDetails {
-    EntryDetails {
-        meta: record.meta(0, None),
-        command: if record.kind == Kind::Command {
-            Some(record.command.clone())
-        } else {
-            None
-        },
-        working_directory: record.working_directory.clone(),
-        notes: record.notes.clone(),
-        fields: record.fields.clone(),
-        value: include_value.then(|| record.value.clone()),
-        execution_approved: approved,
-    }
+    Ok(library(&app, &window)?.types_for(request))
 }
 
 #[tauri::command]
@@ -163,51 +141,17 @@ pub fn get_entry<R: Runtime>(
     window: WebviewWindow<R>,
     request: GetRequest,
 ) -> AppResult<EntryDetails> {
-    require_library(&window)?;
-    let state = state(&app);
-    match request.kind {
-        Kind::Command => {
-            let (record, usage, last) = state
-                .repo
-                .get_command(&request.id)?
-                .ok_or(AppError::NotFound)?;
-            let mut details = details_from(&record, state.repo.approval_state(&record)?, false);
-            details.meta.usage_count = usage;
-            details.meta.last_used_at = last;
-            Ok(details)
-        }
-        Kind::Secret => {
-            let record = state.vault.get(&request.id)?;
-            let usage = state.vault.read(|file| {
-                Ok(file
-                    .usage
-                    .iter()
-                    .find(|u| u.id == record.id)
-                    .map(|u| (u.count, u.last_used_at.clone()))
-                    .unwrap_or((0, None)))
-            })?;
-            let mut details = details_from(&record, false, false);
-            details.meta.usage_count = usage.0;
-            details.meta.last_used_at = usage.1;
-            Ok(details)
-        }
-    }
+    library(&app, &window)?.get_entry(request)
 }
 
-/// Explicit reveal. The value only ever leaves through this call or a native copy.
+/// The one call that hands a decrypted value to a window, and only ever to the library.
 #[tauri::command]
 pub fn reveal_secret<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: GetRequest,
 ) -> AppResult<EntryDetails> {
-    require_library(&window)?;
-    let state = state(&app);
-    if request.kind != Kind::Secret {
-        return Err(AppError::Validation("only secrets can be revealed".into()));
-    }
-    let record = state.vault.get(&request.id)?;
-    Ok(details_from(&record, false, true))
+    library(&app, &window)?.reveal_secret(request)
 }
 
 #[tauri::command]
@@ -216,24 +160,10 @@ pub fn save_entry<R: Runtime>(
     window: WebviewWindow<R>,
     request: SaveRequest,
 ) -> AppResult<SavedEntry> {
-    require_library(&window)?;
-    let state = state(&app);
-    let mut draft = request.draft;
-    validate_draft(&mut draft)?;
-    let saved = match draft.kind {
-        Kind::Command => state.repo.save_command(&mut draft)?,
-        Kind::Secret => state.vault.save(&mut draft)?,
-    };
-    emit_entries_changed(
-        &app,
-        &saved,
-        if draft.id.is_none() {
-            "created"
-        } else {
-            "updated"
-        },
-    );
-    Ok(saved)
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| {
+        actions.save_entry(request, effects).map(|saved| saved.0)
+    })
 }
 
 #[tauri::command]
@@ -242,43 +172,8 @@ pub fn set_pinned<R: Runtime>(
     window: WebviewWindow<R>,
     request: PinRequest,
 ) -> AppResult<SavedEntry> {
-    require_library(&window)?;
-    let state = state(&app);
-    let saved = match request.kind {
-        Kind::Command => {
-            state
-                .repo
-                .set_command_pinned(&request.id, request.expected_revision, request.pinned)?
-        }
-        Kind::Secret => {
-            state
-                .vault
-                .set_pinned(&request.id, request.expected_revision, request.pinned)?
-        }
-    };
-    emit_entries_changed(&app, &saved, "updated");
-    Ok(saved)
-}
-
-/// Opens an http(s) link from a URL field in the user's default browser. Anything else is
-/// rejected so a stored value can never launch an arbitrary scheme or program.
-#[tauri::command]
-pub fn open_url<R: Runtime>(window: WebviewWindow<R>, url: String) -> AppResult<()> {
-    require_library(&window)?;
-    let url = url.trim();
-    if !crate::repository::is_http_url(url) || url.starts_with('-') {
-        return Err(AppError::Validation(
-            "only http(s) links can be opened".into(),
-        ));
-    }
-    std::process::Command::new("xdg-open")
-        .arg(url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| AppError::Other(format!("could not open the browser: {e}")))
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| actions.set_pinned(request, effects))
 }
 
 #[tauri::command]
@@ -287,329 +182,143 @@ pub fn delete_entry<R: Runtime>(
     window: WebviewWindow<R>,
     request: DeleteRequest,
 ) -> AppResult<()> {
-    require_library(&window)?;
-    let state = state(&app);
-    match request.kind {
-        Kind::Command => state
-            .repo
-            .delete_command(&request.id, request.expected_revision)?,
-        Kind::Secret => state.vault.delete(&request.id, request.expected_revision)?,
-    };
-    emit_entries_changed(
-        &app,
-        &SavedEntry {
-            id: request.id,
-            revision: 0,
-            kind: request.kind,
-        },
-        "deleted",
-    );
-    Ok(())
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| actions.delete_entry(request, effects))
 }
 
-/// Copies the *saved* record, never a draft, and re-checks vault access while holding the
-/// vault lock so a queued copy cannot complete after a lock was acknowledged.
-#[tauri::command]
-pub fn copy_entry<R: Runtime>(app: AppHandle<R>, request: CopyRequest) -> AppResult<CopyResult> {
-    // No window guard here on purpose: both windows may copy; privileged editing and
-    // execution are library-only via require_library in their own handlers.
-    let state = state(&app);
-    let expiry = state.settings.get().clipboard_expiry_seconds;
-    match request.kind {
-        Kind::Command => {
-            let (record, _, _) = state
-                .repo
-                .get_command(&request.id)?
-                .ok_or(AppError::NotFound)?;
-            if request.expected_revision != 0 && request.expected_revision != record.revision {
-                return Err(AppError::Conflict);
-            }
-            let result =
-                state
-                    .clipboard
-                    .copy(Kind::Command, &record.id, &record.command, expiry)?;
-            state.repo.record_usage(&record.id)?;
-            Ok(result)
-        }
-        Kind::Secret => {
-            let result = state.vault.read(|file| {
-                let record = file
-                    .records
-                    .iter()
-                    .find(|r| r.id == request.id && r.kind == Kind::Secret)
-                    .ok_or(AppError::NotFound)?;
-                if request.expected_revision != 0 && request.expected_revision != record.revision {
-                    return Err(AppError::Conflict);
-                }
-                // The native copy happens inside the vault guard.
-                state
-                    .clipboard
-                    .copy(Kind::Secret, &record.id, &record.value, expiry)
-            })?;
-            let _ = state.vault.record_usage(&request.id);
-            Ok(result)
-        }
-    }
-}
-
+/// Copies the command output panel, capped at what execution was allowed to capture.
 #[tauri::command]
 pub fn copy_command_output<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     text: String,
 ) -> AppResult<CopyResult> {
-    require_library(&window)?;
-    if text.is_empty() || text.len() > 64 * 1024 {
-        return Err(AppError::Validation(
-            "command output is empty or too large to copy".into(),
-        ));
-    }
-    let state = state(&app);
-    let expiry = state.settings.get().clipboard_expiry_seconds;
-    state
-        .clipboard
-        .copy(Kind::Command, "command-output", &text, expiry)
+    library(&app, &window)?.copy_command_output(text)
 }
 
+/// Runs a saved command off the async runtime's worker pool, as it has always been: a command that
+/// needs a terminal spawns one and returns immediately, and anything else is waited on here with the
+/// timeout and the output cap the core applies.
 #[tauri::command]
 pub async fn run_command<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: RunRequest,
 ) -> AppResult<execution::RunResult> {
-    require_library(&window)?;
-    let state = state(&app);
-    let (record, _, _) = state
-        .repo
-        .get_command(&request.id)?
-        .ok_or(AppError::NotFound)?;
-    if request.expected_revision != 0 && request.expected_revision != record.revision {
-        return Err(AppError::Conflict);
-    }
-    if !request.approved {
-        return Err(AppError::ApprovalRequired);
-    }
-    if !state.repo.approval_state(&record)? {
-        state.repo.approve_execution(&record)?;
-    }
-    let record_id = record.id.clone();
-    let result = if execution::needs_terminal(&record.command) {
-        execution::execute(&state.settings.get().terminal, &record, "/bin/sh")?;
-        execution::RunResult {
-            mode: "terminal",
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: None,
-            truncated: false,
-            timed_out: false,
-        }
-    } else {
-        tauri::async_runtime::spawn_blocking(move || execution::execute_inline(&record, "/bin/sh"))
-            .await
-            .map_err(|error| AppError::Execution(format!("command task failed: {error}")))??
-    };
-    state.repo.record_usage(&record_id)?;
-    Ok(result)
+    let actions = library(&app, &window)?;
+    tauri::async_runtime::spawn_blocking(move || actions.run_command(request))
+        .await
+        .map_err(|error| AppError::Execution(format!("command task failed: {error}")))?
 }
+
+/// An http(s) link from a URL field, and nothing else. The rule lives with the services so the
+/// native shell refuses the same set of links.
+#[tauri::command]
+pub fn open_url<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    url: String,
+) -> AppResult<()> {
+    library(&app, &window)?.open_url(url)
+}
+
+// ---------------------------------------------------------------------------------------------
+// The vault, which both windows may drive
+// ---------------------------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn lock_vault<R: Runtime>(app: AppHandle<R>) -> AppResult<VaultState> {
-    let state = state(&app);
-    // Order matters: secrets stop being readable first, then any app-owned clipboard copy.
-    state.vault.lock()?;
-    state.clipboard.clear_owned();
-    emit_vault_state(&app);
-    let vault = state.vault.state();
-    let _ = tray::refresh_menu(&app);
-    Ok(vault)
+    let actions = palette(&app);
+    with_effects(&app, |effects| actions.lock_vault(effects))
 }
 
 #[tauri::command]
 pub fn unlock_vault<R: Runtime>(app: AppHandle<R>) -> AppResult<VaultState> {
-    let state = state(&app);
-    state.vault.unlock()?;
-    // A replacement that startup could not settle (no readable keyring then) gets another turn
-    // now that the credential is definitely available. Until it succeeds the secret store stays
-    // shut: the two stores might otherwise disagree about which library is live.
-    match state.reconcile_interrupted_replacement() {
-        Ok(Some(report)) => {
-            eprintln!("dev-console: {}", report.message());
-            emit_reload_all(&app);
-        }
-        Ok(None) => {}
-        Err(error) => {
-            let reason = error.to_string();
-            state.vault.quarantine(&reason);
-            emit_vault_state(&app);
-            let _ = tray::refresh_menu(&app);
-            return Err(AppError::VaultUnavailable(reason));
-        }
-    }
-    emit_vault_state(&app);
-    let vault = state.vault.state();
-    let _ = tray::refresh_menu(&app);
-    Ok(vault)
+    let actions = palette(&app);
+    with_effects(&app, |effects| actions.unlock_vault(effects))
 }
 
+// ---------------------------------------------------------------------------------------------
+// Windows: handoffs, hiding, and the quit
+// ---------------------------------------------------------------------------------------------
+
+/// The palette's `Enter`: hand the entry to the library window. Refused from the library itself, and
+/// the refusal names the window that asked, which is how the frontend reports it.
 #[tauri::command]
 pub fn open_library<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: OpenLibraryRequest,
 ) -> AppResult<()> {
-    if window.label() != windows::FINDER {
-        return Err(AppError::Forbidden(window.label().to_string()));
-    }
-    windows::show_library_with(&app, request.kind, request.entry_id)
+    let command = palette(&app).open_library(surface(&window), request.kind, request.entry_id)?;
+    effects::dispatch(&app, effects::window_command(command))
 }
 
+/// `Escape`. Each window may hide itself; nothing else about the resident app changes.
 #[tauri::command]
-pub fn hide_self<R: Runtime>(window: WebviewWindow<R>) -> AppResult<()> {
-    windows::hide(&window)
+pub fn hide_self<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    let command = palette(&app).hide_self(surface(&window));
+    effects::dispatch(&app, effects::window_command(command))
 }
 
-/// Emitted when a window asks to close; the frontend resolves unsaved edits first and then
-/// calls this, which is the only path that actually hides a window on close.
+/// Emitted when a window asks to close; the frontend resolves unsaved edits first and then calls
+/// this, which is the only path that actually hides a window on close - or finishes a quit that the
+/// close was the last answer to.
 #[tauri::command]
-pub fn allow_close<R: Runtime>(window: WebviewWindow<R>, app: AppHandle<R>) -> AppResult<()> {
-    if state(&app)
-        .quitting
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
-        return windows::finish_quit(&app);
-    }
-    windows::hide(&window)
+pub fn allow_close<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    let command = palette(&app).allow_close(surface(&window));
+    effects::dispatch(&app, effects::window_command(command))
 }
 
+/// The user chose to stay: the quit's countdown is cancelled. Library only, because it is the
+/// library's editor that gets asked to answer for a quit.
 #[tauri::command]
 pub fn cancel_quit<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
-    require_library(&window)?;
-    windows::cancel_quit(&app);
-    Ok(())
+    let command = library(&app, &window)?.cancel_quit();
+    effects::dispatch(&app, effects::window_command(command))
 }
 
-/// Opens the in-window settings panel (tray action).
-#[tauri::command]
-pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
-    require_library(&window)?;
-    let _ = window.emit("open-settings", ());
-    let _ = app;
-    Ok(())
-}
-
-/// Relaunch into the library after an update, even when this process started in the background.
-#[tauri::command]
-pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
-    use std::os::unix::process::CommandExt;
-    require_library(&window)?;
-    let binary = tauri::process::current_binary(&app.env())
-        .map_err(|e| AppError::Other(format!("could not locate the app: {e}")))?;
-    std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg("sleep 1; exec \"$0\" --library")
-        .arg(binary)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| AppError::Other(format!("could not relaunch: {e}")))?;
-    app.exit(0);
-    Ok(())
-}
-
+/// The keyboard-less way to leave the resident app. Either window may ask; the library still gets
+/// its chance to answer for unsaved edits first.
 #[tauri::command]
 pub fn quit_app<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
-    windows::request_quit(&app)
+    let command = palette(&app).quit_app();
+    effects::dispatch(&app, effects::window_command(command))
 }
+
+/// Relaunch into a visible library, which is how an installed update is entered.
+#[tauri::command]
+pub fn restart_app<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    let command = library(&app, &window)?.restart_app();
+    effects::dispatch(&app, effects::window_command(command))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn get_settings<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
 ) -> AppResult<Settings> {
-    require_library(&window)?;
-    Ok(state(&app).settings.get())
+    // A plain value inside the `Result`, as it was: the store cannot fail by the time the app is
+    // running, so the only error this call can carry is the window guard.
+    Ok(library(&app, &window)?.get_settings())
 }
 
-/// Read project-specific aggregate counts from the private local store, on a blocking worker.
-/// The enabled setting gates both this read and collection through the shell socket.
-#[tauri::command]
-pub async fn history_suggestions<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    limit: Option<usize>,
-) -> AppResult<Vec<history::Suggestion>> {
-    require_library(&window)?;
-    let state = state(&app);
-    if !state.settings.get().history_suggestions_enabled {
-        return Ok(Vec::new());
-    }
-    let limit = limit
-        .unwrap_or(history::DEFAULT_LIMIT)
-        .clamp(1, history::MAX_LIMIT);
-    tauri::async_runtime::spawn_blocking(move || state.history_suggestions(limit))
-        .await
-        .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
-}
-
-/// Marks one suggestion as never to be offered again. Only its digest is stored, so a dismissal
-/// cannot put a history line into the database either.
-#[tauri::command]
-pub fn dismiss_suggestion<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    key: String,
-) -> AppResult<()> {
-    require_library(&window)?;
-    state(&app).repo.dismiss_suggestion(&key)
-}
-
-/// Forgets every dismissal, so those commands can be suggested again. Returns how many there were.
-#[tauri::command]
-pub fn clear_dismissed_suggestions<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> AppResult<usize> {
-    require_library(&window)?;
-    state(&app).repo.clear_dismissed_suggestions()
-}
-
-/// How many suggestions are dismissed, for the Settings row that brings them back.
-#[tauri::command]
-pub fn dismissed_suggestion_count<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> AppResult<usize> {
-    require_library(&window)?;
-    Ok(state(&app).repo.dismissed_suggestion_keys()?.len())
-}
-
-#[tauri::command]
-pub fn list_terminals<R: Runtime>(
-    window: WebviewWindow<R>,
-) -> AppResult<Vec<execution::TerminalOption>> {
-    require_library(&window)?;
-    Ok(execution::available_terminals())
-}
-
-/// Both windows may read the selected theme; full settings remain library-only.
-#[tauri::command]
-pub fn get_theme<R: Runtime>(app: AppHandle<R>) -> String {
-    state(&app).settings.get().theme
-}
-
+/// Saving settings tells every window about the new palette and then asks the desktop to put the
+/// autostart entry in place - in that order, because a window repainting from the theme event should
+/// not be held up by a desktop-integration write, and a failed write is still a saved file.
 #[tauri::command]
 pub fn save_settings<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     settings: Settings,
 ) -> AppResult<Settings> {
-    require_library(&window)?;
-    let state = state(&app);
-    let saved = state.settings.save(settings)?;
-    let _ = app.emit("theme-changed", &saved.theme);
-    if let Err(error) = crate::autostart::apply(saved.autostart) {
+    let actions = library(&app, &window)?;
+    let saved = with_effects(&app, |effects| actions.save_settings(settings, effects))?;
+    if let Err(error) = autostart::apply(saved.autostart) {
         return Err(AppError::Other(format!(
             "settings saved but autostart failed: {error}"
         )));
@@ -617,172 +326,76 @@ pub fn save_settings<R: Runtime>(
     Ok(saved)
 }
 
-/// Emits one refresh signal after a bulk operation (backup restore or archive import).
-fn emit_reload_all<R: Runtime>(app: &AppHandle<R>) {
-    emit_entries_changed(
-        app,
-        &SavedEntry {
-            id: String::new(),
-            revision: 0,
-            kind: Kind::Command,
-        },
-        "reloaded",
-    );
-    emit_vault_state(app);
-    let _ = tray::refresh_menu(app);
-}
-
+/// Opens the in-window settings panel (the tray's action, reachable from the library too).
 #[tauri::command]
-pub fn create_backup<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<String> {
-    require_library(&window)?;
-    let state = state(&app);
-    let archive = state.build_archive()?;
-    let seal = state.archive_seal()?;
-    state.backups.create(&archive, &seal)
-}
-
-#[tauri::command]
-pub fn list_backups<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> AppResult<Vec<crate::backup::BackupInfo>> {
-    require_library(&window)?;
-    state(&app).backups.list()
-}
-
-#[tauri::command]
-pub fn restore_backup<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-    name: String,
-) -> AppResult<BackupOutcome> {
-    require_library(&window)?;
-    let state = state(&app);
-    let seal = state.archive_seal()?;
-    let archive = state.backups.read_backup(&name, &seal)?;
-    let (commands, secrets) = state.apply_archive(&archive)?;
-    emit_reload_all(&app);
-    Ok(BackupOutcome {
-        source: name,
-        commands,
-        secrets,
+pub fn open_settings<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<()> {
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| {
+        actions.open_settings(effects);
+        Ok(())
     })
 }
 
-/// Review-before-apply for a generated backup: date and counts, no side effects.
 #[tauri::command]
-pub fn inspect_backup<R: Runtime>(
+pub fn list_terminals<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
-    name: String,
-) -> AppResult<crate::backup::ArchiveSummary> {
-    require_library(&window)?;
-    let state = state(&app);
-    let seal = state.archive_seal()?;
-    state.backups.inspect_backup(&name, &seal)
+) -> AppResult<Vec<execution::TerminalOption>> {
+    Ok(library(&app, &window)?.list_terminals())
 }
 
-/// Review-before-apply for an exported archive file: date and counts, no side effects.
+// ---------------------------------------------------------------------------------------------
+// Shell history suggestions
+// ---------------------------------------------------------------------------------------------
+
 #[tauri::command]
-pub fn inspect_archive<R: Runtime>(
+pub async fn history_suggestions<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
-    path: String,
-) -> AppResult<crate::backup::ArchiveSummary> {
-    require_library(&window)?;
-    if path.trim().is_empty() {
-        return Err(AppError::Validation("choose a file first".into()));
-    }
-    let state = state(&app);
-    let seal = state.archive_seal()?;
-    state
-        .backups
-        .inspect_file(std::path::Path::new(&path), &seal)
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecoveryKeyInfo {
-    pub secret: String,
-    pub path: String,
-}
-
-/// The recovery credential, so the owner can store it somewhere independent of this
-/// machine. Library window **and** an unlocked vault: the credential decrypts every archive
-/// this profile has ever sealed, so a manual lock has to shut this path too.
-#[tauri::command]
-pub fn recovery_key<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> AppResult<RecoveryKeyInfo> {
-    require_library(&window)?;
-    let state = state(&app);
-    let (secret, path) = state.recovery_credential()?;
-    Ok(RecoveryKeyInfo {
-        secret: secret.to_string(),
-        path: path.to_string_lossy().to_string(),
-    })
-}
-
-/// Copies the recovery credential with the native clipboard path: configured expiry, cleared
-/// with every other app-owned copy when the vault locks, and the value never crosses back to
-/// the frontend, so it cannot end up in a log line or a UI notification.
-#[tauri::command]
-pub fn copy_recovery_key<R: Runtime>(
-    app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> AppResult<CopyResult> {
-    require_library(&window)?;
-    state(&app).copy_recovery_credential()
+    limit: Option<usize>,
+) -> AppResult<Vec<history::Suggestion>> {
+    let actions = library(&app, &window)?;
+    tauri::async_runtime::spawn_blocking(move || actions.history_suggestions(limit))
+        .await
+        .map_err(|error| AppError::Other(format!("history scan failed: {error}")))?
 }
 
 #[tauri::command]
-pub fn export_archive<R: Runtime>(
+pub fn dismiss_suggestion<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
-    path: String,
-    overwrite: Option<bool>,
-) -> AppResult<u64> {
-    require_library(&window)?;
-    if path.trim().is_empty() {
-        return Err(AppError::Validation(
-            "choose a destination file first".into(),
-        ));
-    }
-    let state = state(&app);
-    let archive = state.build_archive()?;
-    let seal = state.archive_seal()?;
-    state.backups.export_to(
-        std::path::Path::new(&path),
-        &archive,
-        &seal,
-        overwrite.unwrap_or(false),
-    )?;
-    Ok(std::fs::metadata(&path)
-        .map(|m| m.len())
-        .unwrap_or_default())
+    key: String,
+) -> AppResult<()> {
+    library(&app, &window)?.dismiss_suggestion(key)
 }
 
 #[tauri::command]
-pub fn import_archive<R: Runtime>(
+pub fn clear_dismissed_suggestions<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
-    path: String,
-) -> AppResult<BackupOutcome> {
-    require_library(&window)?;
-    let state = state(&app);
-    let seal = state.archive_seal()?;
-    let archive = state
-        .backups
-        .import_from(std::path::Path::new(&path), &seal)?;
-    let (commands, secrets) = state.apply_archive(&archive)?;
-    emit_reload_all(&app);
-    Ok(BackupOutcome {
-        source: path,
-        commands,
-        secrets,
-    })
+) -> AppResult<usize> {
+    library(&app, &window)?.clear_dismissed_suggestions()
 }
+
+#[tauri::command]
+pub fn dismissed_suggestion_count<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<usize> {
+    library(&app, &window)?.dismissed_suggestion_count()
+}
+
+#[tauri::command]
+pub fn install_history_tracking<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<String> {
+    library(&app, &window)?.install_history_tracking()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Projects and environments
+// ---------------------------------------------------------------------------------------------
 
 /// Read a project folder without saving anything from it.
 #[tauri::command]
@@ -790,33 +403,18 @@ pub fn scan_project<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: ScanProjectRequest,
-) -> AppResult<crate::projects::ProjectScan> {
-    require_library(&window)?;
-    crate::projects::scan(&request.path, &state(&app).repo)
+) -> AppResult<projects::ProjectScan> {
+    library(&app, &window)?.scan_project(request)
 }
 
-/// Save the chosen tasks of a project folder as commands. The folder is read again here, so a
-/// scan result can never be replaced by command text supplied by the window.
 #[tauri::command]
 pub fn import_project<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     request: ImportProjectRequest,
-) -> AppResult<crate::projects::ImportOutcome> {
-    require_library(&window)?;
-    let state = state(&app);
-    let outcome = crate::projects::import(&request.path, &request.names, request.all, &state.repo)?;
-    if outcome.imported > 0 {
-        emit_reload_all(&app);
-    }
-    Ok(outcome)
-}
-
-/// Install the local shell integration only from the library's explicit action.
-#[tauri::command]
-pub fn install_history_tracking<R: Runtime>(window: WebviewWindow<R>) -> AppResult<String> {
-    require_library(&window)?;
-    crate::project_history::install_zsh_hook()
+) -> AppResult<projects::ImportOutcome> {
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| actions.import_project(request, effects))
 }
 
 #[tauri::command]
@@ -824,8 +422,7 @@ pub fn environment_projects<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
 ) -> AppResult<Vec<crate::environment::ProjectMeta>> {
-    require_library(&window)?;
-    crate::environment::list(&state(&app).vault)
+    library(&app, &window)?.environment_projects()
 }
 
 #[tauri::command]
@@ -834,18 +431,10 @@ pub async fn sync_environment<R: Runtime>(
     window: WebviewWindow<R>,
     path: String,
 ) -> AppResult<crate::environment::SyncResult> {
-    require_library(&window)?;
-    let state = state(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let root = std::fs::canonicalize(&path)?.to_string_lossy().to_string();
-        crate::environment::sync(&state.vault, &root, true)?;
-        Ok(crate::environment::SyncResult {
-            root,
-            projects: crate::environment::list(&state.vault)?,
-        })
-    })
-    .await
-    .map_err(|_| AppError::Other("Environment sync could not complete.".into()))?
+    let actions = library(&app, &window)?;
+    tauri::async_runtime::spawn_blocking(move || actions.sync_environment(path))
+        .await
+        .map_err(|_| AppError::Other("Environment sync could not complete.".into()))?
 }
 
 #[tauri::command]
@@ -855,30 +444,116 @@ pub fn set_environment_sync<R: Runtime>(
     root: String,
     enabled: bool,
 ) -> AppResult<()> {
-    require_library(&window)?;
-    crate::environment::set_enabled(&state(&app).vault, &root, enabled)
+    library(&app, &window)?.set_environment_sync(root, enabled)
 }
 
+/// Copies a snapshot's content. It is a secret, so it goes to the clipboard and never into a window.
 #[tauri::command]
 pub fn copy_environment<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     id: String,
 ) -> AppResult<CopyResult> {
-    require_library(&window)?;
-    let state = state(&app);
-    state.vault.read(|v| {
-        let snapshot = v
-            .environments
-            .iter()
-            .flat_map(|p| &p.snapshots)
-            .find(|s| s.id == id)
-            .ok_or(AppError::NotFound)?;
-        state.clipboard.copy(
-            Kind::Secret,
-            &snapshot.id,
-            &snapshot.content,
-            state.settings.get().clipboard_expiry_seconds,
-        )
+    library(&app, &window)?.copy_environment(id)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backups, archives and the recovery credential
+// ---------------------------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn create_backup<R: Runtime>(app: AppHandle<R>, window: WebviewWindow<R>) -> AppResult<String> {
+    library(&app, &window)?.create_backup()
+}
+
+#[tauri::command]
+pub fn list_backups<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<Vec<crate::backup::BackupInfo>> {
+    library(&app, &window)?.list_backups()
+}
+
+#[tauri::command]
+pub fn restore_backup<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    name: String,
+) -> AppResult<BackupOutcome> {
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| actions.restore_backup(name, effects))
+}
+
+/// Review-before-apply for a generated backup: date and counts, no side effects.
+#[tauri::command]
+pub fn inspect_backup<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    name: String,
+) -> AppResult<crate::backup::ArchiveSummary> {
+    library(&app, &window)?.inspect_backup(name)
+}
+
+/// Review-before-apply for an exported archive file: date and counts, no side effects.
+#[tauri::command]
+pub fn inspect_archive<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+) -> AppResult<crate::backup::ArchiveSummary> {
+    library(&app, &window)?.inspect_archive(path)
+}
+
+/// The wire shape the settings panel reads for the recovery credential. It is built here rather than
+/// exported by the core on purpose: the core's `RecoveryCredential` is a value that must not be
+/// printed (see its `Debug`), and turning it into JSON is this layer's job.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryKeyInfo {
+    pub secret: String,
+    pub path: String,
+}
+
+/// The recovery credential, so the owner can store it somewhere independent of this machine. Library
+/// window **and** an unlocked vault - the reader the service uses enforces both.
+#[tauri::command]
+pub fn recovery_key<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<RecoveryKeyInfo> {
+    let credential = library(&app, &window)?.recovery_key()?;
+    Ok(RecoveryKeyInfo {
+        secret: credential.secret,
+        path: credential.path,
     })
+}
+
+/// Copies the recovery credential the way a secret is always copied: natively, with the configured
+/// expiry, and never back into a window where it could be logged or screenshotted.
+#[tauri::command]
+pub fn copy_recovery_key<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> AppResult<CopyResult> {
+    library(&app, &window)?.copy_recovery_key()
+}
+
+#[tauri::command]
+pub fn export_archive<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+    overwrite: Option<bool>,
+) -> AppResult<u64> {
+    library(&app, &window)?.export_archive(path, overwrite)
+}
+
+#[tauri::command]
+pub fn import_archive<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+) -> AppResult<BackupOutcome> {
+    let actions = library(&app, &window)?;
+    with_effects(&app, |effects| actions.import_archive(path, effects))
 }

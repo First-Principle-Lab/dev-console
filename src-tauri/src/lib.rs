@@ -1,36 +1,29 @@
-pub mod auth;
+// Desktop runtime: windows, tray, IPC, CLI intents, the control socket and the OS integrations that
+// touch them. Everything the UI needs lives in `dev-console-core` (plan section 1 and 3), re-exported
+// below at the crate-root paths it had before the move, so every `crate::models::..`/`crate::state::..`
+// reference here - and every `dev_console_lib::..` path in `src-tauri/tests/` - still resolves to the
+// one implementation of each rule.
 pub mod autostart;
-pub mod backup;
 pub mod cli;
-pub mod clipboard;
-pub mod context;
 pub mod control;
 pub mod desktop_icons;
-pub mod environment;
-pub mod error;
-pub mod execution;
-pub mod history;
-pub mod import;
+pub mod effects;
 pub mod ipc;
-pub mod keyring;
-pub mod models;
-pub mod paths;
-pub mod project_history;
-pub mod projects;
-pub mod recovery;
-pub mod repository;
-pub mod search;
-pub mod settings;
-pub mod state;
 pub mod tray;
-pub mod vault;
 pub mod windows;
+
+pub use dev_console_core::{
+    auth, backup, clipboard, context, environment, error, execution, history, import, keyring,
+    models, paths, project_history, projects, recovery, repository, search, services, settings,
+    state, vault,
+};
 
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::cli::Intent;
+use crate::services::AppEvent;
 use crate::state::AppState;
 
 pub fn run() {
@@ -209,7 +202,9 @@ fn build(argv: Vec<String>) {
                         let _ = windows::finish_quit(window.app_handle());
                     }
                     _ => {
-                        let _ = window.emit("close-requested", ());
+                        // The library is the window with something to answer for, and the event's
+                        // own variant says so (`Delivery::Library`) rather than this call site.
+                        let _ = effects::deliver(window.app_handle(), &AppEvent::CloseRequested);
                     }
                 }
             }
