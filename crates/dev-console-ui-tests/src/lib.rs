@@ -235,8 +235,15 @@ impl<S: 'static> Stage<S> {
         Some((x + width / 2.0, y + height / 2.0))
     }
 
-    /// Presses the element keyed `key`. False when it is not on screen.
+    /// Scrolls an existing element into view before clicking it. Layout coordinates alone do
+    /// not establish visibility: a target can be clipped by a scroll viewport or modal footer.
     pub fn press(&mut self, key: &str) -> bool {
+        if !self.has(key) {
+            return false;
+        }
+        self.runtime
+            .update(|_, tx| tx.scroll_into_view(key.to_owned()));
+        self.settle();
         let Some((x, y)) = self.centre_of(key) else {
             return false;
         };

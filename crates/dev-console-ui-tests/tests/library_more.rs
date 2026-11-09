@@ -479,10 +479,37 @@ fn the_terminal_field_parses_quoted_arguments_and_saves_them() {
 #[test]
 fn settings_offer_the_project_ranking_switch_and_store_it() {
     let profile = Profile::new("more-ranking");
-    let mut library = profile.library();
-    library.press("settings");
+    let state = Library::new(profile.hub.clone(), dev_console_desktop::hub::Exec::Inline);
+    let mut library = Stage::from_spec(
+        state,
+        &dev_console_desktop::app::library_spec(),
+        (760.0, 520.0),
+    );
+    assert!(library.press("settings"));
     assert!(library.press("project-context"));
-    library.press("save-settings");
+    assert!(
+        !library
+            .state()
+            .settings
+            .as_ref()
+            .unwrap()
+            .settings
+            .as_ref()
+            .unwrap()
+            .project_context_enabled,
+        "the click must reach the checkbox before Save is tested"
+    );
+    let ([_, y, _, height], _) = library.box_of("project-context").unwrap();
+    let ([_, footer_y, _, _], _) = library.box_of("settings-panel-footer").unwrap();
+    assert!(
+        y >= 0.0 && y + height <= footer_y,
+        "the checkbox must be above the fixed footer after scrolling"
+    );
+    assert!(library.press("save-settings"));
+    assert!(
+        library.state().settings.is_none(),
+        "a successful save closes the panel"
+    );
     assert!(!profile.hub.library.get_settings().project_context_enabled);
 }
 

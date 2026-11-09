@@ -77,3 +77,13 @@ Remaining migration work includes the updater, the full CLI/control and shell-ho
 packaging and production cutover. Remaining acceptance includes polkit authentication success,
 physical tray clicks, portal cancellation, clipboard-history behaviour, X11 rendering and the
 matrix's visual/accessibility checks. Browser screenshots do not establish native Wayland proof.
+
+## CI follow-up
+
+The first backend CI run on `700ffb2` exposed a scripted interaction failure in the Settings
+project-ranking test. `Stage::press` used the target's layout coordinates without scrolling its
+containing viewport, so a clipped checkbox could be missed while the helper reported a click.
+It now scrolls the target into view before pointer delivery. The regression runs at 760x520,
+checks the checkbox state before saving, and checks its position above the fixed modal footer.
+It fails with scrolling removed and passes with the fix. All 105 native scripted UI tests and
+workspace Clippy passed after the change.
