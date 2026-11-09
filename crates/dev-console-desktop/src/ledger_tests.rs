@@ -43,8 +43,17 @@ const HEADLESS_RUN: &str = "HEADLESS-RUN";
 const UNVERIFIED: &str = "UNVERIFIED (owner desktop)";
 /// No such capability in the Rune shell yet, so no host can check it.
 const NOT_BUILT: &str = "NOT BUILT";
+/// Run by hand on the owner's Hyprland/NVIDIA session. Evidence, not a test: it must say what ran
+/// and when, and it never counts towards a wired area's headless evidence.
+const DESKTOP_RUN: &str = "DESKTOP-RUN (owner desktop)";
 
-const STATUSES: &[&str] = &[HEADLESS_TEST, HEADLESS_RUN, UNVERIFIED, NOT_BUILT];
+const STATUSES: &[&str] = &[
+    HEADLESS_TEST,
+    HEADLESS_RUN,
+    DESKTOP_RUN,
+    UNVERIFIED,
+    NOT_BUILT,
+];
 
 /// Every area the ledger may file a row under. `CLAUSE_AREAS` is checked against these.
 const AREAS: &[&str] = &[
@@ -206,7 +215,9 @@ fn every_row_the_container_settles_points_at_something_that_exists() {
         })
         .collect();
     assert!(
-        sources.iter().any(|(path, _)| path.ends_with("/ui.rs")),
+        sources
+            .iter()
+            .any(|(path, _)| path.ends_with("/library/view.rs")),
         "the ledger gate walked {} sources but none of them is the view file, which means the \
          roots above no longer describe this workspace",
         sources.len()
@@ -288,6 +299,36 @@ fn every_row_the_container_settles_points_at_something_that_exists() {
                     observed_exit,
                     "ledger line {} reports running {RUN_BINARY} without recording what it exited \
                      with; the exit code is the observation",
+                    row.line
+                );
+            }
+            DESKTOP_RUN => {
+                assert_eq!(
+                    row.command, "-",
+                    "ledger line {}: a {DESKTOP_RUN} row was run on the desktop already, so it needs \
+                     no command (-)",
+                    row.line
+                );
+                assert!(
+                    row.evidence.contains(RUN_BINARY),
+                    "ledger line {} reports a desktop run without naming what ran ({RUN_BINARY})",
+                    row.line
+                );
+                let dated = row.evidence.char_indices().any(|(index, _)| {
+                    let stamp = row.evidence[index..].chars().take(10).collect::<String>();
+                    stamp.len() == 10
+                        && stamp.chars().enumerate().all(|(at, c)| {
+                            if at == 4 || at == 7 {
+                                c == '-'
+                            } else {
+                                c.is_ascii_digit()
+                            }
+                        })
+                });
+                assert!(
+                    dated,
+                    "ledger line {} reports a desktop run without the date it was run on; a hand \
+                     check is evidence of one day, not of every build after it",
                     row.line
                 );
             }

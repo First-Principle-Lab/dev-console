@@ -470,9 +470,9 @@ fn every_matrix_citation_names_a_test_that_actually_exists() {
         );
     }
     assert!(
-        cited >= 200,
-        "the matrix cites {cited} tests overall; most rows quote at least the ported rule underneath \
-         them, so a count this low means the citation scan stopped matching the cells"
+        cited >= 120,
+        "the matrix cites {cited} tests overall; every covered row quotes the test that decides it, \
+         so a count this low means the citation scan stopped matching the cells"
     );
 }
 
@@ -517,11 +517,12 @@ fn every_gap_names_its_missing_seam_and_no_covered_row_names_one() {
             other => unreachable!("status vocabulary checked when parsing: {other}"),
         }
     }
+    // 27 paint rows and the 4 updater rows cannot move until a renderer check and the updater
+    // exist, so fewer gaps than that means the seam marker stopped parsing, not that they closed.
     assert!(
-        gaps >= 100,
-        "only {gaps} rows name a missing seam; the native shell is missing most of the shipped \
-         screens, so a count this low means either the rows moved up without tests or the seam \
-         marker stopped parsing"
+        gaps >= 31,
+        "only {gaps} rows name a missing seam; the paint and updater rows alone are 31, so a count \
+         this low means either rows moved up without tests or the seam marker stopped parsing"
     );
 }
 

@@ -1,0 +1,255 @@
+//! The Dev Console palette as the native views paint it.
+//!
+//! Every colour here comes from `dev_console_core::theme`, the generated port of
+//! `src/styles/tokens.css` and `src/styles/omarchy.css`, so the two shells cannot drift apart on a
+//! value. [`Look`] resolves the tokens a view needs once per frame; `system` follows the desktop's
+//! dark/light preference the way the stylesheet's `prefers-color-scheme` block does.
+
+use dev_console_core::theme::Theme;
+use rune::color::srgb_decode;
+use rune::tok::{Family, TextStyle};
+use rune::Color;
+
+/// The setting value that follows the desktop rather than naming a palette.
+pub const SYSTEM: &str = "system";
+
+/// One palette's colours, resolved from its tokens.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    pub dark: bool,
+    pub bg: Color,
+    pub panel: Color,
+    pub raised: Color,
+    pub sunken: Color,
+    pub hover: Color,
+    pub active: Color,
+    pub line: Color,
+    pub line_strong: Color,
+    pub line_hair: Color,
+    pub fg: Color,
+    pub muted: Color,
+    pub dim: Color,
+    pub shell: Color,
+    pub accent: Color,
+    pub accent_strong: Color,
+    pub accent_fg: Color,
+    pub accent_soft: Color,
+    pub accent_line: Color,
+    pub selected: Color,
+    pub selected_fg: Color,
+    pub selected_edge: Color,
+    pub danger: Color,
+    pub danger_soft: Color,
+    pub ok: Color,
+    pub ok_soft: Color,
+    pub warn: Color,
+    pub warn_soft: Color,
+    pub kind_command: Color,
+    pub kind_secret: Color,
+    pub secret_soft: Color,
+    pub focus: Color,
+    pub backdrop: Color,
+    pub placeholder: Color,
+    pub inset: Color,
+}
+
+impl Look {
+    /// The palette a saved `theme` setting names, with `system` resolved against `system_dark`.
+    /// An unknown name (a palette removed in a later release) falls back to the system choice
+    /// rather than failing to draw.
+    pub fn for_setting(setting: &str, system_dark: bool) -> Look {
+        let fallback = if system_dark { "dark" } else { "light" };
+        let theme = if setting == SYSTEM {
+            Theme::named(fallback)
+        } else {
+            Theme::named(setting).or_else(|_| Theme::named(fallback))
+        }
+        .expect("the dark and light palettes are always registered");
+        Look::from_theme(theme)
+    }
+
+    pub fn from_theme(theme: Theme) -> Look {
+        let c = |token: &str| colour(theme, token);
+        Look {
+            dark: theme.appearance().is_dark(),
+            bg: c("--bg"),
+            panel: c("--bg-panel"),
+            raised: c("--bg-raised"),
+            sunken: c("--bg-sunken"),
+            hover: c("--bg-hover"),
+            active: c("--bg-active"),
+            line: c("--line"),
+            line_strong: c("--line-strong"),
+            line_hair: c("--line-hair"),
+            fg: c("--fg"),
+            muted: c("--fg-muted"),
+            dim: c("--fg-dim"),
+            shell: c("--shell-bg"),
+            accent: c("--accent"),
+            accent_strong: c("--accent-strong"),
+            accent_fg: c("--accent-fg"),
+            accent_soft: c("--accent-soft"),
+            accent_line: c("--accent-line"),
+            selected: c("--selected"),
+            selected_fg: c("--selected-fg"),
+            selected_edge: c("--selected-edge"),
+            danger: c("--danger"),
+            danger_soft: c("--danger-soft"),
+            ok: c("--ok"),
+            ok_soft: c("--ok-soft"),
+            warn: c("--warn"),
+            warn_soft: c("--warn-soft"),
+            kind_command: c("--kind-command"),
+            kind_secret: c("--kind-secret"),
+            secret_soft: c("--secret-soft"),
+            focus: c("--focus-ring"),
+            backdrop: c("--backdrop"),
+            placeholder: c("--search-placeholder"),
+            inset: c("--inset-fill"),
+        }
+    }
+
+    /// The rune-kit token set the kit's controls (text fields, switches, selects) read, seeded
+    /// from this palette so they sit in it instead of in Rune's own default.
+    pub fn kit(&self) -> rune_kit::Kit {
+        let mut kit = rune_kit::Kit::from_palette_focus(
+            rune_kit::PaletteSeed {
+                bg: self.bg,
+                fg: self.fg,
+                accent: self.accent,
+            },
+            rune_kit::PaletteFocus::Custom(self.focus),
+        );
+        kit.radius.sm = 4.0;
+        kit.radius.md = 6.0;
+        kit.radius.lg = 10.0;
+        kit
+    }
+}
+
+/// A token's colour as Rune paints it: the stylesheet's sRGB value, decoded to linear light.
+fn colour(theme: Theme, token: &str) -> Color {
+    let rgba = theme
+        .colour(token)
+        .unwrap_or_else(|error| panic!("palette {} has no colour {token}: {error}", theme.name()));
+    let channel = |value: f64| srgb_decode((value / 255.0) as f32);
+    Color {
+        r: channel(rgba.red),
+        g: channel(rgba.green),
+        b: channel(rgba.blue),
+        a: rgba.alpha as f32,
+    }
+}
+
+/// The palette names the Settings appearance picker offers, `system` first, each with the label
+/// the web shows.
+pub fn choices() -> Vec<(&'static str, String)> {
+    let mut out = vec![(SYSTEM, "Follow system".to_string())];
+    for name in dev_console_core::theme::palette_names() {
+        out.push((name, label(name)));
+    }
+    out
+}
+
+/// `omarchy-tokyo-night` reads as "Omarchy: Tokyo Night"; `dark` as "Dark".
+pub fn label(name: &str) -> String {
+    let title = |words: &str| {
+        words
+            .split('-')
+            .map(|word| {
+                let mut chars = word.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    match name.strip_prefix("omarchy-") {
+        Some(rest) => format!("Omarchy: {}", title(rest)),
+        None => title(name),
+    }
+}
+
+/// The type scale from `tokens.css` (`--text-xs` .. `--text-xl`, the row and search sizes).
+pub mod text {
+    use super::{Family, TextStyle};
+
+    pub const XS: TextStyle = TextStyle::new(11.0, 400.0);
+    pub const SM: TextStyle = TextStyle::new(12.5, 400.0);
+    pub const BODY: TextStyle = TextStyle::new(13.5, 400.0);
+    pub const STRONG: TextStyle = TextStyle::new(13.5, 600.0);
+    pub const LG: TextStyle = TextStyle::new(15.0, 600.0);
+    pub const XL: TextStyle = TextStyle::new(18.0, 600.0);
+    pub const ROW: TextStyle = TextStyle::new(13.5, 600.0);
+    pub const ROW_META: TextStyle = TextStyle::new(11.5, 400.0);
+    pub const SEARCH: TextStyle = TextStyle::new(17.0, 400.0);
+    /// Section headings: small caps-style labels with the stylesheet's `--label-tracking`.
+    pub const LABEL: TextStyle = TextStyle::new(11.0, 600.0).tracking(0.66);
+    pub const MONO: TextStyle = TextStyle::new(12.5, 400.0).family(Family::SystemMono);
+    pub const MONO_SM: TextStyle = TextStyle::new(11.5, 400.0).family(Family::SystemMono);
+}
+
+/// Sizes from `tokens.css`, in points.
+pub mod size {
+    pub const SP1: f32 = 4.0;
+    pub const SP2: f32 = 8.0;
+    pub const SP3: f32 = 12.0;
+    pub const SP4: f32 = 16.0;
+    pub const SP5: f32 = 24.0;
+    pub const RADIUS_SM: f32 = 4.0;
+    pub const RADIUS: f32 = 6.0;
+    pub const RADIUS_LG: f32 = 10.0;
+    pub const RADIUS_ROW: f32 = 8.0;
+    pub const CONTROL_H: f32 = 30.0;
+    pub const CONTROL_H_SM: f32 = 26.0;
+    pub const ROW_H: f32 = 40.0;
+    pub const SEARCH_H: f32 = 46.0;
+    pub const FOOTER_H: f32 = 34.0;
+    pub const TAB_H: f32 = 34.0;
+    pub const TILE_SM: f32 = 22.0;
+    pub const TILE_LG: f32 = 32.0;
+    pub const PANE_LIST: f32 = 320.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_registered_palette_resolves_every_token_the_views_paint() {
+        for theme in Theme::all() {
+            let look = Look::from_theme(theme);
+            assert_eq!(look.dark, theme.appearance().is_dark(), "{}", theme.name());
+            assert!(
+                look.bg.a > 0.99,
+                "{} has a translucent background",
+                theme.name()
+            );
+        }
+    }
+
+    #[test]
+    fn system_follows_the_desktop_and_unknown_names_fall_back_to_it() {
+        assert!(Look::for_setting(SYSTEM, true).dark);
+        assert!(!Look::for_setting(SYSTEM, false).dark);
+        assert!(Look::for_setting("no-such-palette", true).dark);
+        assert_eq!(
+            Look::for_setting("omarchy-tokyo-night", false),
+            Look::from_theme(Theme::named("omarchy-tokyo-night").unwrap())
+        );
+    }
+
+    #[test]
+    fn labels_read_as_the_settings_picker_shows_them() {
+        assert_eq!(label("dark"), "Dark");
+        assert_eq!(label("omarchy-tokyo-night"), "Omarchy: Tokyo Night");
+        let choices = choices();
+        assert_eq!(choices[0].0, SYSTEM);
+        assert_eq!(
+            choices.len(),
+            dev_console_core::theme::palette_names().len() + 1
+        );
+    }
+}

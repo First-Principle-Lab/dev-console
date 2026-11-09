@@ -1,19 +1,23 @@
-//! Process wiring: window specs, the single-instance decision, and the wakeup path.
+//! Process wiring: the single-instance decision, the core services, both windows and the tray.
 //!
-//! The resident process owns both windows and starts with neither mapped (`WindowOptions::visible`
-//! is false for both), which is how the current app behaves: the tray, the compositor shortcut and
-//! a second launch are what ask for a window. Plan §3 ("Single instance"): a later launch forwards
-//! its intent and exits, so exactly one process ever holds the vault and the windows.
+//! The resident process owns both windows and starts with neither mapped, as the current app does:
+//! the tray, the compositor shortcut and a second launch are what ask for a window. A later launch
+//! forwards its intent and exits, so exactly one process ever holds the vault and the windows.
 
+use std::sync::Arc;
+
+use dev_console_core::state::AppState;
 use rune::{App, AppHandle, WindowSpec};
 
+use crate::finder::{finder_view, Finder};
+use crate::hub::{Exec, Hub, Windows};
 use crate::identity::{
     finder_options, library_options, FINDER_LABEL, FINDER_SIZE, FINDER_TITLE, LIBRARY_MIN_SIZE,
     LIBRARY_SIZE, LIBRARY_TITLE,
 };
 use crate::instance::{self, Intent};
+use crate::library::{library_view, Library};
 use crate::tray;
-use crate::ui::{self, Finder, Library};
 
 /// Success.
 pub const EXIT_OK: i32 = 0;
@@ -21,12 +25,8 @@ pub const EXIT_OK: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
 /// An unknown command-line flag.
 pub const EXIT_USAGE: i32 = 2;
-/// The GUI could not start because there is no display to draw on.
-///
-/// 77 is the code this repository already treats as *UNVERIFIED, not passed* (see
-/// `scripts/verify.sh`: a harness that cannot run exits 77). Using it here means a gate that runs
-/// this binary on a headless host reports the native shell as unverified instead of mistaking an
-/// ordinary startup failure for a pass.
+/// The GUI could not start because there is no display to draw on. 77 is what
+/// `scripts/verify.sh` reads as UNVERIFIED rather than as a pass or a failure.
 pub const EXIT_NO_DISPLAY: i32 = 77;
 
 /// What `dev-console [FLAG]` accepts. Anything else is a usage error, because a mistyped flag must
@@ -54,10 +54,7 @@ const USAGE: &str = "usage: dev-console [--finder | --library]\n\
      With no flag, the resident instance is asked to show the Library, or a new resident\n\
      instance starts with no window mapped and waits for the tray, a shortcut or a second launch.";
 
-/// The Library's `AppSpec`: title, size and minimum come from [`crate::identity`], and `on_key` is
-/// the router that stands in for the shipped window's `<svelte:window onkeydown>` listener. Setting
-/// it here rather than in a test is the point: the scripted keyboard tests build their stage from
-/// this same spec, so a stage cannot route a chord the shipped window forgot to ask for.
+/// The Library's spec: title, size, minimum and the window-level key router.
 pub fn library_spec() -> rune::AppSpec<Library> {
     rune::AppSpec::<Library> {
         min_size: Some(LIBRARY_MIN_SIZE),
@@ -65,54 +62,43 @@ pub fn library_spec() -> rune::AppSpec<Library> {
         ..rune::AppSpec::new(
             LIBRARY_TITLE,
             LIBRARY_SIZE,
-            Library::default,
-            ui::library_view,
+            || unreachable!("built by App::init"),
+            library_view,
         )
     }
 }
 
-/// The Library app: the resident process's primary window, hidden at start, surviving a close.
-pub fn library_app() -> App<Library> {
-    App::new(library_spec())
-        .window_options(library_options())
-        .windowless()
-        .keep_running()
-}
-
-/// The Finder's `AppSpec`. `scenes` are the named states `--scene` selects for a snapshot, so the
-/// desktop check and Rune's headless tooling can both reach the states that matter.
+/// The Finder's spec. The query field routes the palette's keys first; the window routes the same
+/// table for keys that arrive while a row, not the field, holds focus (a click on a row moves it).
 pub fn finder_spec() -> rune::AppSpec<Finder> {
     rune::AppSpec::<Finder> {
-        scenes: &[
-            ("empty", |finder| *finder = Finder::default()),
-            ("rows", |finder| {
-                *finder = Finder::with_rows(&["git status", "cargo test"])
-            }),
-            ("context", |finder| {
-                *finder = Finder {
-                    context: "dev-console".into(),
-                    ..Finder::with_rows(&["just build"])
-                }
-            }),
-        ],
-        ..rune::AppSpec::new(FINDER_TITLE, FINDER_SIZE, Finder::default, ui::finder_view)
+        on_key: Some(Finder::route_key),
+        ..rune::AppSpec::new(
+            FINDER_TITLE,
+            FINDER_SIZE,
+            || unreachable!("built by App::init"),
+            finder_view,
+        )
     }
 }
 
-/// The Finder as a secondary window of the Library's app: it never keeps the process alive alone,
-/// and closing it hides it.
-pub fn finder_window() -> WindowSpec<Finder> {
-    WindowSpec::new(FINDER_LABEL, finder_spec()).options(finder_options()).on_created(|window| {
-        // The one place the 680×420 request is repeated on purpose: some compositors settle a
-        // borderless window's size after mapping, and plan §3 requires the *post-map* size request to
-        // be made. Whether Hyprland honours it is the owner's check, not something asserted here.
-        let _ = window;
-        eprintln!("dev-console: finder window mapped (asking the compositor for {FINDER_TITLE} at 680x420)");
-    })
+/// A close request on the Library: with an unsaved draft, the prompt goes up and the window comes
+/// back to show it, because Rune's close cannot be vetoed; otherwise decrypted state is dropped.
+fn library_closed(library: &mut Library, _tx: &mut rune::Tx) {
+    if library.draft_dirty() {
+        library.pending_close = true;
+        if let Some(windows) = library.hub().windows() {
+            windows.library.open();
+        }
+    } else {
+        library.clear_sensitive();
+    }
 }
 
-/// The Library window's handle for `app` (used by `run` and by nothing else).
-type LibraryHandle = AppHandle<Library>;
+/// The Finder never closes for good: closing it is dismissing it.
+fn finder_closed(finder: &mut Finder, _tx: &mut rune::Tx) {
+    finder.query.clear();
+}
 
 /// Starts, or talks to, the resident instance. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
@@ -130,17 +116,11 @@ pub fn run(args: &[String]) -> i32 {
 
     let socket = instance::socket_path();
 
-    // Second launch: hand the intent to the resident process and leave. An error here is the normal
-    // case for the first launch, so it is not reported.
+    // Second launch: hand the intent to the resident process and leave.
     if instance::send_intent(&socket, intent.unwrap_or(Intent::Library)).is_ok() {
-        println!(
-            "dev-console: asked the running instance for the {} window",
-            describe(intent)
-        );
         return EXIT_OK;
     }
 
-    // From here on this process is the resident one, so the lock it takes is held for its lifetime.
     let Some(_lock) = take_instance_lock() else {
         eprintln!(
             "dev-console: another instance holds the lock but is not answering on {}; exiting",
@@ -160,43 +140,105 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
+    // Nothing is shown until the profile is open and any interrupted replacement is settled.
+    let state: Arc<AppState> = match AppState::bootstrap() {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("dev-console: cannot open the profile: {error}");
+            return EXIT_ERROR;
+        }
+    };
+    start_background_work(&state);
+    let hub = Hub::new(state, env!("CARGO_PKG_VERSION"));
+
     rune::set_app_id(crate::APP_ID);
 
-    let mut app = library_app();
-    let library: LibraryHandle = app.handle();
-    let (finder, _finder_window) = app.window(finder_window());
+    let library_app = App::new(library_spec());
+    let library: AppHandle<Library> = library_app.handle();
+    let library_hub = hub.clone();
+    let library_exec = library.clone();
+    let mut library_app = library_app
+        .init(move || Library::new(library_hub, Exec::Thread(library_exec)))
+        .window_options(library_options())
+        .on_close(library_closed)
+        .windowless()
+        .keep_running();
+
+    let finder_app = App::new(finder_spec());
+    let finder: AppHandle<Finder> = finder_app.handle();
+    let finder_hub = hub.clone();
+    let finder_exec = finder.clone();
+    let finder_app = finder_app
+        .init(move || Finder::new(finder_hub, Exec::Thread(finder_exec)))
+        .on_close(finder_closed);
+    let (_, _finder_window) = library_app.window(
+        WindowSpec::from_app(FINDER_LABEL, finder_app)
+            .options(finder_options())
+            .on_created(|window| {
+                // Tiling compositors can settle a borderless window's size after mapping; asking again
+                // once it is mapped is honoured for floating windows.
+                window.resize(FINDER_SIZE);
+            }),
+    );
 
     // The tray must be built before the loop starts and kept alive for the process's life.
-    let _tray = tray::attach(&library, &finder);
+    let tray_handle = tray::attach(&hub);
+    let tray_refresh: Option<Arc<dyn Fn() + Send + Sync>> = tray_handle.clone().map(|tray| {
+        let state = hub.state.clone();
+        Arc::new(move || tray::refresh(&tray, state.vault.state().unlocked))
+            as Arc<dyn Fn() + Send + Sync>
+    });
+    hub.connect(Windows {
+        library: library.clone(),
+        finder: finder.clone(),
+        tray: tray_refresh,
+    });
 
     if let Some(intent) = intent {
-        open(&library, &finder, intent);
+        open(&hub, intent);
     }
 
     // The wakeup path runs on its own thread; `AppHandle` calls are what wake the UI loop, so no
     // socket read ever happens on the UI thread.
-    let wakeup_library = library.clone();
-    let wakeup_finder = finder.clone();
+    let wakeup_hub = hub.clone();
     std::thread::spawn(move || {
-        if let Err(error) = server.serve(|intent| open(&wakeup_library, &wakeup_finder, intent)) {
-            // The listener only fails if the socket is gone, which means this process is shutting
-            // down; say so rather than silently losing the wakeup path.
+        if let Err(error) = server.serve(|intent| open(&wakeup_hub, intent)) {
             eprintln!("dev-console: control socket stopped: {error}");
         }
     });
 
-    match app.try_run() {
+    let outcome = library_app.try_run();
+    drop(tray_handle);
+    match outcome {
         Ok(()) => EXIT_OK,
         Err(message) => {
-            // With no Wayland or X11 display this is the expected outcome, and it is the boundary
-            // past which nothing about the native shell can be decided on this host.
             eprintln!("dev-console: the native shell could not start: {message}");
             EXIT_NO_DISPLAY
         }
     }
 }
 
-/// Takes the instance lock, or reports why it could not.
+/// The resident process's duties that need no window, as `src-tauri/src/lib.rs` starts them: a
+/// sealed backup at startup, the clipboard expiry worker, environment snapshot sync and the shell
+/// hook refresh.
+fn start_background_work(state: &Arc<AppState>) {
+    // A locked or unavailable vault cannot be backed up, and that is not an error.
+    if state.vault.is_unlocked() {
+        match state
+            .build_archive()
+            .and_then(|archive| state.backups.create(&archive, &state.vault))
+        {
+            Ok(name) => eprintln!("dev-console: sealed backup written ({name})"),
+            Err(error) => eprintln!("dev-console: startup backup skipped ({error})"),
+        }
+    }
+    dev_console_core::clipboard::spawn_expiry_worker(Arc::clone(state));
+    dev_console_core::environment::spawn_sync_worker(Arc::clone(state));
+    if dev_console_core::project_history::refresh_installed_zsh_hook().is_err() {
+        eprintln!("dev-console: could not refresh the installed shell hook");
+    }
+}
+
 fn take_instance_lock() -> Option<instance::InstanceLock> {
     let path = instance::lock_path();
     match instance::InstanceLock::acquire(&path) {
@@ -211,19 +253,15 @@ fn take_instance_lock() -> Option<instance::InstanceLock> {
     }
 }
 
-/// Shows the window an intent names. Requests made before the loop starts are applied when it
-/// starts, so a launch with `--finder` still lands on the Finder.
-fn open(library: &LibraryHandle, finder: &AppHandle<Finder>, intent: Intent) {
+/// Shows the window an intent names. `--finder` is Super+F, which toggles.
+fn open(hub: &Hub, intent: Intent) {
     match intent {
-        Intent::Library => library.open(),
-        Intent::Finder => finder.open(),
-    }
-}
-
-fn describe(intent: Option<Intent>) -> &'static str {
-    match intent {
-        Some(Intent::Finder) => "Finder",
-        Some(Intent::Library) | None => "Library",
+        Intent::Library => {
+            if let Some(windows) = hub.windows() {
+                windows.library.open();
+            }
+        }
+        Intent::Finder => hub.toggle_finder(None),
     }
 }
 
@@ -248,14 +286,6 @@ mod tests {
         assert!(parse_args(&["--reveal".into()])
             .unwrap_err()
             .starts_with("unknown argument"));
-    }
-
-    #[test]
-    fn help_is_a_usage_message_not_a_window_request() {
-        let error = parse_args(&["--help".into()]).unwrap_err();
-        assert!(error.starts_with("usage:"), "{error}");
-        assert!(error.contains("--finder"));
-        // `run` turns a usage string into a clean exit rather than a failure.
         assert!(parse_args(&["--help".into()])
             .unwrap_err()
             .starts_with("usage:"));
@@ -267,102 +297,40 @@ mod tests {
         assert_eq!(library.title, LIBRARY_TITLE);
         assert_eq!(library.size, LIBRARY_SIZE);
         assert_eq!(library.min_size, Some(LIBRARY_MIN_SIZE));
-
-        let options = library_options();
         assert!(
-            !options.visible,
-            "the resident app starts with no window mapped"
+            library.on_key.is_some(),
+            "the Library window carries the app-level key router"
         );
-        assert!(options.resizable);
-
         let finder = finder_spec();
         assert_eq!(finder.title, FINDER_TITLE);
         assert_eq!(finder.size, FINDER_SIZE);
-
-        let window = finder_window();
-        assert_eq!(window.key, FINDER_LABEL);
-        assert!(!window.options.transparent);
-        assert!(window.options.borderless);
-        assert!(!window.options.resizable);
-        assert!(!window.options.visible);
-    }
-
-    #[test]
-    fn the_library_spec_hands_the_window_a_key_router_and_the_finder_does_not() {
-        // `tests/library_keys.rs` builds every one of its stages from `library_spec()`, so the
-        // assertion that *which* handler is wired is the right one is made behaviourally there: a
-        // spec with no router, or with one that routes the wrong chords, fails those tests. What
-        // only a test here can say is that the spec carries a handler at all - a `Library::route_key`
-        // that exists but is never installed would otherwise leave the shipped window deaf.
-        //
-        // Deliberately not a function-pointer comparison against `Library::route_key`: the addresses
-        // of the same function can differ between codegen units (that is what clippy's
-        // `unpredictable_function_pointer_comparisons` is for), so an identity assert here would be a
-        // flake with a green tick next to it.
         assert!(
-            library_spec().on_key.is_some(),
-            "the Library window must carry the app-level key router"
+            finder.on_key.is_some(),
+            "the Finder routes its keys from the window too, for a row that took focus"
         );
-        // The palette keeps its bindings on the query field (`El::on_input_key`), so it asks the
-        // window for none: a second, window-level table for the Finder would be a second owner of
-        // the same keys.
+        let options = finder_options();
         assert!(
-            finder_spec().on_key.is_none(),
-            "the Finder must not grow a second, window-level key table"
+            !options.transparent && options.borderless && !options.resizable && !options.visible
         );
-    }
-
-    #[test]
-    fn the_finder_scenes_cover_the_states_the_desktop_check_needs() {
-        let scenes: Vec<&str> = finder_spec().scenes.iter().map(|(name, _)| *name).collect();
-        assert_eq!(scenes, vec!["empty", "rows", "context"]);
-    }
-
-    #[test]
-    fn every_scene_produces_a_finder_that_the_view_can_draw() {
-        // A scene the view cannot render is a snapshot that silently shows nothing, so each one is
-        // applied here and its state inspected.
-        for (name, apply) in finder_spec().scenes {
-            let mut finder = Finder::default();
-            apply(&mut finder);
-            match *name {
-                "empty" => assert!(finder.rows.is_empty()),
-                "rows" => assert_eq!(finder.rows.len(), 2),
-                "context" => {
-                    assert_eq!(finder.context, "dev-console");
-                    assert_eq!(finder.rows.len(), 1);
-                }
-                other => panic!("unexpected scene {other}"),
-            }
-        }
+        assert!(
+            !library_options().visible,
+            "the resident app starts with no window mapped"
+        );
     }
 
     #[test]
     fn exit_codes_do_not_collide_with_the_repos_unverified_convention() {
-        assert_eq!(EXIT_OK, 0);
-        assert_eq!(EXIT_ERROR, 1);
-        assert_eq!(EXIT_USAGE, 2);
-        // verify.sh reads 77 as UNVERIFIED; nothing else here may return it.
-        assert_eq!(EXIT_NO_DISPLAY, 77);
-        assert_ne!(EXIT_NO_DISPLAY, EXIT_ERROR);
+        assert_eq!(
+            (EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_NO_DISPLAY),
+            (0, 1, 2, 77)
+        );
     }
 
     #[test]
     fn an_intent_with_no_running_instance_is_reported_rather_than_retried_forever() {
-        // `send_intent` against a socket no one listens on fails with ECONNREFUSED rather than
-        // blocking, which is what lets `run` decide "I am the first instance" without a timeout.
-        // A path that never existed gives ENOENT instead, so leave a real (unlinked) socket file
-        // behind, exactly as a killed resident process would: binding a listener and dropping it
-        // removes the listener but not the file.
         let dir = tempfile::tempdir().unwrap();
         let dead = dir.path().join("nothing-here.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&dead).unwrap();
-        drop(listener);
-        assert!(
-            dead.exists(),
-            "dropping a `UnixListener` leaves its socket file in place, as a killed instance does"
-        );
-
+        drop(std::os::unix::net::UnixListener::bind(&dead).unwrap());
         let error = instance::send_intent(&dead, Intent::Finder).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::ConnectionRefused);
         assert!(!instance::instance_running(&dead));

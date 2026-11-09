@@ -23,7 +23,7 @@ mod library;
 
 pub use events::{AppEvent, Delivery, UpdatePhase, UpdateProgress};
 pub use finder::{FinderActions, FINDER_OPERATIONS};
-pub use library::{LibraryActions, LIBRARY_OPERATIONS};
+pub use library::{LibraryActions, RecoveryCredential, LIBRARY_OPERATIONS};
 
 use std::sync::Arc;
 

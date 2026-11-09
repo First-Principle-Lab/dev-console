@@ -19,7 +19,7 @@ pub struct TerminalOption {
     pub command: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
     pub mode: &'static str,

@@ -122,8 +122,7 @@ mod tests {
                     expected_revision: 1,
                     approved: false,
                 })
-                .err()
-                .expect("an unapproved run never reaches a process")
+                .expect_err("an unapproved run never reaches a process")
                 .to_string(),
             "running this command needs explicit approval for the saved version"
         );
@@ -134,8 +133,7 @@ mod tests {
                     expected_revision: 9,
                     approved: true,
                 })
-                .err()
-                .expect("a stale revision is refused before anything is spawned")
+                .expect_err("a stale revision is refused before anything is spawned")
                 .to_string(),
             "this entry was changed elsewhere; reload it before saving"
         );
@@ -146,8 +144,7 @@ mod tests {
                     expected_revision: 0,
                     approved: true,
                 })
-                .err()
-                .expect("a missing entry is a missing entry")
+                .expect_err("a missing entry is a missing entry")
                 .to_string(),
             "entry not found"
         );

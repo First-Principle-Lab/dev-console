@@ -7,16 +7,19 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ### Added
 
-- The native shell has an entry editor pane and the state behind it: opening an edit copies the saved record into a draft, the pane reports `unsaved changes` only while the draft differs from that record, and the list is swapped out while it is open. Saving writes the draft back into the record the editor was opened on rather than into the slot it sat in, so a record that went away meanwhile is neither recreated nor silently replaced.
-- The shared dialog panel has a second user, the unsaved-changes prompt: three actions (`Keep editing`, `Discard`, `Save`), its own copy, a keyboard trap over three stops, and the same three dismissive routes as the delete confirmation. A close request and the Library's tab chords both refuse to throw a draft away, the way the shipped window does.
+- Port Library, Finder, entry editing, project import, environment versions, history suggestions, and Settings to the staged Rune shell. Production continues to use Tauri while the remaining migration milestones are completed.
+- Add native scripted UI tests over disposable encrypted profiles and a live Hyprland check with synthetic entries, repeated Finder opens, hover, keyboard copy, tray Quit, and clipboard cleanup.
 
 ### Fixed
 
+- Reject late secret and recovery reveals after closing, cancelling, locking, switching tabs, or reopening Settings. Reload the Secrets tab after unlock and secure its editor before the first frame.
+- Keep modal footers and project actions reachable in narrow native windows, support Enter on history suggestions, and hide project import on the Secrets tab.
+- Preserve unsaved edits when quitting the native shell, and clear decrypted state and owned clipboard content before exit.
 - Closing the finder while Dev Console is quitting finishes the quit at once instead of waiting out the five-second grace period.
 
 ### Testing
 
-- `./scripts/verify.sh` now compiles and tests the whole Cargo workspace, so the native shell's headless gates (the runtime harness and the checkpoint gates over the shipped conventions) run in the same entrypoint as the rest instead of depending on a CI job that needs a token this repo cannot issue.
+- Run Cargo workspace formatting, Clippy, and tests in CI alongside the existing Tauri checks. Isolate the native test fixtures' XDG directories as well as their home directory.
 
 ## 0.0.12 — 2026-11-08
 

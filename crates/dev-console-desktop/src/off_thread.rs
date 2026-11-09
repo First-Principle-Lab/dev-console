@@ -654,7 +654,7 @@ mod tests {
         // worker finishing while no loop is connected. Whether a wake then produced a *frame* is the
         // part this host cannot see at all (see the module docs): that is the owner's desktop check,
         // and nothing here pretends to have settled it.
-        let app = crate::app::library_app();
+        let app = rune::App::new(crate::app::library_spec());
         let handle = app.handle();
         let waker = wakeup(&handle);
         waker();

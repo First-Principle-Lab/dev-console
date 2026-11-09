@@ -18,6 +18,7 @@
 //! `the_two_surfaces_together_cover_every_ipc_command_exactly_once`.
 
 mod archive;
+pub use archive::RecoveryCredential;
 mod entries;
 mod execution;
 mod projects;

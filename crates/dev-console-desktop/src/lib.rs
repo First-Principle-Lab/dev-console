@@ -1,39 +1,34 @@
-//! The native Rune shell: two windows, a tray, one instance, and a control socket that wakes it.
+//! The native Rune shell: the Library and Finder windows, the tray, one instance, and a control
+//! socket that wakes it.
 //!
-//! This crate is the desktop half of the plan in `docs/plans/rune-migration.md`. It owns windows,
-//! tray, CLI, single-instance and wakeups. It deliberately owns **no** domain logic: models, the
-//! SQLite repository, the age vault, the keyring adapter, polkit, search, imports, project scanners,
-//! history, environment snapshots, recovery and backups all live in `dev-console-core` (plan §1), and
-//! this shell reaches them only through that crate's types. The one place it has to hold one is
-//! [`off_thread`], the stream that runs a blocking call on a Rune worker and has the answer judged by
-//! `dev_console_core::freshness` before a window may paint it. The views in [`ui`] are still
-//! placeholder trees with no profile behind them, so nothing here reads or writes a real user profile,
-//! a database or a keyring, and it cannot disagree with the running Tauri app about user data.
+//! This crate is the desktop half of `docs/plans/rune-migration.md`. It owns windows, views, tray,
+//! CLI, single-instance and wakeups, and no domain logic: models, the SQLite repository, the age
+//! vault, the keyring adapter, polkit, search, imports, project scanners, history, environment
+//! snapshots, recovery and backups live in `dev-console-core`, reached through its typed
+//! `LibraryActions` and `FinderActions` ([`hub`]).
 //!
-//! ## What this crate can prove on a headless host, and what it cannot
+//! The views ([`library`], [`finder`]) are Rust ports of `src/windows/*.svelte` and
+//! `src/components/*.svelte`, drawn in the Dev Console palette ([`theme`]) with the Lucide icon set
+//! ([`icons`]). Blocking calls run on worker threads and their answers are applied on the UI thread
+//! only while they still answer the newest request ([`hub::Exec`]).
 //!
-//! Unit tests here cover the *specifications* the shell asks Rune for and the parts that need no
-//! display: window titles and sizes, the opaque/borderless option set, the single-instance lock, the
-//! control-socket round trip, the tray menu's shape and the icon buffer's layout. Rune's headless
-//! tooling can also drive the views over their element trees (see `dev-console-ui-tests`).
-//!
-//! None of that establishes what plan §5 reserves for a real session: activation, the title/class
-//! `hyprctl -j clients` reports for `dev-console-finder`, the mapped 680×420 size, hover, dismissal,
-//! whether neighbouring tiled windows keep their layout, tray rendering, GPU/X11 error logs, and
-//! "verified on Hyprland/NVIDIA". Those stay UNVERIFIED here - by the plan's own rule ("Treat exit 77
-//! as UNVERIFIED"), which is what [`app::EXIT_NO_DISPLAY`] encodes for this binary - and are carried
-//! to the owner's desktop check.
+//! Unit and scripted tests decide behaviour on a headless host. What only a real session can
+//! decide - activation, the title/class `hyprctl -j clients` reports, the mapped 680×420 size,
+//! hover, dismissal, tiled neighbours, tray rendering - is checked on the owner's Hyprland/NVIDIA
+//! desktop (see `docs/project/native-feasibility-ledger.md`); with no display the binary exits 77,
+//! which `scripts/verify.sh` reads as UNVERIFIED.
 
 pub mod app;
-pub mod copy;
-pub mod dialog;
-pub mod editor;
 pub mod finder;
+pub mod hub;
+pub mod icons;
 pub mod identity;
 pub mod instance;
+pub mod library;
 pub mod off_thread;
+pub mod theme;
 pub mod tray;
-pub mod ui;
+pub mod widgets;
 
 /// The one source walk shared by the gates that read this repository's own files, so a walk that
 /// silently found nothing cannot make two of them pass at once.
@@ -119,8 +114,10 @@ mod tests {
             }
         }
         assert!(
-            scanned.iter().any(|path| path.ends_with("/ui.rs")),
-            "the scan stopped walking the view file: {scanned:?}"
+            scanned
+                .iter()
+                .any(|path| path.ends_with("/library/view.rs")),
+            "the scan stopped walking the view files: {scanned:?}"
         );
         assert!(
             scanned

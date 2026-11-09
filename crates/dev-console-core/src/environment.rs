@@ -32,28 +32,29 @@ pub struct EnvironmentProject {
     pub snapshots: Vec<EnvironmentSnapshot>,
 }
 
-#[derive(Serialize)]
+/// One saved version of an environment file: metadata only, never the file's contents.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotMeta {
-    id: String,
-    file: String,
-    version: u32,
-    saved_at: String,
-    bytes: usize,
+    pub id: String,
+    pub file: String,
+    pub version: u32,
+    pub saved_at: String,
+    pub bytes: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SyncResult {
     pub root: String,
     pub projects: Vec<ProjectMeta>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMeta {
-    root: String,
-    enabled: bool,
-    snapshots: Vec<SnapshotMeta>,
+    pub root: String,
+    pub enabled: bool,
+    pub snapshots: Vec<SnapshotMeta>,
 }
 
 pub fn list(vault: &VaultService) -> AppResult<Vec<ProjectMeta>> {

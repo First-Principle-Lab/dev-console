@@ -1,519 +1,687 @@
-//! The Finder window's state and view: the palette's query field, its context chip, its candidate
-//! rows and the keyboard footer.
+//! The Finder palette: the native port of `src/windows/Finder.svelte`.
 //!
-//! This is the palette half of what `src/windows/Finder.svelte` is on the shipped side. It lives
-//! apart from [`crate::ui`] because the two windows are separate state machines with one thing in
-//! common - the toolkit they draw with - and because the keyboard rules ported here are the reason
-//! this host can decide anything about the palette at all: `route_key` in
-//! `crates/rune/src/runtime/input/keys.rs` asks the focused input, then its editor, then the
-//! window's handler, so every binding asserted below is driven through the same seam the real window
-//! uses.
+//! Every appearance starts from an empty query and a fresh search. Typing searches through
+//! `FinderActions::search_entries`; Up/Down move the highlight with the shipped `nextSelection`
+//! rule (`dev_console_core::finder_state`), Tab accepts the inline completion, Enter copies the
+//! highlighted row through the core clipboard service (which owns expiry and lock clearing) and
+//! hides the palette, Ctrl+O opens the row in the Library, Ctrl+P ignores the detected project for
+//! this open, and Escape clears and hides.
 //!
-//! Secret hygiene is a shape property here, not a discipline: [`Candidate`] carries an id, a name and
-//! a kind, and the value behind a secret candidate reaches the clipboard only inside
-//! [`Finder::activate`]'s call to the [`crate::copy::CopySource`] - there is no field on
-//! any of these structs that a `Debug` dump or an `assert_eq!` diff could print a value out of, which
-//! is what [`Finder`]'s hand-written `Debug` and the harness's element-tree scans assert.
+//! A search answer is applied only if it answers the newest request, and a locked vault's answer
+//! never brings back secret rows: the same request-id and vault-generation guards `runSearch` has.
 
-use std::sync::Arc;
-use std::time::Duration;
+use dev_console_core::context::FinderContext;
+use dev_console_core::finder_state::{displayed_query, next_selection, selected, tab_completion};
+use dev_console_core::models::{
+    CopyRequest, Kind, SearchRequest, SearchResponse, SearchResult, VaultState,
+};
+use dev_console_core::services::{AppEvent, Effects};
+use dev_console_core::Surface;
+use rune::{
+    col, el, icon, row, text, text_input, Chord, Cursor, Cx, El, Key, KeyEvent, ScrollSpec,
+    TextEdit, Tx,
+};
+use std::sync::LazyLock;
 
-use crate::copy::{self, CopyOutcome, CopySource, Unwired};
-use crate::ui::keycap;
-use dev_console_core::models::{CopyRequest, Kind};
-use rune::tok::{radius, space, type_};
-use rune::{col, el, row, text, text_input, Cx, El, Key, KeyEvent, TextEdit, Tx};
+use crate::hub::{message, Exec, Hub};
+use crate::icons;
+use crate::theme::{size, text as ts, Look};
+use crate::widgets;
 
-/// One row of the palette's result list.
-///
-/// A candidate is *metadata*: the entry's id, the name the row prints, and which kind it is. That is
-/// the whole shape, and it is the point - the shipped palette receives exactly this from
-/// `api.search()` (`SearchResult`), and the value behind a `Secret` candidate reaches the clipboard
-/// only through [`Finder::activate`]'s call to the [`CopySource`], never through a field of a state
-/// struct a dump could print.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
-    /// The entry id the copy request is made for (`api.copy(kind, id, 0)`). Metadata, not a secret.
-    pub id: String,
-    /// The name the row prints, and the text Tab writes into the field (`tabCompletion`'s input).
-    pub name: String,
-    /// Command or secret: it decides the copy's wording and which backend path resolves the value.
-    pub kind: Kind,
-}
+/// The id of the synthetic "unlock the vault" row the palette shows while the vault is locked.
+pub const UNLOCK_ID: &str = "__unlock_vault__";
 
-impl Candidate {
-    /// A command candidate whose id is `id`.
-    pub fn command(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Candidate {
-            id: id.into(),
-            name: name.into(),
-            kind: Kind::Command,
-        }
-    }
+/// The status line after a copy. The value itself never appears: only what happened.
+pub const COPIED_COMMAND: &str = "Copied the command to the clipboard.";
+pub const COPIED_SECRET: &str = "Copied the secret to the clipboard.";
+pub const COPY_FAILED: &str = "Copy failed. Nothing was copied.";
 
-    /// A secret candidate: `name` is all the window ever sees of it.
-    pub fn secret(id: impl Into<String>, name: impl Into<String>) -> Self {
-        Candidate {
-            id: id.into(),
-            name: name.into(),
-            kind: Kind::Secret,
-        }
-    }
-}
+static OPEN_DETAILS: LazyLock<Chord> =
+    LazyLock::new(|| Chord::parse("ctrl+o").expect("valid chord"));
+static IGNORE_CONTEXT: LazyLock<Chord> =
+    LazyLock::new(|| Chord::parse("ctrl+p").expect("valid chord"));
 
-/// A bare name is a command candidate whose id is that name - the shorthand the placeholder lists and
-/// the scripted fixtures use, so `vec!["git status".into()]` still reads as one row.
-impl From<&str> for Candidate {
-    fn from(name: &str) -> Self {
-        Candidate::command(name, name)
-    }
-}
-
-/// The Finder window's state.
 pub struct Finder {
-    /// The query field's editable text.
+    hub: Hub,
+    exec: Exec<Finder>,
     pub query: TextEdit,
-    /// Completion candidates, best first. Placeholder for the ported Finder selection logic; the
-    /// ranking rules live in `src/lib/search-ranking.ts` until that moves.
-    pub rows: Vec<Candidate>,
-    /// Index of the highlighted row.
-    pub selected: usize,
-    /// The project folder the Finder detected from the focused window, shown as a chip. Empty
-    /// means no context was detected. A path only - never file contents.
-    pub context: String,
-    /// Set when the palette asked to be dismissed. Explicit state rather than a window call: the
-    /// shell that hides the window reads it (the shipped palette's `api.hideSelf()` hop), so the
-    /// decision "Escape clears the palette and takes it out of the way" is testable here while the
-    /// unmapping itself stays the owner-desktop check it is.
-    pub dismissed: bool,
-    /// What the last copy attempt left to say, the mirror of the shipped `status`/`error` pair.
-    /// [`CopyOutcome`] is an enum of fixed strings, so there is no field here a value could be
-    /// written into - which is the whole of the shipped app's "the value itself never appears here"
-    /// comment turned into a type. Cleared by the next copy; the shipped palette clears it when a new
-    /// search starts, which is the seam that does not exist yet.
-    pub copy_status: Option<CopyOutcome>,
-    /// How long a copied value may stay on the clipboard before the shell clears it, if it still owns
-    /// it: the native form of `clipboardExpirySeconds` ([`copy::default_expiry`] reads the same
-    /// default the shipped app reads).
-    pub copy_expiry: Duration,
-    /// Where a highlighted row's value comes from. A `dyn` pointer, deliberately: the resolver is the
-    /// only thing in this struct that can reach a value, and it reaches it *outwards* - straight to
-    /// the clipboard - so no state field, `Debug` line or element dump can carry one.
-    pub source: Arc<dyn CopySource>,
+    pub results: Vec<SearchResult>,
+    pub selected_id: Option<String>,
+    pub vault: Option<VaultState>,
+    pub context: Option<FinderContext>,
+    pub error: Option<String>,
+    pub status: Option<String>,
+    pub loading: bool,
+    /// The theme setting, re-read on every appearance and on `theme-changed`.
+    pub theme: String,
+    request_id: u64,
 }
 
-impl Default for Finder {
-    fn default() -> Self {
-        Finder {
-            query: TextEdit::new(String::new()),
-            rows: Vec::new(),
-            selected: 0,
-            context: String::new(),
-            dismissed: false,
-            copy_status: None,
-            copy_expiry: copy::default_expiry(),
-            source: Arc::new(Unwired),
-        }
-    }
-}
-
-/// Hand-written rather than derived, and the difference matters: the derived form would print
-/// `source`, whose `Debug` is this crate's own and prints the resolver's *identity* only - so the one
-/// path a value could take out of this struct in a log line or a `assert_eq!` diff is closed by what
-/// the impl says rather than by what it forgot to skip.
 impl std::fmt::Debug for Finder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Finder")
             .field("query", &self.query.text)
-            .field("rows", &self.rows)
-            .field("selected", &self.selected)
+            .field("results", &self.results.len())
+            .field("selected_id", &self.selected_id)
             .field("context", &self.context)
-            .field("dismissed", &self.dismissed)
-            .field("copy_status", &self.copy_status)
-            .field("copy_expiry", &self.copy_expiry)
-            .field("source", &"dyn CopySource")
+            .field("error", &self.error)
+            .field("status", &self.status)
             .finish()
     }
 }
 
 impl Finder {
-    /// A Finder showing `rows` as command candidates, for tests and the headless snapshot scenes.
-    pub fn with_rows(rows: &[&str]) -> Self {
-        Finder {
-            rows: rows.iter().map(|row| Candidate::from(*row)).collect(),
-            ..Finder::default()
-        }
-    }
-
-    /// A Finder showing exact candidates, so a fixture can name the id and kind a copy will ask for.
-    pub fn with_candidates(rows: &[Candidate]) -> Self {
-        Finder {
-            rows: rows.to_vec(),
-            ..Finder::default()
-        }
-    }
-
-    /// The Finder backed by `source` instead of [`Unwired`]: the seam the scripted tests put a
-    /// synthetic vault behind, and the one milestone 2 will hand an `Arc<AppState>` to.
-    pub fn with_copy_source(mut self, source: Arc<dyn CopySource>) -> Self {
-        self.source = source;
-        self
-    }
-
-    /// Highlights `index` when it names a row, and says whether anything moved. The scripted tests
-    /// drive selection through this rather than through a private field, so the rule "a press on a
-    /// row that is not in the list cannot select it" is one tested place.
-    pub fn select(&mut self, index: usize) -> bool {
-        if index < self.rows.len() && self.selected != index {
-            self.selected = index;
-            return true;
-        }
-        false
-    }
-
-    /// Moves the highlight by `delta`, the port of `nextSelection` in `src/lib/finder-state.ts`:
-    /// it clamps instead of wrapping, keeps a still-valid selection, and when the selected row has
-    /// fallen out of a shortened list it restarts at the end the movement was heading for. Returns
-    /// whether the highlight moved.
-    pub fn move_selection(&mut self, delta: isize) -> bool {
-        if self.rows.is_empty() {
-            return false;
-        }
-        let last = self.rows.len() - 1;
-        if self.selected > last {
-            self.selected = if delta >= 0 { 0 } else { last };
-            return true;
-        }
-        let wanted = self.selected as isize + delta;
-        let next = wanted.clamp(0, last as isize) as usize;
-        if next == self.selected {
-            return false;
-        }
-        self.selected = next;
-        true
-    }
-
-    /// Accepts the selected row into the field: the port of `tabCompletion` in
-    /// `src/lib/finder-state.ts`, which returns the row's name for both a prefix match and a fuzzy
-    /// one, and nothing at all once the field already holds that name. Writes through
-    /// [`TextEdit::replace_text`], which zeroes the old draft - the query field can hold a secret's
-    /// name, so a plain `String` assignment would leave the old bytes in the allocation.
-    ///
-    /// The shipped handler also re-searches and keeps the same row selected (`acceptCompletion`);
-    /// there is no search backend behind this state yet, so only the field changes.
-    pub fn complete(&mut self) -> bool {
-        let Some(row) = self.rows.get(self.selected) else {
-            return false;
+    pub fn new(hub: Hub, exec: Exec<Finder>) -> Finder {
+        let info = hub.finder.app_state();
+        let theme = hub.finder.get_theme();
+        let mut query = TextEdit::new(String::new());
+        query.focused = true;
+        let mut finder = Finder {
+            hub,
+            exec,
+            query,
+            results: Vec::new(),
+            selected_id: None,
+            vault: Some(info.vault),
+            context: info.finder_context,
+            error: None,
+            status: None,
+            loading: false,
+            theme,
+            request_id: 0,
         };
-        if row.name == self.query.text {
-            return false;
+        finder.search();
+        finder
+    }
+
+    /// The rows on screen: the results, plus the unlock prompt while the vault is locked.
+    pub fn rows(&self) -> Vec<SearchResult> {
+        let mut rows = self.results.clone();
+        if self.vault.as_ref().is_some_and(|vault| !vault.unlocked) {
+            rows.push(SearchResult {
+                id: UNLOCK_ID.into(),
+                kind: Kind::Command,
+                name: "Unlock vault to search secrets".into(),
+                entry_type: "System".into(),
+                tags: Vec::new(),
+                description: String::new(),
+                completion: None,
+                pinned: false,
+                usage_count: 0,
+                last_used_at: None,
+                in_context: false,
+            });
         }
-        let name = row.name.clone();
-        self.query.replace_text(name);
-        true
+        rows
     }
 
-    /// Copies the highlighted row: the port of `activate()` in `src/windows/Finder.svelte`, all three
-    /// of its hops.
-    ///
-    /// The value is asked for by *id* through [`CopySource`] and handed straight to
-    /// [`Tx::copy_secret`], which zeroes the buffer and re-clears the board when the deadline passes
-    /// **only if the clipboard still holds what this copy wrote** - Rune's version of the shipped
-    /// `expire_due` guard ("clear the clipboard only when it still holds the value this app copied"),
-    /// and the reason the write goes through the toolkit rather than a second owner beside it. A
-    /// secret and a command both take `copy_secret`, because in the shipped app both go through
-    /// [`dev_console_core::clipboard::Clipboard::copy`], which schedules the same expiry whichever
-    /// kind it was handed.
-    ///
-    /// `None` means there was nothing highlighted: the shipped `activate` returns before touching
-    /// `status` in that case, so no line appears, which is why the return type distinguishes it from
-    /// [`CopyOutcome::Failed`]. On success this sets [`Finder::dismissed`] *without* calling
-    /// [`Finder::dismiss`], because the shipped success path is `api.hideSelf()` - the palette closes
-    /// as it stands - while Escape's `hide()` is the one that clears the query and the rows.
-    pub fn activate(&mut self, tx: &mut Tx) -> Option<CopyOutcome> {
-        let row = self.rows.get(self.selected)?;
-        let request = CopyRequest {
-            kind: row.kind,
-            id: row.id.clone(),
-            // The shipped palette passes a literal 0 here: "whatever revision the backend currently
-            // holds" (see `CopyRequest`). The revision-checked variant is the Library's copy action,
-            // not the palette's, and the staleness rules behind it are ported and tested in core.
-            expected_revision: 0,
-        };
-        let outcome = match self.source.value_for(&request) {
-            Some(value) => {
-                tx.copy_secret(value, self.copy_expiry);
-                CopyOutcome::for_kind(request.kind)
-            }
-            None => CopyOutcome::Failed,
-        };
-        self.copy_status = Some(outcome);
-        if outcome.succeeded() {
-            self.dismissed = true;
-        }
-        Some(outcome)
+    pub fn current(&self) -> Option<SearchResult> {
+        let rows = self.rows();
+        selected(&rows, self.selected_id.as_deref()).cloned()
     }
 
-    /// Takes the palette out of the way: the port of `hide` in `src/windows/Finder.svelte`, which
-    /// clears the query, the rows and the selection and then closes the window. `clear` rather than
-    /// an empty assignment because it zeroes the old draft and keeps keyboard focus on the field,
-    /// which is where the next summon wants it. The request-counter half of the shipped `hide`
-    /// belongs to the search port and is not here yet.
-    pub fn dismiss(&mut self) {
-        self.query.clear();
-        self.rows.clear();
-        self.selected = 0;
-        self.dismissed = true;
-        // The shipped `hide()` clears `error` and leaves `status` alone, and the split is deliberate:
-        // "Copy failed." describes an attempt the user is entitled to be told about on the way out,
-        // while a "Copied …" confirmation describes a palette state that is about to be gone. The one
-        // place the shipped app clears a confirmation is at the start of the next search
-        // (`runSearch`), which is the seam that does not exist here yet - hence a confirmation
-        // surviving this call, and the matrix row that says so staying uncovered rather than being
-        // tested against a search that isn't there.
-        if matches!(self.copy_status, Some(CopyOutcome::Failed)) {
-            self.copy_status = None;
-        }
-    }
-
-    /// The palette's key routing, the native mirror of `<input on:keydown={onKeydown}>` in
-    /// `src/windows/Finder.svelte`. It is reached through [`El::on_input_key`] on the query field -
-    /// the only Rune hook that sees a key while a text field holds focus, because `El::on_key`
-    /// covers controls that own their keys and `Runtime::on_key` runs only for keys the focused
-    /// field left alone (`route_key` in `runtime/input/keys.rs` consults the input's own handler
-    /// before the editor and the window's).
-    ///
-    /// Returning true is `preventDefault`: the key never reaches the editor, so an arrow does not
-    /// move the caret and Escape does not blur the field. The five bindings below are the shipped ones
-    /// this state can honour today; `Ctrl+O`/`Ctrl+P` fall through to the field until the details
-    /// panel and the ignore-context hop exist, and the footer says the same thing this comment does
-    /// rather than advertising a binding that is not there.
-    ///
-    /// `Space` stays unbound on purpose, unlike the shipped handler which binds it beside `Enter`
-    /// behind `shouldCommit`: Rune's IME composition flag is `pub(super)` and its own guard holds
-    /// `Enter`/`Escape` back mid-composition but not `Space`, so binding it would swallow a space the
-    /// user is composing. `Enter` is safe for exactly that reason.
-    pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        match ev.key {
-            Key::Down => {
-                self.move_selection(1);
-                true
-            }
-            Key::Up => {
-                self.move_selection(-1);
-                true
-            }
-            Key::Tab => {
-                self.complete();
-                true
-            }
-            Key::Enter => {
-                // Consumed whether or not a row is highlighted, as the shipped `case 'Enter'` is: it
-                // calls `preventDefault()` before `activate()` decides there is nothing to copy.
-                self.activate(tx);
-                true
-            }
-            Key::Escape => {
-                self.dismiss();
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-/// Draws the Finder window: query field, context chip, candidates and the keyboard footer.
-pub fn finder_view(state: &Finder, cx: &mut Cx<Finder>) -> El {
-    let theme = rune::tok::theme(cx.system_dark());
-    col()
-        .key("finder-window")
-        .w_full()
-        .h_full()
-        .fill(theme.bg)
-        .px(space::S3)
-        .py(space::S3)
-        .gap(space::S2)
-        .child(query_field(state, theme))
-        .child(context_chip(state, theme))
-        .child(result_rows(state, theme))
-        .child(copy_line(state, theme))
-        .child(finder_footer(state, theme))
-}
-
-/// The one line the palette shows after a copy attempt, and the only surface a copy ever writes to.
-///
-/// Mirrors the shipped pair exactly: `class="copied" role="status"` for a copy that happened and
-/// `class="error-banner" role="alert"` for one that did not, one line at a time (`{:else if}`), with
-/// the same text. The element *key* follows that split too - `finder-status` / `finder-error` are the
-/// `data-testid`s `tests/e2e/finder.spec.ts` reaches for - and what both can ever carry is one of
-/// [`CopyOutcome`]'s three fixed strings, which is the leak-proof half of the shipped design done in
-/// the type rather than in the template.
-///
-/// With nothing to report this emits an unkeyed zero-sized spacer, exactly as [`context_chip`] does:
-/// a `finder-status` element that says nothing would be a live region a screen reader announces as
-/// empty, and a scripted check reading its presence as "a copy just happened" would be wrong.
-fn copy_line(state: &Finder, theme: rune::tok::Theme) -> El {
-    let Some(outcome) = state.copy_status else {
-        return el().size(0.0, 0.0);
-    };
-    // The shipped markup distinguishes the two: a confirmation is a `role="status"` live region, a
-    // failure is a `role="alert"` one. Which one a headless tree announces is the a11y half this
-    // container cannot settle, so the split is carried by the role and the key, not by a colour -
-    // `rune::tok::Theme` has no danger token, and inventing a hex for a failure would break both the
-    // token rule and the palette port. The panel's two states are told apart by contrast within the
-    // tokens that exist.
-    let failed = outcome == CopyOutcome::Failed;
-    row()
-        .key(if failed {
-            "finder-error"
-        } else {
-            "finder-status"
-        })
-        .role(if failed { "alert" } else { "status" })
-        .label(outcome.message())
-        .w_full()
-        .h(20.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::SM)
-        .fill(if failed {
-            theme.control_off
-        } else {
-            theme.card
-        })
-        .border(1.0, theme.card_border)
-        .child(text(outcome.message()).font(type_::LABEL).color(if failed {
-            theme.text
-        } else {
-            theme.text_secondary
-        }))
-}
-
-fn query_field(state: &Finder, theme: rune::tok::Theme) -> El {
-    row()
-        .key("finder-query-row")
-        .w_full()
-        .h(34.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::MD)
-        .fill(theme.card)
-        .border(1.0, theme.card_border)
-        .child(
-            text_input(&state.query, type_::BODY)
-                .key("finder-query")
-                .role("textbox")
-                .label("Search commands and secrets")
-                .color(theme.text)
-                .on_edit(|state: &mut Finder| &mut state.query)
-                // The palette's bindings belong on the field, not on the window: the shipped
-                // handler is `<input on:keydown>`, and a focused Rune field is also the only thing
-                // that sees its own keys before the editor does. See [`Finder::route_key`].
-                .on_input_key(|state: &mut Finder, ev: &KeyEvent, tx: &mut Tx| {
-                    state.route_key(ev, tx)
-                }),
-        )
-}
-
-fn context_chip(state: &Finder, theme: rune::tok::Theme) -> El {
-    // No detected project folder: emit an unkeyed, zero-sized spacer, not a `finder-context`
-    // element. A keyed-but-empty chip would put an accessible node that announces nothing into the
-    // tree, and the scripted checks read the presence of `finder-context` as "a folder was detected"
-    // (`an_empty_finder_shows_the_query_field_and_no_rows_or_context_chip`). The unkeyed spacer keeps
-    // the column's gap and layout identical; only the misleading identity is gone.
-    if state.context.is_empty() {
-        return el().size(0.0, 0.0);
-    }
-    row()
-        .key("finder-context")
-        .h(22.0)
-        .px(space::S2)
-        .center_y()
-        .radius(radius::SM)
-        .fill(theme.card)
-        .border(1.0, theme.card_border)
-        .label(format!("Project {}", state.context))
-        .child(
-            text(state.context.clone())
-                .font(type_::MONO_CAPTION)
-                .color(theme.text_secondary),
-        )
-}
-
-fn result_rows(state: &Finder, theme: rune::tok::Theme) -> El {
-    if state.rows.is_empty() {
-        return col().key("finder-empty").w_full().h_full().center().child(
-            text("Type to search")
-                .font(type_::BODY)
-                .color(theme.text_secondary),
+    /// Searches for the current query. Only the newest request's answer is applied.
+    pub fn search(&mut self) {
+        self.request_id += 1;
+        let id = self.request_id;
+        let query = self.query.text.clone();
+        self.loading = true;
+        self.error = None;
+        // A "Copied" line belongs to the query it happened for.
+        self.status = None;
+        let finder = self.hub.finder.clone();
+        self.exec.clone().run(
+            self,
+            move || {
+                finder.search_entries(SearchRequest {
+                    query,
+                    request_id: id,
+                    limit: None,
+                })
+            },
+            |state, response| state.apply_search(response),
         );
     }
-    col()
-        .key("finder-rows")
-        .role("list")
-        .label("Results")
-        .w_full()
-        .h_full()
-        .gap(space::S1)
-        .children(state.rows.iter().enumerate().map(|(index, candidate)| {
-            let selected = index == state.selected;
-            row()
-                .key(format!("finder-row-{index}"))
-                .role("listitem")
-                // The name, never the value: `Candidate::name` is the row's metadata and the same
-                // string `row.name` prints in the shipped list. The kind glyph (`Icon
-                // name="secret"`) has no native equivalent yet - the SVG icon set is still on the
-                // unbuilt list - so a secret row and a command row are told apart by what they copy,
-                // not by what they print, which is the safer direction for a leak.
-                .label(candidate.name.clone())
-                // No `selected` state exists on `El` at this revision (see `tab`); the row's place
-                // in the list is announced and the highlight is drawn.
-                .position_in_set(index + 1, state.rows.len())
-                .focusable(true)
-                .h(28.0)
-                .px(space::S2)
-                .center_y()
-                .radius(radius::MD)
-                .fill(if selected { theme.hover } else { theme.bg })
-                .on_press_tx(move |state: &mut Finder, _| {
-                    state.select(index);
-                })
-                .child(
-                    text(candidate.name.clone())
-                        .font(type_::BODY)
-                        .color(if selected {
-                            theme.text
+
+    /// Paints a search answer, unless a newer search has been asked since or the answer was read
+    /// from a vault that has locked since: the shipped `runSearch` guards.
+    pub fn apply_search(&mut self, response: SearchResponse) {
+        if response.request_id != self.request_id {
+            return;
+        }
+        self.loading = false;
+        let generation = self
+            .vault
+            .as_ref()
+            .map_or(response.vault_generation, |vault| vault.generation);
+        if response.vault_generation < generation
+            && self.vault.as_ref().is_some_and(|vault| !vault.unlocked)
+        {
+            return;
+        }
+        self.results = response.results;
+        self.selected_id =
+            next_selection(&self.results, self.selected_id.as_deref(), 0).map(str::to_owned);
+    }
+
+    /// The id the next answer must carry to be painted.
+    pub fn request_id(&self) -> u64 {
+        self.request_id
+    }
+
+    /// Moves the highlight by `delta`, clamping at both ends.
+    pub fn move_selection(&mut self, delta: i64, tx: Option<&mut Tx>) {
+        let rows = self.rows();
+        self.selected_id =
+            next_selection(&rows, self.selected_id.as_deref(), delta).map(str::to_owned);
+        if let (Some(tx), Some(id)) = (tx, self.selected_id.as_deref()) {
+            tx.scroll_into_view(row_key(id));
+        }
+    }
+
+    /// What the field shows: the query plus the greyed completion of the highlighted row.
+    pub fn completion_tail(&self) -> String {
+        let current = self.current();
+        match displayed_query(&self.query.text, current.as_ref()) {
+            Some(full)
+                if full.len() > self.query.text.len() && full.starts_with(&self.query.text) =>
+            {
+                full[self.query.text.len()..].to_owned()
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Tab: replace the query with the highlighted row's name and keep that row highlighted.
+    pub fn accept_completion(&mut self) -> bool {
+        let current = self.current();
+        let Some(completed) = tab_completion(&self.query.text, current.as_ref()) else {
+            return false;
+        };
+        let keep = current.map(|row| row.id);
+        self.query.replace_text(completed);
+        self.search();
+        if let Some(keep) = keep {
+            if self.results.iter().any(|row| row.id == keep) {
+                self.selected_id = Some(keep);
+            }
+        }
+        true
+    }
+
+    /// Enter: copy the highlighted row, or unlock when it is the unlock prompt.
+    pub fn activate(&mut self) {
+        let Some(entry) = self.current() else {
+            return;
+        };
+        if entry.id == UNLOCK_ID {
+            self.unlock();
+            return;
+        }
+        let finder = self.hub.finder.clone();
+        let hub = self.hub.clone();
+        let request = CopyRequest {
+            kind: entry.kind,
+            id: entry.id.clone(),
+            expected_revision: 0,
+        };
+        self.exec.clone().run(
+            self,
+            move || finder.copy_entry(request),
+            move |state, outcome| match outcome {
+                Ok(_) => {
+                    state.status = Some(
+                        if entry.kind == Kind::Secret {
+                            COPIED_SECRET
                         } else {
-                            theme.text_secondary
-                        }),
-                )
-        }))
+                            COPIED_COMMAND
+                        }
+                        .into(),
+                    );
+                    state.error = None;
+                    hub.perform(state.hub.finder.hide_self(Surface::Finder));
+                }
+                Err(error) => {
+                    let text = message(&error);
+                    state.error = Some(if text.is_empty() {
+                        COPY_FAILED.into()
+                    } else {
+                        text
+                    });
+                }
+            },
+        );
+    }
+
+    /// Ctrl+O: show the highlighted row in the Library, then step out of the way.
+    pub fn open_details(&mut self) {
+        let Some(entry) = self.current().filter(|entry| entry.id != UNLOCK_ID) else {
+            return;
+        };
+        match self
+            .hub
+            .finder
+            .open_library(Surface::Finder, entry.kind, Some(entry.id))
+        {
+            Ok(command) => {
+                self.hub.perform(command);
+                self.hub.perform(self.hub.finder.hide_self(Surface::Finder));
+            }
+            Err(error) => self.error = Some(message(&error)),
+        }
+    }
+
+    /// Ctrl+P, or a press on the chip: rank everything, not just this project's, for this open.
+    pub fn ignore_context(&mut self) {
+        if self.context.is_none() {
+            return;
+        }
+        self.context = None;
+        self.selected_id = None;
+        let _ = self.hub.finder.clear_finder_context();
+        self.search();
+    }
+
+    /// Escape: clear and hide.
+    pub fn dismiss(&mut self) {
+        self.request_id += 1;
+        self.query.clear();
+        self.results.clear();
+        self.selected_id = None;
+        self.error = None;
+        self.loading = false;
+        self.hub.perform(self.hub.finder.hide_self(Surface::Finder));
+    }
+
+    /// Unlocks through the system's authentication prompt, then searches again.
+    pub fn unlock(&mut self) {
+        let finder = self.hub.finder.clone();
+        let hub = self.hub.clone();
+        self.exec.clone().run(
+            self,
+            move || {
+                let mut effects = Effects::default();
+                let outcome = finder.unlock_vault(&mut effects);
+                (outcome, effects)
+            },
+            move |state, (outcome, effects)| {
+                match outcome {
+                    Ok(vault) => {
+                        state.vault = Some(vault);
+                        state.search();
+                    }
+                    Err(error) => state.error = Some(message(&error)),
+                }
+                hub.dispatch(effects);
+            },
+        );
+    }
+
+    /// Every appearance starts again: empty query, fresh search, focus in the field.
+    pub fn reset(&mut self) {
+        self.query.clear();
+        self.query.focused = true;
+        self.error = None;
+        self.status = None;
+        self.theme = self.hub.finder.get_theme();
+        self.search();
+    }
+
+    /// The field's key bindings, the port of the shipped `onKeydown`.
+    pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        match ev.key {
+            Key::Down => self.move_selection(1, Some(tx)),
+            Key::Up => self.move_selection(-1, Some(tx)),
+            Key::Tab => {
+                self.accept_completion();
+            }
+            Key::Enter => self.activate(),
+            Key::Escape => self.dismiss(),
+            _ if OPEN_DETAILS.matches(ev) => self.open_details(),
+            _ if IGNORE_CONTEXT.matches(ev) && self.context.is_some() => self.ignore_context(),
+            _ => return false,
+        }
+        true
+    }
+
+    pub fn on_event(&mut self, event: &AppEvent, _tx: &mut Tx) {
+        match event {
+            AppEvent::FinderShown => self.reset(),
+            AppEvent::VaultStateChanged(vault) => {
+                let was_locked = self.vault.as_ref().is_some_and(|old| !old.unlocked);
+                self.vault = Some(vault.clone());
+                if was_locked && vault.unlocked {
+                    self.search();
+                } else if !vault.unlocked {
+                    self.results.retain(|row| row.kind != Kind::Secret);
+                    if self.current().is_none() {
+                        self.selected_id = self.rows().first().map(|row| row.id.clone());
+                    }
+                }
+            }
+            AppEvent::EntriesChanged(_) => self.search(),
+            AppEvent::FinderContext(context) => {
+                if *context == self.context {
+                    return;
+                }
+                self.context = context.clone();
+                // The project's commands now lead, so the selection starts again at the top.
+                self.selected_id = None;
+                self.search();
+            }
+            AppEvent::ThemeChanged(theme) => self.theme = theme.clone(),
+            _ => {}
+        }
+    }
 }
 
-/// The footer's hints. Each string is the binding [`Finder::route_key`] actually honours, in the order
-/// `src/windows/Finder.svelte` lists them. `Ctrl+O details` is the one shipped chip left out, because
-/// there is no details panel to open yet and a hint is a promise the shell has to keep.
-const FINDER_HINTS: [(&str, &str); 4] = [
-    ("footer-move", "Up+Down select"),
-    ("footer-tab", "Tab complete"),
-    ("footer-copy", "Enter copy"),
-    ("footer-dismiss", "Esc dismiss"),
-];
+fn row_key(id: &str) -> String {
+    format!("finder-row-{id}")
+}
 
-fn finder_footer(state: &Finder, theme: rune::tok::Theme) -> El {
-    let mut footer = row()
+/// Draws the palette.
+pub fn finder_view(state: &Finder, cx: &mut Cx<Finder>) -> El {
+    let look = Look::for_setting(&state.theme, cx.system_dark());
+    let kit = look.kit();
+    let _ = kit;
+    col()
+        .key("finder")
+        .w_full()
+        .h_full()
+        .fill(look.shell)
+        .child(search_bar(state, &look))
+        .child(el().h(1.0).w_full().fill(look.line_hair))
+        .child(results(state, &look))
+        .children(feedback(state, &look))
+        .child(el().h(1.0).w_full().fill(look.line_hair))
+        .child(footer(state, &look))
+}
+
+fn search_bar(state: &Finder, look: &Look) -> El {
+    let field = text_input(&state.query, ts::SEARCH)
+        .key("finder-input")
+        .single_line()
+        .w_full()
+        .role("combobox")
+        .label("Search commands and secrets")
+        .color(look.fg)
+        .placeholder("Search commands and secrets…", look.placeholder)
+        .on_edit(|state: &mut Finder| &mut state.query)
+        .on_input_change(|state: &mut Finder, _| state.search())
+        .on_input_key(|state: &mut Finder, ev: &KeyEvent, tx: &mut Tx| state.route_key(ev, tx));
+    let tail = state.completion_tail();
+    // The completion is drawn behind the field: the typed text, invisible, then the rest of the
+    // highlighted row's name in the dim colour, so the tail starts exactly where the caret is.
+    let ghost = row()
+        .absolute(0.0, 0.0)
+        .h_full()
+        .center_y()
+        .inert()
+        .child(
+            text(state.query.text.clone())
+                .font(ts::SEARCH)
+                .color(rune::Color::TRANSPARENT),
+        )
+        .child(
+            text(tail)
+                .key("finder-completion")
+                .font(ts::SEARCH)
+                .color(look.dim),
+        );
+    let mut bar = row()
+        .key("finder-search")
+        .w_full()
+        .h(size::SEARCH_H + 2.0)
+        .px(size::SP3 + 2.0)
+        .gap(size::SP2)
+        .center_y()
+        .child(icon(&icons::SEARCH, 16.0).color(look.muted))
+        .child(
+            el().grow(1.0)
+                .min_w(0.0)
+                .h_full()
+                .center_y()
+                .child(ghost)
+                .child(field),
+        );
+    if let Some(context) = &state.context {
+        bar = bar.child(
+            row()
+                .key("finder-context")
+                .role("button")
+                .label(format!(
+                    "Ranking the project {} first. Activate to ignore it.",
+                    context.name
+                ))
+                .help(format!(
+                    "{} — its commands are ranked first. Click, or press Ctrl+P, to ignore that.",
+                    context.name
+                ))
+                .h(22.0)
+                .px(size::SP2)
+                .gap(4.0)
+                .center_y()
+                .radius(999.0)
+                .fill(look.accent_soft)
+                .border(1.0, look.accent_line)
+                .cursor(Cursor::Pointer)
+                .on_press(|state: &mut Finder| state.ignore_context())
+                .child(icon(&icons::PROJECT, 12.0).color(look.accent))
+                .child(
+                    text(context.name.clone())
+                        .font(ts::XS)
+                        .color(look.accent)
+                        .truncate()
+                        .max_w(160.0),
+                ),
+        );
+    }
+    if let Some(vault) = &state.vault {
+        let (ink, fill, glyph, label) = if vault.unlocked {
+            (look.ok, look.ok_soft, &icons::UNLOCK, "Vault unlocked")
+        } else {
+            (look.warn, look.warn_soft, &icons::LOCK, "Vault locked")
+        };
+        bar = bar.child(
+            row()
+                .key("finder-vault")
+                .h(22.0)
+                .px(size::SP2)
+                .gap(4.0)
+                .center_y()
+                .radius(999.0)
+                .fill(fill)
+                .child(icon(glyph, 12.0).color(ink))
+                .child(text(label).font(ts::XS).color(ink)),
+        );
+    }
+    bar
+}
+
+fn results(state: &Finder, look: &Look) -> El {
+    let rows = state.rows();
+    let mut list = col()
+        .key("finder-results")
+        .role("listbox")
+        .label("Results")
+        .w_full()
+        .px(size::SP2)
+        .py(size::SP2)
+        .gap(2.0);
+    if rows.is_empty() {
+        let (key, line) = if state.loading {
+            ("finder-searching", "Searching…".to_string())
+        } else if !state.query.text.is_empty() {
+            (
+                "finder-empty",
+                format!(
+                    "No match for {} — try a tag, a type, or part of the name",
+                    state.query.text
+                ),
+            )
+        } else {
+            ("finder-nothing", "Nothing saved yet".to_string())
+        };
+        list = list.child(
+            row()
+                .key(key)
+                .h(size::ROW_H)
+                .px(size::SP3)
+                .gap(size::SP2)
+                .center_y()
+                .child(icon(&icons::SEARCH, 14.0).color(look.dim))
+                .child(text(line).font(ts::SM).color(look.muted).truncate()),
+        );
+    }
+    let total = rows.len();
+    for (index, entry) in rows.into_iter().enumerate() {
+        list = list.child(result_row(state, look, entry, index, total));
+    }
+    col()
+        .key("finder-scroll")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        })
+        .child(list)
+}
+
+fn result_row(state: &Finder, look: &Look, entry: SearchResult, index: usize, total: usize) -> El {
+    let active = state.selected_id.as_deref() == Some(entry.id.as_str());
+    let system = entry.id == UNLOCK_ID;
+    let secret = entry.kind == Kind::Secret;
+    let glyph = if system {
+        row()
+            .w(size::TILE_SM + 2.0)
+            .h(size::TILE_SM + 2.0)
+            .center()
+            .radius(size::RADIUS)
+            .fill(look.warn_soft)
+            .child(icon(&icons::LOCK, 13.0).color(look.warn))
+    } else {
+        widgets::kind_tile(look, secret, size::TILE_SM + 2.0)
+    };
+    let context_line = if system {
+        "Secret metadata stays encrypted until you unlock the vault.".to_string()
+    } else {
+        let mut parts = Vec::new();
+        if !entry.entry_type.is_empty() {
+            parts.push(entry.entry_type.clone());
+        }
+        if !entry.description.is_empty() {
+            parts.push(entry.description.clone());
+        }
+        parts.extend(entry.tags.iter().take(2).map(|tag| format!("#{tag}")));
+        parts.join("  ·  ")
+    };
+    let mut body = col().grow(1.0).min_w(0.0).gap(1.0).child(
+        text(entry.name.clone())
+            .font(ts::ROW)
+            .color(if active { look.selected_fg } else { look.fg })
+            .truncate(),
+    );
+    if !context_line.is_empty() {
+        body = body.child(
+            text(context_line)
+                .font(ts::ROW_META)
+                .color(look.muted)
+                .truncate(),
+        );
+    }
+    let mut trail = row().gap(size::SP1).center_y();
+    if entry.in_context {
+        let name = state
+            .context
+            .as_ref()
+            .map_or("the current project".to_string(), |context| {
+                context.name.clone()
+            });
+        trail = trail.child(
+            row()
+                .key(format!("finder-in-project-{}", entry.id))
+                .role("img")
+                .label(format!("in {name}"))
+                .help(format!("in {name}"))
+                .child(icon(&icons::PROJECT, 11.0).color(look.accent)),
+        );
+    }
+    if active {
+        trail = trail.child(widgets::keycap(look, "Enter"));
+    }
+    let id = entry.id.clone();
+    let mut item = row()
+        .key(row_key(&entry.id))
+        .role("option")
+        .label(entry.name.clone())
+        .position_in_set(index + 1, total)
+        .w_full()
+        .min_h(size::ROW_H + 4.0)
+        .px(size::SP2)
+        .py(5.0)
+        .gap(size::SP2 + 2.0)
+        .center_y()
+        .radius(size::RADIUS_ROW)
+        .cursor(Cursor::Pointer)
+        .hover(look.fg.alpha(0.04))
+        .on_press(move |state: &mut Finder| state.selected_id = Some(id.clone()))
+        .on_double_press(|state: &mut Finder| state.activate())
+        .child(glyph)
+        .child(body)
+        .child(trail);
+    if active {
+        item = item.fill(look.selected).border(1.0, look.selected_edge);
+    }
+    item
+}
+
+fn feedback(state: &Finder, look: &Look) -> Option<El> {
+    if let Some(error) = &state.error {
+        return Some(
+            row()
+                .px(size::SP3)
+                .pb(size::SP2)
+                .child(widgets::status_line(
+                    look,
+                    "finder-error",
+                    widgets::Tone::Error,
+                    error,
+                )),
+        );
+    }
+    state.status.as_ref().map(|status| {
+        row()
+            .px(size::SP3)
+            .pb(size::SP2)
+            .child(widgets::status_line(
+                look,
+                "finder-status",
+                widgets::Tone::Ok,
+                status,
+            ))
+    })
+}
+
+fn footer(state: &Finder, look: &Look) -> El {
+    row()
         .key("finder-footer")
         .w_full()
-        .gap(space::S2)
-        .center_y();
-    for (key, hint) in FINDER_HINTS {
-        footer = footer.child(keycap(key, hint, theme));
-    }
-    // The shipped footer pushes its row count to the far edge with a flex spacer; `grow` is Rune's.
-    footer.child(el().grow(1.0)).child(
-        text(format!("{}", state.rows.len()))
-            .key("footer-count")
-            .font(type_::LABEL)
-            .color(theme.text_secondary),
-    )
+        .h(size::FOOTER_H)
+        .px(size::SP3)
+        .gap(size::SP3)
+        .center_y()
+        .fill(look.panel)
+        .child(widgets::hint(look, &["Up", "Down"], "select"))
+        .child(widgets::hint(look, &["Tab"], "complete"))
+        .child(widgets::hint(look, &["Enter"], "copy"))
+        .child(widgets::hint(look, &["Ctrl", "O"], "details"))
+        .child(widgets::hint(look, &["Esc"], "dismiss"))
+        .child(el().grow(1.0))
+        .child(
+            text(state.rows().len().to_string())
+                .key("finder-count")
+                .font(ts::XS)
+                .color(look.muted),
+        )
 }

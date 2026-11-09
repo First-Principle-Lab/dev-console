@@ -54,6 +54,8 @@ The release batch review is in [`release-0.0.9-review.md`](project/release-0.0.9
 
 - [`release-0.0.10-review.md`](project/release-0.0.10-review.md): environment sync review and release validation
 
+- [`native-port-validation-2026-11-09.md`](project/native-port-validation-2026-11-09.md): native screen port, regression checks, desktop evidence and remaining acceptance work.
+
 ## assets/
 
 Product documentation images. `assets/screenshots/` contains the selected demo screenshots used by the main README.
