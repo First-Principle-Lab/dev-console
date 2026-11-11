@@ -276,6 +276,14 @@ fn start_background_work(state: &Arc<AppState>) {
     if dev_console_core::project_history::refresh_installed_zsh_hook().is_err() {
         eprintln!("dev-console: could not refresh the installed shell hook");
     }
+    // The Tauri build wrote its login entry with the AppImage's temporary mount path, which is gone
+    // after a reboot. Rewriting it at every start repairs an upgraded install without a visit to
+    // Settings, and keeps the entry on the installed image if that ever moves.
+    if state.settings.get().autostart {
+        if let Err(error) = dev_console_core::autostart::apply(true) {
+            eprintln!("dev-console: could not refresh the login entry ({error})");
+        }
+    }
 }
 
 fn take_instance_lock() -> Option<instance::InstanceLock> {
