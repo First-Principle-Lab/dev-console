@@ -720,24 +720,83 @@ fn looks_like_secret(text: &str) -> bool {
     dev_console_core::history::looks_like_secret(text)
 }
 
+/// Whether a changelog section lists at least one change.
+fn section_has_entry(section: &str) -> bool {
+    section
+        .lines()
+        .map(str::trim)
+        .any(|line| line.starts_with("- ") || line.starts_with("* "))
+}
+
+/// The text of each `## ` section, heading included, in file order.
+fn changelog_sections(changelog: &str) -> Vec<&str> {
+    let mut starts: Vec<usize> = changelog
+        .match_indices("\n## ")
+        .map(|(at, _)| at + 1)
+        .collect();
+    if changelog.starts_with("## ") {
+        starts.insert(0, 0);
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, &start)| {
+            let end = starts
+                .get(index + 1)
+                .map_or(changelog.len(), |&next| next - 1);
+            &changelog[start..end]
+        })
+        .collect()
+}
+
 #[test]
 fn the_release_notes_open_with_a_non_empty_unreleased_section() {
     let changelog = repo_file("CHANGELOG.md");
-    let heading = "## Unreleased";
-    let start = changelog
-        .find(heading)
+    let sections = changelog_sections(&changelog);
+    let unreleased = sections
+        .iter()
+        .position(|section| section.starts_with("## Unreleased\n") || *section == "## Unreleased")
         .expect("AGENTS.md requires an `## Unreleased` section for changes not yet released");
-    let rest = &changelog[start + heading.len()..];
-    let body = match rest.find("\n## ") {
-        Some(end) => &rest[..end],
-        None => rest,
-    };
+    assert_eq!(
+        unreleased, 0,
+        "`## Unreleased` has to be the first section, above every release"
+    );
+    if section_has_entry(sections[0]) {
+        return;
+    }
+    // Promotion (AGENTS.md, workflow step 4) renames the section to the version it publishes and
+    // starts a fresh, empty one above it. Empty is right then, and only then: the release below it
+    // has to be the one just cut, with its entries.
+    let release = sections.get(1).copied().unwrap_or_default();
     assert!(
-        body.lines()
-            .map(str::trim)
-            .any(|line| line.starts_with("- ") || line.starts_with("* ")),
-        "`## Unreleased` exists but holds no entry. The section is how a user finds out what \
-         changed, so an empty one is not evidence of anything:\n{body}"
+        release.starts_with("## 0.") && section_has_entry(release),
+        "`## Unreleased` holds no entry, and the section below it is not a release with entries. \
+         The section is how a user finds out what changed, so an empty one is not evidence of \
+         anything:\n{}",
+        sections[0]
+    );
+}
+
+#[test]
+fn the_changelog_gate_allows_an_empty_unreleased_section_only_above_a_fresh_release() {
+    let passes = |text: &str| {
+        let sections = changelog_sections(text);
+        let release = sections.get(1).copied().unwrap_or_default();
+        sections[0].starts_with("## Unreleased")
+            && (section_has_entry(sections[0])
+                || (release.starts_with("## 0.") && section_has_entry(release)))
+    };
+    assert!(passes("## Unreleased\n\n- New\n\n## 0.0.1 — d\n\n- Old\n"));
+    assert!(passes(
+        "## Unreleased\n\n## 0.0.2 — d\n\n### Added\n\n- Shipped\n"
+    ));
+    assert!(!passes(
+        "## Unreleased\n\n### Added\n\n## 0.0.2 — d\n\n### Added\n"
+    ));
+    assert!(!passes("## Unreleased\n\n"));
+    assert_eq!(
+        changelog_sections("## A\n- x\n## B\n- y\n"),
+        ["## A\n- x", "## B\n- y\n"]
     );
 }
 
