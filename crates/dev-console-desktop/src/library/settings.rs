@@ -24,6 +24,46 @@ use crate::icons;
 use crate::theme::{self, size, text as ts, Look};
 use crate::widgets::{self, Tone, Variant};
 
+/// The keys the Library answers, as Settings lists them. The Finder's own are in its footer.
+pub const SHORTCUTS: [(&str, &[&str]); 9] = [
+    ("Open the Finder", &["Super", "F"]),
+    ("Move through the list", &["↑", "↓"]),
+    ("Filter the list", &["Ctrl", "F"]),
+    ("New entry", &["Ctrl", "N"]),
+    ("Edit the selected entry", &["Ctrl", "E"]),
+    ("Save the editor", &["Ctrl", "S"]),
+    ("Leave an unchanged editor", &["Esc"]),
+    ("Commands", &["Ctrl", "1"]),
+    ("Secrets", &["Ctrl", "2"]),
+];
+
+/// The pages of the Settings sheet. One is shown at a time, so no page is long enough to scroll
+/// past what you came to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Section {
+    #[default]
+    General,
+    Backups,
+    Keyboard,
+}
+
+impl Section {
+    pub const ALL: [Section; 3] = [Section::General, Section::Backups, Section::Keyboard];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Section::General => "General",
+            Section::Backups => "Backups",
+            Section::Keyboard => "Keyboard",
+        }
+    }
+
+    /// The key of this page's tab: `settings-tab-general`, `-backups`, `-keyboard`.
+    pub fn tab_key(self) -> String {
+        format!("settings-tab-{}", self.label().to_lowercase())
+    }
+}
+
 /// Which archive a review card is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewKind {
@@ -32,6 +72,9 @@ pub enum ReviewKind {
 }
 
 pub struct SettingsPanel {
+    pub section: Section,
+    /// What was on disk when the panel loaded: the settings, and the two fields as text.
+    baseline: Option<(Settings, String, String)>,
     pub settings: Option<Settings>,
     /// The theme on disk, restored if the panel closes without saving.
     pub saved_theme: String,
@@ -68,6 +111,8 @@ pub struct SettingsPanel {
 impl SettingsPanel {
     pub fn new(theme: String) -> SettingsPanel {
         SettingsPanel {
+            section: Section::default(),
+            baseline: None,
             settings: None,
             saved_theme: theme,
             expiry: TextEdit::new(String::new()),
@@ -139,6 +184,17 @@ impl SettingsPanel {
     }
 
     /// The expiry field as a number, clamped to the field's 5..600 range.
+    /// Whether anything Save would write differs from what was loaded. The switches look like
+    /// ones that apply at once; the footer uses this to say that they do not.
+    pub fn changed(&self) -> bool {
+        match (&self.baseline, &self.settings) {
+            (Some((saved, expiry, terminal)), Some(now)) => {
+                saved != now || *expiry != self.expiry.text || *terminal != self.terminal.text
+            }
+            _ => false,
+        }
+    }
+
     fn expiry_seconds(&self) -> Option<u64> {
         self.expiry
             .text
@@ -179,6 +235,63 @@ fn ms_to_iso(ms: i64) -> String {
 }
 
 impl Library {
+    pub fn check_updates_if_due(&mut self) {
+        if self
+            .updates
+            .last_check
+            .is_none_or(|time| time.elapsed() >= std::time::Duration::from_secs(60))
+        {
+            self.check_for_updates();
+        }
+    }
+    pub fn check_for_updates(&mut self) {
+        if crate::updater::target().is_none() || self.updates.checking || self.updates.installing {
+            return;
+        }
+        self.updates.checking = true;
+        self.updates.error = None;
+        self.updates.last_check = Some(std::time::Instant::now());
+        self.exec().clone().run(
+            self,
+            || crate::updater::check(env!("CARGO_PKG_VERSION")),
+            |state, result| {
+                state.updates.checking = false;
+                state.updates.checked = true;
+                match result {
+                    Ok(release) => state.updates.release = release,
+                    Err(error) => state.updates.error = Some(error),
+                }
+            },
+        );
+    }
+    pub fn install_update(&mut self) {
+        if self.draft_dirty() {
+            self.status = Some(super::BUSY_EDIT.into());
+            return;
+        }
+        if self.updates.installing || self.updates.checking {
+            return;
+        }
+        let Some(release) = self.updates.release.clone() else {
+            return;
+        };
+        self.updates.installing = true;
+        self.updates.error = None;
+        self.exec().clone().run(
+            self,
+            move || crate::updater::install(&release),
+            |state, result| {
+                state.updates.installing = false;
+                match result {
+                    Ok(()) => state
+                        .hub()
+                        .perform(dev_console_core::services::WindowCommand::Restart),
+                    Err(error) => state.updates.error = Some(error),
+                }
+            },
+        );
+    }
+
     fn panel(&mut self) -> Option<&mut SettingsPanel> {
         self.settings.as_mut()
     }
@@ -249,6 +362,11 @@ impl Library {
                     Ok(backups) => panel.backups = backups,
                     Err(error) => panel.backup_error = Some(message(&error)),
                 }
+                panel.baseline = Some((
+                    settings.clone(),
+                    panel.expiry.text.clone(),
+                    panel.terminal.text.clone(),
+                ));
                 panel.settings = Some(settings);
             },
         );
@@ -319,7 +437,18 @@ impl Library {
             self,
             move || {
                 let mut effects = Effects::default();
-                let saved = actions.save_settings(settings, &mut effects);
+                // As the shipped app does it: the file is saved and the theme event queued before
+                // the desktop-integration write, and a failed write is still a saved file.
+                let saved = actions
+                    .save_settings(settings, &mut effects)
+                    .and_then(|saved| {
+                        dev_console_core::autostart::apply(saved.autostart).map_err(|error| {
+                            dev_console_core::error::AppError::Other(format!(
+                                "settings saved but autostart failed: {error}"
+                            ))
+                        })?;
+                        Ok(saved)
+                    });
                 (saved, effects)
             },
             move |state, (saved, effects)| {
@@ -344,12 +473,14 @@ impl Library {
         );
     }
 
-    fn on_saved_settings(&mut self, saved: &Settings) {
+    pub(super) fn on_saved_settings(&mut self, saved: &Settings) {
         self.history_enabled = saved.history_suggestions_enabled;
         if saved.history_suggestions_enabled {
             self.load_suggestions();
         } else {
             self.suggestions.clear();
+            self.selected_suggestion = None;
+            self.history_expanded = false;
         }
     }
 
@@ -638,17 +769,72 @@ impl Library {
     }
 }
 
+/// The page switch under the sheet's title: the Library's own segmented control, again.
+fn section_tabs(look: &Look, current: Section) -> El {
+    let mut tabs = row()
+        .key("settings-tabs")
+        .role("tablist")
+        .focus_group()
+        .self_start()
+        .h(32.0)
+        .padding(2.0)
+        .gap(2.0)
+        .radius(size::RADIUS + 1.0)
+        .fill(look.fg.alpha(0.06));
+    for section in Section::ALL {
+        let active = section == current;
+        let mut tab = row()
+            .key(section.tab_key())
+            .role("tab")
+            .label(section.label())
+            .checked(active)
+            .focusable(true)
+            .focus_selected(active)
+            .focus_ring(2.0, 1.0, look.focus)
+            .h_full()
+            .px(size::SP3)
+            .center()
+            .radius(size::RADIUS - 1.0)
+            .cursor(Cursor::Pointer)
+            .on_press_tx(move |state: &mut Library, tx| {
+                tx.instant();
+                if let Some(panel) = state.settings.as_mut() {
+                    panel.section = section;
+                }
+            })
+            .child(
+                text(section.label())
+                    .font(if active { ts::MEDIUM } else { ts::BODY })
+                    .color(if active { look.fg } else { look.muted }),
+            );
+        if active {
+            tab = tab.fill(look.accent_soft).border(1.0, look.accent_line);
+        }
+        tabs = tabs.child(tab);
+    }
+    tabs
+}
+
+/// One group of settings: a heading and its rows, set off from the group above by space and a
+/// hairline rather than by a box around each.
 fn section(look: &Look, key: &str, title: &str) -> El {
     col()
         .key(key.to_owned())
         .label(title.to_owned())
         .w_full()
-        .gap(size::SP2)
-        .padding(size::SP3)
-        .radius(size::RADIUS)
-        .fill(look.panel)
-        .border(1.0, look.line)
-        .child(text(title.to_owned()).font(ts::STRONG).color(look.fg))
+        .gap(size::SP3)
+        .pt(size::SP4)
+        .border_sides([1.0, 0.0, 0.0, 0.0], look.line_hair)
+        .child(text(title.to_owned()).font(ts::SECTION).color(look.fg))
+}
+
+/// The first group of a page, which the page's tab already names: no heading, no rule.
+fn lead_section(key: &str, title: &str) -> El {
+    col()
+        .key(key.to_owned())
+        .label(title.to_owned())
+        .w_full()
+        .gap(size::SP3)
 }
 
 fn detail(look: &Look, words: &str) -> El {
@@ -659,6 +845,81 @@ fn detail(look: &Look, words: &str) -> El {
         .w_full()
 }
 
+/// Core's clipboard notes are written to follow a colon. Shown on their own they are a sentence.
+pub fn sentence(words: &str) -> String {
+    let mut chars = words.trim().chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out: String = first.to_uppercase().chain(chars).collect();
+    if !out.ends_with(['.', '!', '?']) {
+        out.push('.');
+    }
+    out
+}
+
+/// A setting as one line: what it is on the left, the control that changes it on the right.
+fn setting_row(look: &Look, label: &str, control: El) -> El {
+    row()
+        .w_full()
+        .min_h(size::CONTROL_H)
+        .gap(size::SP3)
+        .center_y()
+        .child(
+            text(label.to_owned())
+                .font(ts::BODY)
+                .color(look.fg)
+                .grow(1.0)
+                .min_w(0.0),
+        )
+        .child(control)
+}
+
+/// The on/off control: a track and a knob. It reports as a checkbox, which is what it is.
+fn switch(look: &Look, on: bool) -> El {
+    let knob =
+        el().w(14.0)
+            .h(14.0)
+            .radius(999.0)
+            .fill(if on { look.accent_fg } else { look.muted });
+    let mut track = row()
+        .w(30.0)
+        .h(18.0)
+        .padding(2.0)
+        .center_y()
+        .radius(999.0)
+        .fill(if on { look.accent } else { look.fg.alpha(0.12) });
+    if on {
+        track = track.justify_end();
+    }
+    track.child(knob)
+}
+
+fn toggle_row(look: &Look, key: &str, label: &str, on: bool) -> El {
+    row()
+        .key(key.to_owned())
+        .role("checkbox")
+        .label(label.to_owned())
+        .checked(on)
+        .focusable(true)
+        .focus_ring(2.0, 1.0, look.focus)
+        .w_full()
+        .min_h(size::CONTROL_H)
+        .gap(size::SP3)
+        .center_y()
+        .radius(size::RADIUS_SM)
+        .cursor(Cursor::Pointer)
+        .child(
+            text(label.to_owned())
+                .font(ts::BODY)
+                .color(look.fg)
+                .wrap()
+                .grow(1.0)
+                .min_w(0.0),
+        )
+        .child(switch(look, on))
+}
+
 fn check_row(
     look: &Look,
     key: &str,
@@ -666,77 +927,25 @@ fn check_row(
     checked: bool,
     pick: fn(&mut Settings) -> &mut bool,
 ) -> El {
-    let mut tick = row()
-        .w(16.0)
-        .h(16.0)
-        .center()
-        .radius(size::RADIUS_SM)
-        .border(
-            1.0,
-            if checked {
-                look.accent
-            } else {
-                look.line_strong
-            },
-        )
-        .fill(if checked { look.accent } else { look.sunken });
-    if checked {
-        tick = tick.child(icon(&icons::CHECK, 12.0).color(look.accent_fg));
-    }
-    row()
-        .key(key.to_owned())
-        .role("checkbox")
-        .label(label.to_owned())
-        .checked(checked)
-        .focusable(true)
-        .focus_ring(2.0, 1.0, look.focus)
-        .gap(size::SP2)
-        .py(4.0)
-        .center_y()
-        .cursor(Cursor::Pointer)
-        .on_press(move |state: &mut Library| state.settings_toggle(pick))
-        .child(tick)
-        .child(text(label.to_owned()).font(ts::BODY).color(look.fg))
+    toggle_row(look, key, label, checked).on_press_tx(move |state: &mut Library, tx| {
+        tx.instant();
+        state.settings_toggle(pick);
+    })
 }
 
 fn pre_backup_row(look: &Look, checked: bool) -> El {
-    let mut tick = row()
-        .w(16.0)
-        .h(16.0)
-        .center()
-        .radius(size::RADIUS_SM)
-        .border(
-            1.0,
-            if checked {
-                look.accent
-            } else {
-                look.line_strong
-            },
-        )
-        .fill(if checked { look.accent } else { look.sunken });
-    if checked {
-        tick = tick.child(icon(&icons::CHECK, 12.0).color(look.accent_fg));
-    }
-    row()
-        .key("prebackup")
-        .role("checkbox")
-        .label("Back up the current data first (recommended)")
-        .checked(checked)
-        .focusable(true)
-        .gap(size::SP2)
-        .center_y()
-        .cursor(Cursor::Pointer)
-        .on_press(|state: &mut Library| {
-            if let Some(panel) = state.settings.as_mut() {
-                panel.pre_backup = !panel.pre_backup;
-            }
-        })
-        .child(tick)
-        .child(
-            text("Back up the current data first (recommended)")
-                .font(ts::BODY)
-                .color(look.fg),
-        )
+    toggle_row(
+        look,
+        "prebackup",
+        "Back up the current data first (recommended)",
+        checked,
+    )
+    .on_press_tx(|state: &mut Library, tx| {
+        tx.instant();
+        if let Some(panel) = state.settings.as_mut() {
+            panel.pre_backup = !panel.pre_backup;
+        }
+    })
 }
 
 fn options_list(
@@ -787,26 +996,14 @@ fn options_list(
 }
 
 pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> El {
-    let mut body = Vec::new();
+    let mut general: Vec<El> = Vec::new();
+    let mut archives: Vec<El> = Vec::new();
+    let mut keyboard: Vec<El> = Vec::new();
 
     let version = state
         .app
         .as_ref()
         .map_or_else(String::new, |app| app.version.clone());
-    body.push(
-        section(look, "updates", "Updates")
-            .child(
-                text(format!("Dev Console {version}"))
-                    .key("current-version")
-                    .font(ts::BODY)
-                    .color(look.fg),
-            )
-            .child(
-                detail(look, "Updates are only available in the installed app.")
-                    .key("update-status"),
-            ),
-    );
-
     if let Some(settings) = &panel.settings {
         let theme_label = theme::label(&settings.theme);
         let theme_button = widgets::button(
@@ -827,48 +1024,32 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 panel.choosing_terminal = false;
             }
         });
-        let mut general = section(look, "general", "General").child(
-            row()
-                .w_full()
-                .gap(size::SP3)
-                .child(
-                    col()
-                        .grow(1.0)
-                        .gap(4.0)
-                        .child(text("Theme").font(ts::SM).color(look.muted))
-                        .child(theme_button),
-                )
-                .child(
-                    col()
-                        .w(200.0)
-                        .gap(4.0)
-                        .child(
-                            text("Clipboard expiry (seconds)")
-                                .font(ts::SM)
-                                .color(look.muted),
-                        )
-                        .child(
-                            TextInput::new(&panel.expiry)
-                                .width(None)
-                                .label("Clipboard expiry (seconds)")
-                                .on_edit(|state: &mut Library| {
-                                    state.settings_field(|panel| &mut panel.expiry)
-                                })
-                                .build(kit)
-                                .key("clipboard-expiry"),
-                        ),
+        let mut group = lead_section("general", "General")
+            .child(setting_row(look, "Theme", theme_button))
+            .child(setting_row(
+                look,
+                "Clear copied values after (seconds)",
+                el().w(72.0).child(
+                    TextInput::new(&panel.expiry)
+                        .width(None)
+                        .label("Clipboard expiry (seconds)")
+                        .on_edit(|state: &mut Library| {
+                            state.settings_field(|panel| &mut panel.expiry)
+                        })
+                        .build(kit)
+                        .key("clipboard-expiry"),
                 ),
-        );
+            ));
         if panel.choosing_theme {
             let options = theme::choices()
                 .into_iter()
                 .map(|(id, label)| (id.to_string(), label, id == settings.theme))
                 .collect();
-            general = general.child(options_list(look, "theme-options", options, |state, id| {
+            group = group.child(options_list(look, "theme-options", options, |state, id| {
                 state.preview_theme(id)
             }));
         }
-        general = general
+        group = group
             .child(check_row(look, "autostart", "Start at login (hidden in the tray)", settings.autostart, |settings| &mut settings.autostart))
             .child(check_row(
                 look,
@@ -879,10 +1060,10 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
             ))
             .child(detail(
                 look,
-                "Counts useful commands by their actual project and folder while Dev Console is running. Enable the zsh integration in the history panel, then open a new terminal. No old history is assigned to a project. Turning this off stops collection and suggestions.",
+                "Counts the commands you run per project while Dev Console is running, through the zsh integration. Old history is never read. Off stops collecting.",
             ));
         if panel.dismissed > 0 {
-            general = general.child(
+            group = group.child(
                 widgets::button_sm(
                     look,
                     "history-suggestions-restore",
@@ -909,24 +1090,24 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
             .map_or("Custom command".to_string(), |option| {
                 option.name.to_string()
             });
-        general = general
-            .child(text("Terminal").font(ts::SM).color(look.muted))
-            .child(
-                widgets::button(
-                    look,
-                    "terminal-choice",
-                    &terminal_name,
-                    Some(&icons::CHEVRON),
-                    Variant::Default,
-                )
-                .label("Terminal")
-                .on_press(|state: &mut Library| {
-                    if let Some(panel) = state.settings.as_mut() {
-                        panel.choosing_terminal = !panel.choosing_terminal;
-                        panel.choosing_theme = false;
-                    }
-                }),
-            );
+        group = group.child(setting_row(
+            look,
+            "Terminal for Run",
+            widgets::button(
+                look,
+                "terminal-choice",
+                &terminal_name,
+                Some(&icons::CHEVRON),
+                Variant::Default,
+            )
+            .label("Terminal")
+            .on_press(|state: &mut Library| {
+                if let Some(panel) = state.settings.as_mut() {
+                    panel.choosing_terminal = !panel.choosing_terminal;
+                    panel.choosing_theme = false;
+                }
+            }),
+        ));
         if panel.choosing_terminal {
             let mut options: Vec<(String, String, bool)> = panel
                 .terminals
@@ -944,7 +1125,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 "Custom command".into(),
                 panel.terminal_choice == "custom",
             ));
-            general = general.child(options_list(
+            group = group.child(options_list(
                 look,
                 "terminal-options",
                 options,
@@ -952,13 +1133,13 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
             ));
         }
         if panel.terminals.is_empty() {
-            general = general.child(detail(
+            group = group.child(detail(
                 look,
                 "No supported terminal was found in PATH. Enter a custom command below.",
             ));
         }
         if panel.terminal_choice == "custom" {
-            general = general
+            group = group
                 .child(
                     text("Terminal command (quotes kept)")
                         .font(ts::SM)
@@ -979,7 +1160,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 );
         }
         if let Some(error) = &panel.terminal_error {
-            general = general.child(widgets::status_line(
+            group = group.child(widgets::status_line(
                 look,
                 "terminal-error",
                 Tone::Error,
@@ -999,27 +1180,36 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                         .px(6.0)
                         .center_y()
                         .radius(size::RADIUS_SM)
-                        .fill(look.raised)
+                        .fill(look.fg.alpha(0.06))
                         .child(text(token.clone()).font(ts::MONO_SM).color(look.fg)),
                 );
             }
-            general = general.child(tokens);
+            group = group.child(tokens);
         }
-        general = general.child(
-            detail(
+        // What the session can do about clipboard managers, as a setting-shaped fact: the answer
+        // on the right, the consequence under it.
+        let (answer, consequence) = match &panel.exclusion {
+            Some(exclusion) => (exclusion.mechanism.to_string(), sentence(&exclusion.detail)),
+            None => ("Checking…".to_string(), String::new()),
+        };
+        let mut exclusion = col()
+            .key("clipboard-exclusion")
+            .label(format!(
+                "Clipboard history exclusion: {answer}. {consequence}"
+            ))
+            .w_full()
+            .gap(size::SP1)
+            .child(setting_row(
                 look,
-                &match &panel.exclusion {
-                    Some(exclusion) => format!(
-                        "Clipboard history exclusion: {} - {}",
-                        exclusion.mechanism, exclusion.detail
-                    ),
-                    None => "Checking clipboard history support…".to_string(),
-                },
-            )
-            .key("clipboard-exclusion"),
-        );
-        body.push(general);
-        body.push(
+                "Kept out of clipboard history",
+                text(answer).font(ts::BODY).color(look.muted),
+            ));
+        if !consequence.is_empty() {
+            exclusion = exclusion.child(detail(look, &consequence));
+        }
+        group = group.child(exclusion);
+        general.push(group);
+        general.push(
             section(look, "finder-settings", "Finder")
                 .child(check_row(
                     look,
@@ -1031,28 +1221,28 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 .child(
                     detail(
                         look,
-                        "From the focused terminal window, Dev Console works out which repository the shell is in and lists its commands first, marked with a folder. Off, it never asks the compositor what is focused and never reads /proc at all.",
+                        "Reads which repository the focused terminal is in and lists its commands first. Off, it never asks the compositor what is focused and never reads /proc.",
                     )
                     .key("project-context-detail"),
                 ),
         );
     } else {
-        body.push(text("Loading…").font(ts::BODY).color(look.muted));
+        general.push(text("Loading…").font(ts::BODY).color(look.muted));
     }
 
     let busy = panel.backup_busy;
     let backup_now = widgets::button_sm(look, "backup-now", "Back up now", None, Variant::Default);
-    let mut backups = section(look, "backups", "Backups")
+    let mut backups = lead_section("backups", "Backups")
         .child(detail(
             look,
-            "Archives are encrypted to two credentials: this machine's vault key and your recovery credential below. They open with either one, so a lost keyring never loses a backup. The newest 8 backups are kept; restoring or importing replaces everything and is always confirmed against the archive's own contents first.",
+            "Encrypted to this machine's vault key and to your recovery credential; either one opens them. The newest 8 are kept. Restoring replaces everything, and always shows you the archive's contents first.",
         ))
         .child(
             row()
                 .key("backup-dir")
                 .gap(4.0)
                 .child(text("Backup folder:").font(ts::SM).color(look.muted))
-                .child(text(if panel.backup_dir.is_empty() { "…".to_string() } else { panel.backup_dir.clone() }).font(ts::MONO_SM).color(look.fg).wrap_anywhere()),
+                .child(text(if panel.backup_dir.is_empty() { "…".to_string() } else { widgets::short_path(&panel.backup_dir) }).font(ts::MONO_SM).color(look.fg).truncate().help(panel.backup_dir.clone())),
         )
         .child(
             row()
@@ -1110,11 +1300,11 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         }
         backups = backups.child(list);
     }
-    body.push(backups);
+    archives.push(backups);
 
     let export = widgets::button_sm(look, "export-archive", "Export", None, Variant::Default);
-    let mut export_section = section(look, "export", "Export a portable archive")
-        .child(detail(look, "Writes one new encrypted file containing commands and secrets. An existing file is never overwritten without asking first."))
+    let mut export_section = section(look, "export", "Export")
+        .child(detail(look, "One new encrypted file with every command and secret. An existing file is never overwritten without asking."))
         .child(
             row()
                 .w_full()
@@ -1183,7 +1373,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 ),
         );
     }
-    body.push(export_section);
+    archives.push(export_section);
 
     let review_button = widgets::button_sm(
         look,
@@ -1192,11 +1382,11 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         None,
         Variant::Default,
     );
-    body.push(
-        section(look, "import", "Import an archive file")
+    archives.push(
+        section(look, "import", "Import")
             .child(detail(
                 look,
-                "Restore a file you exported or copied from another machine (its recovery credential must match). You will see what it contains and confirm before anything is replaced.",
+                "Open a file exported here or on another machine with the same recovery credential. You see what it contains and confirm before anything is replaced.",
             ))
             .child(
                 row()
@@ -1220,7 +1410,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
 
     let mut recovery = section(look, "recovery", "Recovery credential").child(detail(
         look,
-        "If this machine's keyring is lost or you move to a new computer, this credential is the only way to open existing backups and exports. Store a copy somewhere separate from this machine. Anyone who holds it can read every archive you create from now on.",
+        "The only way to open backups and exports if this machine's keyring is lost. Keep a copy somewhere else. Anyone who holds it can read every archive.",
     ));
     match &panel.recovery {
         Some(credential) => {
@@ -1231,10 +1421,10 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 .child(
                     row()
                         .w_full()
-                        .padding(size::SP2)
-                        .radius(size::RADIUS)
+                        .px(size::SP3)
+                        .py(10.0)
+                        .radius(size::RADIUS_LG - 2.0)
                         .fill(look.sunken)
-                        .border(1.0, look.line)
                         .child(text(credential.secret.clone()).key("recovery-secret").transition(Transition::none()).font(ts::MONO_SM).color(look.fg).wrap_anywhere().grow(1.0)),
                 )
                 .child(detail(look, &format!("Saved at {}", credential.path)))
@@ -1295,7 +1485,31 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
             error,
         ));
     }
-    body.push(recovery);
+    archives.push(recovery);
+
+    let mut keys = lead_section("shortcuts", "Keyboard").gap(size::SP1);
+    for (what, chord) in SHORTCUTS {
+        let mut caps = row().gap(3.0).center_y();
+        for key in chord.iter() {
+            caps = caps.child(widgets::keycap(look, key));
+        }
+        keys = keys.child(
+            row()
+                .w_full()
+                .min_h(size::CONTROL_H_SM)
+                .gap(size::SP3)
+                .center_y()
+                .child(
+                    text(what)
+                        .font(ts::BODY)
+                        .color(look.fg)
+                        .grow(1.0)
+                        .min_w(0.0),
+                )
+                .child(caps),
+        );
+    }
+    keyboard.push(keys);
 
     if let Some((kind, summary)) = &panel.review {
         let verb = if *kind == ReviewKind::Backup {
@@ -1329,7 +1543,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                         .grow(1.0),
                 )
         };
-        body.push(
+        archives.push(
             col()
                 .key("review-card")
                 .role("alertdialog")
@@ -1364,7 +1578,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         );
     }
     if panel.backup_busy {
-        body.push(
+        archives.push(
             text("Working…")
                 .role("status")
                 .font(ts::SM)
@@ -1372,7 +1586,7 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         );
     }
     if let Some(message) = &panel.backup_message {
-        body.push(widgets::status_line(
+        archives.push(widgets::status_line(
             look,
             "backup-message",
             Tone::Ok,
@@ -1380,13 +1594,20 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         ));
     }
     if let Some(error) = &panel.backup_error {
-        body.push(widgets::status_line(
+        archives.push(widgets::status_line(
             look,
             "backup-error",
             Tone::Error,
             error,
         ));
     }
+    let section_of = panel.section;
+    let mut body: Vec<El> = vec![section_tabs(look, section_of)];
+    body.extend(match section_of {
+        Section::General => general,
+        Section::Backups => archives,
+        Section::Keyboard => keyboard,
+    });
     if let Some(error) = &panel.error {
         body.push(widgets::status_line(
             look,
@@ -1396,23 +1617,108 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
         ));
     }
 
+    if section_of == Section::General {
+        let mut updates = section(look, "app-updates", "Updates");
+        if crate::updater::target().is_some() {
+            let button = if let Some(release) = &state.updates.release {
+                widgets::button(
+                    look,
+                    "install-update",
+                    &format!("Update to {} and restart", release.version),
+                    Some(&icons::UPDATE),
+                    Variant::Primary,
+                )
+                .on_press(|state: &mut Library| state.install_update())
+            } else {
+                widgets::button(
+                    look,
+                    "check-updates",
+                    "Check for updates",
+                    Some(&icons::UPDATE),
+                    Variant::Default,
+                )
+                .on_press(|state: &mut Library| state.check_for_updates())
+            };
+            updates = updates
+                .child(if state.updates.checking || state.updates.installing {
+                    widgets::disabled(button)
+                } else {
+                    button
+                })
+                .child(detail(
+                    look,
+                    if state.updates.installing {
+                        "Downloading and verifying the update…"
+                    } else if state.updates.checking {
+                        "Checking for updates…"
+                    } else if state.updates.checked
+                        && state.updates.release.is_none()
+                        && state.updates.error.is_none()
+                    {
+                        "You are up to date."
+                    } else {
+                        "Checks at startup, on focus, and every 15 minutes."
+                    },
+                ));
+            if let Some(error) = &state.updates.error {
+                updates = updates.child(widgets::status_line(
+                    look,
+                    "update-error",
+                    Tone::Error,
+                    error,
+                ));
+            }
+        } else {
+            updates = updates.child(detail(look, "This installation is updated by its package manager. Signed self-updates are available in the AppImage."));
+        }
+        body.push(updates);
+    }
+
+    let changed = panel.changed();
     let save = widgets::button(
         look,
         "save-settings",
         if panel.saving { "Saving…" } else { "Save" },
         None,
-        Variant::Primary,
+        // Filled only when there is something to save.
+        if changed {
+            Variant::Primary
+        } else {
+            Variant::Default
+        },
     );
-    dialogs::shell(
+    dialogs::shell_sized(
         look,
         "settings-panel",
         "Settings",
         true,
+        Some(440.0),
         body,
         vec![
-            widgets::button(look, "close-settings", "Close", None, Variant::Default)
-                .on_press(|state: &mut Library| state.close_settings()),
+            text(format!("Dev Console {version}"))
+                .key("current-version")
+                .font(ts::SM)
+                .color(look.dim)
+                .help("Installed version")
+                .label(format!("Dev Console {version}.")),
             el().grow(1.0),
+            if changed {
+                text("Not saved yet")
+                    .key("settings-unsaved")
+                    .role("status")
+                    .font(ts::SM)
+                    .color(look.warn)
+            } else {
+                el()
+            },
+            widgets::button(
+                look,
+                "close-settings",
+                if changed { "Discard" } else { "Close" },
+                None,
+                Variant::Default,
+            )
+            .on_press(|state: &mut Library| state.close_settings()),
             if panel.saving || panel.terminal_error.is_some() || panel.settings.is_none() {
                 widgets::disabled(save)
             } else {

@@ -35,9 +35,10 @@ const RUNE_REVISION: &str = "250597b0a591881b5c0138370cbd5f405ed710db";
 
 /// The three workspace crates, spelled from their directories so a new one cannot be forgotten
 /// without the non-vacuity assertions below going red.
-const WORKSPACE_CRATES: [&str; 3] = [
+const WORKSPACE_CRATES: [&str; 4] = [
     "dev-console-core",
     "dev-console-desktop",
+    "dev-console-release",
     "dev-console-ui-tests",
 ];
 

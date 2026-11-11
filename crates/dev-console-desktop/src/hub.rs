@@ -22,6 +22,7 @@ pub struct Hub {
     pub library: Arc<LibraryActions>,
     pub finder: Arc<FinderActions>,
     windows: Arc<OnceLock<Windows>>,
+    pub restart_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The two windows' handles, set once both exist.
@@ -40,6 +41,7 @@ impl Hub {
             finder: Arc::new(FinderActions::new(state.clone(), version)),
             state,
             windows: Arc::new(OnceLock::new()),
+            restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -175,6 +177,13 @@ impl Hub {
                     .store(false, std::sync::atomic::Ordering::SeqCst);
             }
             WindowCommand::Restart => {
+                self.restart_requested
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                self.state.vault.clear_decrypted();
+                self.state.clipboard.clear_owned();
+                windows
+                    .library
+                    .update(|library, _| library.clear_sensitive());
                 windows.library.quit();
             }
         }

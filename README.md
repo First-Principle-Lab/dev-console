@@ -108,13 +108,12 @@ See the [installation guide](docs/packaging/packaging.md) for desktop integratio
 
 ### Build and install on Arch Linux
 
-With Bun, Rust, and the Tauri Linux build dependencies installed:
+With Rust installed:
 
 ```bash
 git clone https://github.com/First-Principle-Lab/dev-console.git
 cd dev-console
-bun install --frozen-lockfile
-bunx tauri build --no-bundle
+cargo build --release --locked -p dev-console-desktop
 sudo PREFIX=/usr/local bash packaging/install.sh install
 dev-console
 ```
@@ -187,12 +186,12 @@ Locking your desktop session does not automatically lock the vault. You can conn
 
 ## Development
 
-The current application uses **Tauri 2, Rust, and Svelte 5**, with Bun for the frontend toolchain.
-The [Rune migration plan](docs/plans/rune-migration.md) describes a future rewrite.
+The released application is a native Rust shell built with **Rune** (`crates/`). The previous
+**Tauri 2 and Svelte 5** application (`src/`, `src-tauri/`) is still in the tree, with its tests,
+until the last step of the [Rune migration plan](docs/plans/rune-migration.md) removes it.
 
 ```bash
-bun install --frozen-lockfile
-bun run tauri dev
+cargo run -p dev-console-desktop -- --library
 ```
 
 Run the full verification gate with:

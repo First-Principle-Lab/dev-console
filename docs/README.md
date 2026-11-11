@@ -19,6 +19,8 @@ to test it, and how to tell it is complete.
 - [`raycast-ui-redesign.md`](design/raycast-ui-redesign.md): the UI redesign brief
 - [`raycast-ui-research-2026-11-02.md`](design/raycast-ui-research-2026-11-02.md): research and
   screenshot capture protocol
+- [`ui-revamp-scorecard.md`](design/ui-revamp-scorecard.md): the native shell's UI revamp - what
+  changed, how each change was measured, the score per category, and what is still unverified
 
 ## packaging/
 

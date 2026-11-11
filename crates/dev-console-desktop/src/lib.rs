@@ -19,6 +19,8 @@
 //! which `scripts/verify.sh` reads as UNVERIFIED.
 
 pub mod app;
+pub mod cli;
+pub mod control;
 pub mod finder;
 pub mod hub;
 pub mod icons;
@@ -28,6 +30,7 @@ pub mod library;
 pub mod off_thread;
 pub mod theme;
 pub mod tray;
+pub mod updater;
 pub mod widgets;
 
 /// The one source walk shared by the gates that read this repository's own files, so a walk that

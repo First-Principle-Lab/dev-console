@@ -1,12 +1,14 @@
-//! The Library window's layout: header, tabs and toolbar, the grouped entry list, the details
-//! pane, and the dialogs over them. Ports the markup of `Library.svelte`, `EntryList.svelte`,
-//! `EntryDetails.svelte`, `ExtraFields.svelte` (read-only half), `VaultStatus.svelte` and `Tabs.svelte`.
+//! The Library window's layout: a sidebar (the Commands/Secrets switch, the filter, the grouped
+//! list, and the vault and rare actions at its foot), the detail pane with its action bar, and the
+//! dialogs over them. The behaviour is that of `Library.svelte`, `EntryList.svelte`,
+//! `EntryDetails.svelte` and `VaultStatus.svelte`; the layout is the native shell's own
+//! (`docs/design/ui-revamp-scorecard.md`).
 
 use dev_console_core::models::{EntryDetails, EntryMeta, FieldDisplay, Kind};
 use dev_console_core::time_format::{absolute_time, relative_time_now};
 use dev_console_core::validation::is_openable_url;
-use rune::{col, el, icon, row, text, Cursor, Cx, El, ScrollSpec, Transition};
-use rune_kit::{Kit, TextInput};
+use rune::{col, el, icon, row, text, Cursor, Cx, Drag, El, Key, Phase, ScrollSpec, Transition};
+use rune_kit::{Kit, Menu, MenuItem, Placement, TextInput};
 
 use super::{dialogs, editor, environment, history, import, settings, Library};
 use crate::icons;
@@ -16,16 +18,49 @@ use crate::widgets::{self, Tone, Variant};
 pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let look = Look::for_setting(&state.theme, cx.system_dark());
     let kit = look.kit();
+    let mut layer = Vec::new();
+    let editing = state.editing.is_some();
+    let has_selection = state.selected_id.is_some() || state.selected_suggestion.is_some();
+    let show_list = !state.narrow || (!editing && !has_selection);
+    let show_detail = !state.narrow || has_selection || editing;
+    // The panes are swapped and resized, never animated: a window the compositor resizes as it
+    // maps must not open on a cross-fade between its two layouts.
+    let mut panes = row()
+        .key("panes")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .instant_changes();
+    if show_list {
+        panes = panes.child(sidebar(state, &look, &kit));
+        if !state.narrow {
+            panes = panes.child(sidebar_divider(&look));
+        }
+    }
+    if show_detail {
+        panes = panes.child(
+            col()
+                .key("detail-pane")
+                .label("Entry details")
+                .grow(1.0)
+                .min_w(0.0)
+                .h_full()
+                .min_h(0.0)
+                // What the pane shows is replaced, never morphed: the old entry must not be
+                // legible through the new one for a third of a second.
+                .instant_changes()
+                .child(detail_body(state, &look, &kit, &mut layer)),
+        );
+    }
     let mut root = col()
         .key("library")
         .w_full()
         .h_full()
-        .fill(look.bg)
+        .fill(look.content())
         .on_layout(|state: &mut Library, rect: [f32; 4]| state.set_width(rect[2]))
-        .child(header(state, &look))
-        .child(toolbar(state, &look, &kit))
+        .child(panes)
         .children(status(state, &look))
-        .child(panes(state, &look, &kit));
+        .children(layer);
     // Drawn last so each is on top of what came before; `modal` makes everything under it inert.
     for overlay in [
         state
@@ -62,41 +97,273 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     root
 }
 
-fn header(state: &Library, look: &Look) -> El {
+fn sidebar_divider(look: &Look) -> El {
+    row()
+        .key("sidebar-resize")
+        .role("separator")
+        .label("Resize sidebar")
+        .help("Drag to resize. Left and Right adjust width; Home resets it.")
+        .focusable(true)
+        .focus_ring(2.0, 0.0, look.focus)
+        .cursor(Cursor::ResizeColumn)
+        .w(6.0)
+        .h_full()
+        .fill(look.sidebar())
+        .hover(look.accent_soft)
+        .child(el().w(1.0).h_full().fill(look.line_strong))
+        .on_drag(|state: &mut Library, drag: &mut Drag, tx| {
+            tx.instant();
+            match drag.phase {
+                Phase::Down => drag.data = state.sidebar_width(),
+                Phase::Move => state.resize_sidebar(drag.data + drag.dx),
+                Phase::Up if drag.cancelled() => state.resize_sidebar(drag.data),
+                Phase::Up => {}
+            }
+        })
+        .on_key(|state: &mut Library, ev, tx| {
+            let width = match ev.key {
+                Key::Left => state.sidebar_width() - 16.0,
+                Key::Right => state.sidebar_width() + 16.0,
+                Key::Home => size::PANE_LIST,
+                _ => return false,
+            };
+            tx.instant();
+            state.resize_sidebar(width);
+            true
+        })
+}
+
+/// The left column: what kind of thing, the filter, the list, and at the bottom the vault and
+/// the three things done rarely enough to be icons.
+fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
+    let mut side = col()
+        .key("list-pane")
+        .label("Entry list")
+        .h_full()
+        .min_h(0.0)
+        .fill(look.sidebar());
+    side = if state.narrow {
+        side.w_full()
+    } else {
+        side.w(state.sidebar_width())
+    };
+    let mut scroll = col().w_full();
+    if state.tab == Kind::Command && state.history_enabled {
+        scroll = scroll.child(history::view(state, look));
+    }
+    scroll = scroll.child(
+        row()
+            .key("saved-entries-heading")
+            .w_full()
+            .mt(size::SP1)
+            .px(size::SP4)
+            .pt(size::SP3)
+            .pb(size::SP2)
+            .gap(size::SP2)
+            .center_y()
+            .border_sides([1.0, 0.0, 0.0, 0.0], look.line_hair)
+            .child(
+                text(if state.tab == Kind::Command {
+                    "Saved commands"
+                } else {
+                    "Saved secrets"
+                })
+                .font(ts::PROJECT)
+                .color(look.muted),
+            )
+            .child(
+                text(state.entries.len().to_string())
+                    .font(ts::SM)
+                    .color(look.muted),
+            ),
+    );
+    scroll = scroll.child(entry_list(state, look));
+    side.child(toolbar(state, look, kit))
+        .child(
+            col()
+                .key("list-scroll")
+                .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .instant_changes()
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .child(scroll),
+        )
+        .child(sidebar_footer(state, look))
+}
+
+fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
+    let hidden = state.secret_metadata_hidden();
+    let tabs = row()
+        .key("tabs")
+        .role("tablist")
+        .focus_group()
+        .w_full()
+        .h(32.0)
+        .padding(2.0)
+        .gap(2.0)
+        .radius(size::RADIUS + 1.0)
+        .fill(look.fg.alpha(0.06))
+        .child(tab(
+            state,
+            look,
+            Kind::Command,
+            "Commands",
+            Some(state.counts[0]),
+        ))
+        .child(tab(
+            state,
+            look,
+            Kind::Secret,
+            "Secrets",
+            (!hidden).then_some(state.counts[1]),
+        ));
+    let filter = TextInput::new(&state.query)
+        .width(None)
+        .label("Search this tab")
+        .placeholder(if state.tab == Kind::Secret {
+            "Filter secrets"
+        } else {
+            "Filter commands"
+        })
+        .leading_icon(&icons::SEARCH)
+        .on_edit(|state: &mut Library| &mut state.query)
+        .on_change(|state: &mut Library, _| state.filter_changed())
+        .build(kit)
+        .key("tab-search");
+    let add = widgets::button(
+        look,
+        "add-entry",
+        "New",
+        Some(&icons::PLUS),
+        Variant::Default,
+    )
+    .h(32.0)
+    .help(if state.tab == Kind::Secret {
+        "New secret (Ctrl+N)"
+    } else {
+        "New command (Ctrl+N)"
+    })
+    .on_press(|state: &mut Library| state.start_new());
+    let mut toolbar = col()
+        .key("toolbar")
+        .w_full()
+        .padding(size::SP3)
+        .gap(size::SP3)
+        .child(tabs)
+        .child(
+            row()
+                .w_full()
+                .gap(size::SP2)
+                .center_y()
+                .child(el().grow(1.0).min_w(0.0).child(filter))
+                .child(add),
+        );
+    if state.tab == Kind::Command {
+        toolbar = toolbar.child(
+            row()
+                .w_full()
+                .gap(size::SP1)
+                .center_y()
+                .child(
+                    widgets::button_sm(
+                        look,
+                        "import-project",
+                        "Import",
+                        Some(&icons::IMPORT),
+                        Variant::Ghost,
+                    )
+                    .help("Import commands from a project folder")
+                    .on_press(|state: &mut Library| state.start_project_import()),
+                )
+                .child(
+                    widgets::button_sm(
+                        look,
+                        "open-environment",
+                        "Environment",
+                        Some(&icons::ENVIRONMENT),
+                        Variant::Ghost,
+                    )
+                    .help("Manage environment files for the selected project")
+                    .on_press(|state: &mut Library| {
+                        let root = state
+                            .meta()
+                            .and_then(|meta| meta.project.as_ref())
+                            .map(|project| project.root.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        state.open_environment(root);
+                    }),
+                ),
+        );
+    }
+    toolbar
+}
+
+fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {
+    let active = state.tab == kind;
+    let mut chip = row()
+        .key(if kind == Kind::Command {
+            "tab-commands"
+        } else {
+            "tab-secrets"
+        })
+        .role("tab")
+        .label(label)
+        .checked(active)
+        .focusable(true)
+        .focus_selected(active)
+        .focus_ring(2.0, 1.0, look.focus)
+        .grow(1.0)
+        .w_frac(0.5)
+        .shrink()
+        .h_full()
+        .gap(6.0)
+        .center()
+        .radius(size::RADIUS - 1.0)
+        .cursor(Cursor::Pointer)
+        .on_press_tx(move |state: &mut Library, tx| {
+            tx.instant();
+            state.select_tab(kind);
+        })
+        .child(
+            text(label)
+                .font(if active { ts::MEDIUM } else { ts::BODY })
+                .color(if active { look.fg } else { look.muted }),
+        );
+    if let Some(count) = count {
+        chip = chip.child(text(count.to_string()).font(ts::XS).color(look.dim));
+    }
+    if active {
+        chip = chip.fill(look.accent_soft).border(1.0, look.accent_line);
+    }
+    chip
+}
+
+/// The vault's state, which is also the control that changes it, and the rare actions.
+fn sidebar_footer(state: &Library, look: &Look) -> El {
     let mut bar = row()
         .key("library-header")
         .w_full()
         .h(48.0)
         .px(size::SP3)
-        .gap(size::SP3)
+        .gap(size::SP2)
         .center_y()
-        .child(
-            row()
-                .gap(size::SP2)
-                .center_y()
-                .child(
-                    row()
-                        .w(24.0)
-                        .h(24.0)
-                        .center()
-                        .radius(size::RADIUS)
-                        .fill(look.accent_soft)
-                        .child(icon(&icons::COMMAND, 14.0).color(look.accent)),
-                )
-                .child(text("Dev Console").font(ts::STRONG).color(look.fg)),
-        )
-        .child(el().grow(1.0));
+        .border_sides([1.0, 0.0, 0.0, 0.0], look.line_hair);
+    if let Some(vault) = &state.vault {
+        bar = bar.child(vault_status(state, vault, look));
+    }
+    bar = bar.child(el().grow(1.0));
     if state.authenticating {
         bar = bar.child(
-            text("Waiting for authentication…")
+            text("Waiting…")
                 .key("waiting")
                 .role("status")
+                .label("Waiting for authentication…")
                 .font(ts::SM)
                 .color(look.muted),
         );
-    }
-    if let Some(vault) = &state.vault {
-        bar = bar.child(vault_status(state, vault, look));
     }
     bar.child(
         widgets::button_sm(
@@ -112,7 +379,7 @@ fn header(state: &Library, look: &Look) -> El {
 
 fn vault_status(state: &Library, vault: &dev_console_core::models::VaultState, look: &Look) -> El {
     let (ink, label) = if vault.unlocked {
-        (look.ok, "Vault unlocked")
+        (look.muted, "Vault unlocked")
     } else if vault.manual_lock {
         (look.warn, "Vault locked")
     } else if vault.vault_available {
@@ -120,29 +387,38 @@ fn vault_status(state: &Library, vault: &dev_console_core::models::VaultState, l
     } else {
         (look.danger, "Keyring unavailable")
     };
-    let mut text_col = col().child(text(label).font(ts::SM).color(look.fg));
-    if !vault.unlocked && vault.keyring_available && !vault.manual_lock {
-        text_col = text_col.child(
-            text("keyring present, vault sealed")
-                .font(ts::XS)
-                .color(look.muted),
-        );
-    }
-    let toggle = widgets::button_sm(
-        look,
-        "vault-toggle",
-        if vault.unlocked { "Lock" } else { "Unlock" },
-        Some(if vault.unlocked {
-            &icons::LOCK
-        } else {
-            &icons::UNLOCK
-        }),
-        if vault.unlocked {
-            Variant::Ghost
-        } else {
-            Variant::Primary
-        },
-    );
+    let action = if vault.unlocked { "Lock" } else { "Unlock" };
+    let toggle = row()
+        .key("vault-toggle")
+        .role("button")
+        .label(action)
+        .help(match (&vault.reason, vault.unlocked) {
+            (Some(reason), _) => reason.clone(),
+            (None, true) => "Lock the vault".to_owned(),
+            (None, false) => "Unlock the vault".to_owned(),
+        })
+        .focusable(true)
+        .focus_ring(2.0, 1.0, look.focus)
+        .h(size::CONTROL_H)
+        .px(size::SP2)
+        .gap(6.0)
+        .center_y()
+        .radius(size::RADIUS)
+        .hover(look.fg.alpha(0.08))
+        .press(look.fg.alpha(0.12))
+        .cursor(Cursor::Pointer)
+        .child(
+            icon(
+                if vault.unlocked {
+                    &icons::UNLOCK
+                } else {
+                    &icons::LOCK
+                },
+                14.0,
+            )
+            .color(ink),
+        )
+        .child(text(label).font(ts::SM).color(ink));
     let toggle = if state.authenticating {
         widgets::disabled(toggle)
     } else if vault.unlocked {
@@ -154,293 +430,67 @@ fn vault_status(state: &Library, vault: &dev_console_core::models::VaultState, l
     } else {
         toggle.on_press(|state: &mut Library| state.unlock())
     };
-    let mut chip = row()
-        .key("vault-status")
-        .h(34.0)
-        .pl(size::SP2)
-        .pr(4.0)
-        .gap(size::SP2)
-        .center_y()
-        .radius(999.0)
-        .fill(look.panel)
-        .border(1.0, look.line)
-        .child(
-            row()
-                .w(22.0)
-                .h(22.0)
-                .center()
-                .radius(999.0)
-                .fill(ink.alpha(0.16))
-                .child(
-                    icon(
-                        if vault.unlocked {
-                            &icons::UNLOCK
-                        } else {
-                            &icons::LOCK
-                        },
-                        12.0,
-                    )
-                    .color(ink),
-                ),
-        )
-        .child(text_col)
-        .child(toggle);
-    if let Some(reason) = &vault.reason {
-        chip = chip.help(reason.clone());
-    }
-    chip
-}
-
-fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
-    let hidden = state.secret_metadata_hidden();
-    let tabs = row()
-        .key("tabs")
-        .role("tablist")
-        .focus_group()
-        .gap(size::SP1)
-        .child(tab(
-            state,
-            look,
-            Kind::Command,
-            "Commands",
-            &icons::COLLECTION,
-            Some(state.counts[0]),
-        ))
-        .child(tab(
-            state,
-            look,
-            Kind::Secret,
-            "Secrets",
-            &icons::SECRET,
-            (!hidden).then_some(state.counts[1]),
-        ));
-    let filter = TextInput::new(&state.query)
-        .width(None)
-        .label("Search this tab")
-        .placeholder("Search this tab")
-        .leading_icon(&icons::SEARCH)
-        .on_edit(|state: &mut Library| &mut state.query)
-        .on_change(|state: &mut Library, _| state.filter_changed())
-        .build(kit)
-        .key("tab-search");
-    let mut tools = row()
-        .w_full()
-        .gap(size::SP2)
-        .center_y()
-        .child(el().grow(1.0).min_w(0.0).child(filter))
-        .child(
-            widgets::button(
-                look,
-                "add-entry",
-                "New",
-                Some(&icons::PLUS),
-                Variant::Primary,
-            )
-            .on_press(|state: &mut Library| state.start_new()),
-        );
-    {
-        tools = tools.child(
-            widgets::button(
-                look,
-                "open-environment",
-                if state.narrow { "Env" } else { "Environment" },
-                Some(&icons::LOCK),
-                Variant::Default,
-            )
-            .on_press(|state: &mut Library| {
-                let root = state
-                    .meta()
-                    .and_then(|meta| meta.project.as_ref())
-                    .map(|project| project.root.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                state.open_environment(root);
-            }),
-        );
-        if state.tab == Kind::Command {
-            tools = tools.child(
-                widgets::button(
-                    look,
-                    "import-project",
-                    if state.narrow {
-                        "Import"
-                    } else {
-                        "Import from project"
-                    },
-                    Some(&icons::FOLDER),
-                    Variant::Default,
-                )
-                .help("Import the tasks a project folder defines as commands")
-                .label("Import from project")
-                .on_press(|state: &mut Library| state.start_project_import()),
-            );
-        }
-    }
-    col()
-        .key("toolbar")
-        .w_full()
-        .px(size::SP3)
-        .pb(size::SP2)
-        .gap(size::SP2)
-        .fill(look.panel)
-        .border_sides([0.0, 0.0, 1.0, 0.0], look.line)
-        .child(row().pt(size::SP2).child(tabs))
-        .child(tools)
-}
-
-fn tab(
-    state: &Library,
-    look: &Look,
-    kind: Kind,
-    label: &'static str,
-    glyph: &'static rune::Icon,
-    count: Option<usize>,
-) -> El {
-    let active = state.tab == kind;
-    let mut chip = row()
-        .key(if kind == Kind::Command {
-            "tab-commands"
-        } else {
-            "tab-secrets"
-        })
-        .role("tab")
-        .label(label)
-        .checked(active)
-        .focusable(true)
-        .focus_selected(active)
-        .focus_ring(2.0, 1.0, look.focus)
-        .h(size::TAB_H)
-        .px(size::SP3)
-        .gap(size::SP2)
-        .center_y()
-        .radius(size::RADIUS)
-        .cursor(Cursor::Pointer)
-        .hover(look.fg.alpha(0.05))
-        .on_press(move |state: &mut Library| {
-            state.select_tab(kind);
-        })
-        .child(icon(glyph, 14.0).color(if active { look.fg } else { look.muted }))
-        .child(
-            text(label)
-                .font(if active { ts::STRONG } else { ts::BODY })
-                .color(if active { look.fg } else { look.muted }),
-        );
-    if let Some(count) = count {
-        chip = chip.child(
-            row()
-                .h(18.0)
-                .min_w(20.0)
-                .px(6.0)
-                .center()
-                .radius(999.0)
-                .fill(if active {
-                    look.accent_soft
-                } else {
-                    look.raised
-                })
-                .child(text(count.to_string()).font(ts::XS).color(if active {
-                    look.accent
-                } else {
-                    look.muted
-                })),
-        );
-    }
-    if active {
-        chip = chip
-            .fill(look.selected)
-            .border_sides([0.0, 0.0, 2.0, 0.0], look.accent);
-    }
-    chip
+    row().key("vault-status").center_y().child(toggle)
 }
 
 fn status(state: &Library, look: &Look) -> Option<El> {
-    let line = if let Some(error) = state.list_error.as_ref().filter(|error| {
+    if let Some(error) = state.list_error.as_ref().filter(|error| {
         !(state.secret_metadata_hidden() && error.to_lowercase().contains("locked"))
     }) {
-        widgets::status_line(look, "list-error", Tone::Error, error)
-    } else if let Some(status) = &state.status {
-        let ok = ["Copied", "Saved", "Deleted", "Launched", "Imported"]
-            .iter()
-            .any(|prefix| status.starts_with(prefix));
-        widgets::status_line(
+        return Some(widgets::toast(
             look,
-            "status",
-            if ok { Tone::Ok } else { Tone::Info },
-            status,
-        )
-    } else {
-        return None;
+            "list-error",
+            Tone::Error,
+            error,
+            error,
+        ));
+    }
+    let status = state.status.as_ref()?;
+    let ok = super::STATUS_CONFIRMATIONS
+        .iter()
+        .any(|prefix| status.starts_with(prefix));
+    // A copied command needs only the confirmation. The sentence after it is the clipboard
+    // caveat, which matters for a secret and is kept in full there (and always in Settings).
+    let shown = match status.split_once(". ") {
+        Some((first, _)) if ok && state.tab == Kind::Command && status.starts_with("Copied") => {
+            format!("{first}.")
+        }
+        _ => status.clone(),
     };
-    Some(row().w_full().px(size::SP3).pt(size::SP2).child(line))
+    Some(widgets::toast(
+        look,
+        "status",
+        if ok { Tone::Ok } else { Tone::Info },
+        &shown,
+        status,
+    ))
 }
 
-fn panes(state: &Library, look: &Look, kit: &Kit) -> El {
-    let editing = state.editing.is_some();
-    let show_list = !state.narrow || (!editing && state.selected_id.is_none());
-    let show_detail = !state.narrow || state.selected_id.is_some() || editing;
-    let mut panes = row().key("panes").w_full().grow(1.0).min_h(0.0);
-    if show_list {
-        let mut list = col()
-            .key("list-pane")
-            .label("Entry list")
-            .h_full()
-            .min_h(0.0)
-            .fill(look.panel);
-        list = if state.narrow {
-            list.w_full()
-        } else {
-            list.w(size::PANE_LIST)
-                .border_sides([0.0, 1.0, 0.0, 0.0], look.line)
-        };
-        if state.tab == Kind::Command && state.history_enabled {
-            list = list.child(history::view(state, look));
-        }
-        list = list.child(
-            col()
-                .key("list-scroll")
-                .w_full()
-                .grow(1.0)
-                .min_h(0.0)
-                .scroll(ScrollSpec {
-                    stick_bottom: false,
-                })
-                .child(entry_list(state, look)),
-        );
-        panes = panes.child(list);
-    }
-    if show_detail {
-        let mut detail = col()
-            .key("detail-pane")
-            .label("Entry details")
-            .grow(1.0)
-            .min_w(0.0)
-            .h_full()
-            .min_h(0.0);
-        if state.narrow && !editing && state.selected_id.is_some() {
-            detail = detail.child(
-                row().px(size::SP3).pt(size::SP2).child(
-                    widgets::button_sm(
-                        look,
-                        "back-to-list",
-                        "List",
-                        Some(&icons::BACK),
-                        Variant::Ghost,
-                    )
-                    .on_press(|state: &mut Library| state.back_to_list()),
-                ),
-            );
-        }
-        detail = detail.child(detail_body(state, look, kit));
-        panes = panes.child(detail);
-    }
-    panes
-}
-
-fn detail_body(state: &Library, look: &Look, kit: &Kit) -> El {
+fn detail_body(state: &Library, look: &Look, kit: &Kit, layer: &mut Vec<El>) -> El {
     if let Some(editor) = &state.editing {
         return editor::editor_view(state, editor, look, kit);
     }
+    if state.tab == Kind::Command {
+        if let Some(suggestion) = state
+            .selected_suggestion
+            .as_ref()
+            .and_then(|key| state.suggestions.iter().find(|s| &s.key == key))
+        {
+            return history::preview(state, suggestion, look);
+        }
+    }
     if let Some(details) = &state.details {
-        return details_view(state, details, look);
+        return details_view(state, details, look, kit, layer);
+    }
+    if state.loading || state.selected_id.is_some() {
+        return widgets::empty_state(
+            look,
+            "detail-loading",
+            &icons::UPDATE,
+            "Loading entry…",
+            "",
+            Vec::new(),
+        );
     }
     if state.tab == Kind::Secret && state.vault.as_ref().is_some_and(|vault| !vault.unlocked) {
         let unlock = widgets::button(
@@ -451,7 +501,7 @@ fn detail_body(state: &Library, look: &Look, kit: &Kit) -> El {
             } else {
                 "Unlock vault"
             },
-            Some(&icons::UNLOCK),
+            None,
             Variant::Primary,
         );
         return widgets::empty_state(
@@ -459,45 +509,81 @@ fn detail_body(state: &Library, look: &Look, kit: &Kit) -> El {
             "vault-locked",
             &icons::LOCK,
             "Vault locked",
-            "Secrets stay encrypted on disk. Unlocking asks the system for confirmation; a manual lock is never cleared automatically.",
-            vec![if state.authenticating { widgets::disabled(unlock) } else { unlock.on_press(|state: &mut Library| state.unlock()) }],
+            "Secrets stay encrypted until you unlock.",
+            vec![if state.authenticating {
+                widgets::disabled(unlock)
+            } else {
+                unlock.on_press(|state: &mut Library| state.unlock())
+            }],
         );
     }
-    if state.entries.is_empty() && !state.loading {
+    if state.entries.is_empty() && !state.loading && state.query.text.is_empty() {
+        let secret = state.tab == Kind::Secret;
         return widgets::empty_state(
             look,
             "nothing-selected",
-            &icons::PLUS,
-            "Nothing selected",
-            "Create an entry, or press the shortcut below to search everything at once.",
+            if secret {
+                &icons::SECRET
+            } else {
+                &icons::COMMAND
+            },
+            if secret {
+                "No secrets yet"
+            } else {
+                "No commands yet"
+            },
+            if secret {
+                "Save a token or key once, then copy it from anywhere."
+            } else {
+                "Save a command once, then find it from anywhere."
+            },
             vec![
                 widgets::button(
                     look,
                     "empty-new",
-                    if state.tab == Kind::Secret {
-                        "New secret"
-                    } else {
-                        "New command"
-                    },
-                    Some(&icons::PLUS),
+                    if secret { "New secret" } else { "New command" },
+                    None,
                     Variant::Primary,
                 )
                 .on_press(|state: &mut Library| state.start_new()),
                 row()
                     .key("shortcut-hint")
-                    .gap(6.0)
+                    .pl(size::SP2)
                     .center_y()
-                    .child(widgets::hint(look, &["Super", "F"], "Finder")),
+                    .child(widgets::hint(look, &["Super", "F"], "opens the Finder")),
             ],
         );
     }
     widgets::empty_state(
         look,
         "select-entry",
-        &icons::SEARCH,
-        "Select an entry",
-        "Pick a row on the left to see it here.",
-        Vec::new(),
+        if state.tab == Kind::Secret {
+            &icons::SECRET
+        } else {
+            &icons::COMMAND
+        },
+        if state.tab == Kind::Command {
+            "Your command library"
+        } else {
+            "Your secret library"
+        },
+        if state.tab == Kind::Command {
+            "Select a saved command to view, copy or run it. Suggested commands come from project history; choose Save to review one before adding it to your library."
+        } else {
+            "Select a secret to view its details or copy it. Values stay masked until you choose Reveal."
+        },
+        vec![widgets::button(
+            look,
+            "empty-selection-new",
+            if state.tab == Kind::Command {
+                "New command"
+            } else {
+                "New secret"
+            },
+            Some(&icons::PLUS),
+            Variant::Default,
+        )
+        .on_press(|state: &mut Library| state.start_new())],
     )
 }
 
@@ -601,16 +687,20 @@ fn entry_list(state: &Library, look: &Look) -> El {
         })
         .w_full()
         .px(size::SP2)
-        .py(size::SP2)
-        .gap(2.0);
+        .pb(size::SP2)
+        .gap(1.0)
+        // A source list: Up and Down move through the rows and the detail pane follows, Home
+        // and End jump, and typing a name's first letters goes to it.
+        .focus_group()
+        .focus_follows();
     if state.loading && state.entries.is_empty() {
         for index in 0..3 {
             list = list.child(
                 el().key(format!("skeleton-{index}"))
                     .w_full()
-                    .h(size::ROW_H - 6.0)
+                    .h(size::ROW_H)
                     .radius(size::RADIUS_ROW)
-                    .fill(look.raised),
+                    .fill(look.fg.alpha(0.04)),
             );
         }
         return list;
@@ -623,7 +713,7 @@ fn entry_list(state: &Library, look: &Look) -> El {
                 .padding(size::SP3)
                 .gap(size::SP2)
                 .center_y()
-                .child(icon(&icons::LOCK, 13.0).color(look.muted))
+                .child(icon(&icons::LOCK, 13.0).color(look.dim))
                 .child(
                     text("Secret metadata is hidden while the vault is locked.")
                         .font(ts::SM)
@@ -641,106 +731,88 @@ fn entry_list(state: &Library, look: &Look) -> El {
         } else {
             "Add a command and it will be searchable from the Finder."
         };
-        return list.child(el().h(240.0).w_full().child(widgets::empty_state(
-            look,
-            "list-empty",
-            &icons::INBOX,
-            "Nothing here yet",
-            hint,
-            Vec::new(),
-        )));
+        return list.child(
+            text(hint)
+                .key("list-empty")
+                .font(ts::SM)
+                .color(look.muted)
+                .wrap()
+                .w_full()
+                .px(size::SP2)
+                .py(size::SP2),
+        );
     }
     let filter_active = !state.query.text.trim().is_empty();
     let all = groups(&state.entries, state.tab);
     let several = all.len() > 1;
     let busy = state.draft_dirty();
     for group in all {
-        let open = group.key.is_empty() || filter_active || state.expanded.contains(&group.key);
+        let open = group.key.is_empty() || filter_active || !state.collapsed.contains(&group.key);
         let mut section = col()
             .key(format!("group-{}", group.key))
             .role("group")
             .label(group.name.clone())
             .w_full()
-            .gap(2.0);
+            .gap(1.0);
         if state.tab == Kind::Command && !group.key.is_empty() {
             let key = group.key.clone();
             let root = group.root.clone();
-            section =
-                section.child(
-                    row()
-                        .key(format!("project-toggle-{}", group.key))
-                        .role("button")
-                        .label(group.name.clone())
-                        .expanded(open)
-                        .help(if group.root.is_empty() {
-                            group.name.clone()
-                        } else {
-                            group.root.clone()
-                        })
-                        .focusable(true)
-                        .focus_ring(2.0, 1.0, look.focus)
-                        .w_full()
-                        .h(30.0)
-                        .px(size::SP2)
-                        .gap(6.0)
-                        .center_y()
-                        .radius(size::RADIUS)
-                        .cursor(Cursor::Pointer)
-                        .hover(look.fg.alpha(0.05))
-                        .on_press(move |state: &mut Library| state.toggle_group(&key, &root))
-                        .child(icon(&icons::CHEVRON, 13.0).color(look.muted).icon_rotation(
-                            if open {
-                                0.0
-                            } else {
-                                -std::f32::consts::FRAC_PI_2
-                            },
-                        ))
-                        .child(icon(&icons::FOLDER, 14.0).color(look.muted))
-                        .child(
-                            text(group.name.clone())
-                                .font(ts::STRONG)
-                                .color(look.fg)
-                                .truncate()
-                                .grow(1.0),
-                        )
-                        .child(count_chip(look, group.entries.len())),
-                );
-        } else if state.tab == Kind::Command && several {
-            section = section.child(
-                row()
-                    .key("general-head")
-                    .h(30.0)
-                    .px(size::SP2)
-                    .gap(6.0)
-                    .center_y()
-                    .child(text("General").font(ts::STRONG).color(look.muted))
-                    .child(count_chip(look, group.entries.len())),
-            );
-        }
-        if open {
+            let chevron = icon(&icons::CHEVRON, 11.0)
+                .color(look.dim)
+                .icon_rotation(if open {
+                    0.0
+                } else {
+                    -std::f32::consts::FRAC_PI_2
+                });
+            let mut head = group_head(look, Some(chevron), &group.name, group.entries.len())
+                .key(format!("project-toggle-{}", group.key))
+                .role("button")
+                .label(group.name.clone())
+                .expanded(open)
+                .help(if group.root.is_empty() {
+                    group.name.clone()
+                } else {
+                    widgets::short_path(&group.root)
+                })
+                .focusable(true)
+                .focus_ring(2.0, 1.0, look.focus)
+                .cursor(Cursor::Pointer)
+                .hover_group_focus()
+                .on_press_tx(move |state: &mut Library, tx| {
+                    tx.instant();
+                    state.toggle_group(&key, &root);
+                });
             if !group.root.is_empty() {
                 let root = group.root.clone();
-                section = section.child(
-                    row()
-                        .key(format!("project-environment-{}", group.key))
-                        .role("button")
-                        .label("Environment")
-                        .focusable(true)
-                        .w_full()
-                        .h(28.0)
-                        .px(size::SP3)
-                        .gap(6.0)
-                        .center_y()
-                        .radius(size::RADIUS)
-                        .cursor(Cursor::Pointer)
-                        .hover(look.fg.alpha(0.05))
-                        .on_press(move |state: &mut Library| state.open_environment(root.clone()))
-                        .child(icon(&icons::LOCK, 13.0).color(look.muted))
-                        .child(text("Environment").font(ts::SM).color(look.muted)),
+                // The project's environment files, offered where the project is named and only
+                // while the pointer or the keyboard is on it.
+                head = head.child(
+                    widgets::icon_button(
+                        look,
+                        format!("project-environment-{}", group.key),
+                        "Environment",
+                        &icons::ENVIRONMENT,
+                        look.muted,
+                    )
+                    .help(format!("Environment files of {}", group.name))
+                    .w(size::CONTROL_H_SM)
+                    .h(size::CONTROL_H_SM)
+                    .group_opacity(0.0, 1.0)
+                    .on_press(move |state: &mut Library| state.open_environment(root.clone())),
                 );
             }
+            // Its own group, so the list's arrows step over a heading instead of folding it; Tab
+            // still reaches it.
+            section = section.child(row().w_full().focus_group().child(head));
+        } else if state.tab == Kind::Command && several {
+            section = section
+                .child(group_head(look, None, "General", group.entries.len()).key("general-head"));
+        }
+        // Rows nest one step beyond the project heading.
+        let headed = state.tab == Kind::Command && (several || !group.key.is_empty());
+        if open {
             for entry in group.entries {
-                section = section.child(entry_row(state, look, entry, busy));
+                section = section.child(entry_row(state, look, entry, busy, headed));
             }
         }
         list = list.child(section);
@@ -748,24 +820,45 @@ fn entry_list(state: &Library, look: &Look) -> El {
     list
 }
 
-fn count_chip(look: &Look, count: usize) -> El {
+/// A project heading is stronger than its rows; nesting and spacing show their relationship.
+fn group_head(look: &Look, lead: Option<El>, name: &str, count: usize) -> El {
     row()
-        .h(18.0)
-        .min_w(20.0)
-        .px(6.0)
-        .center()
-        .radius(999.0)
-        .fill(look.raised)
-        .child(text(count.to_string()).font(ts::XS).color(look.muted))
+        .w_full()
+        .h(size::CONTROL_H)
+        .mt(size::SP4)
+        .pl(size::SP2)
+        .pr(2.0)
+        .gap(6.0)
+        .center_y()
+        .radius(size::RADIUS_ROW)
+        // A group with no chevron keeps the chevron's column, so every heading starts on one line.
+        .child(lead.unwrap_or_else(|| el().w(11.0)))
+        .child(
+            text(name.to_owned())
+                .font(ts::PROJECT)
+                .color(look.fg)
+                .truncate()
+                .min_w(0.0)
+                .shrink(),
+        )
+        .child(text(count.to_string()).font(ts::SM).color(look.muted))
+        .child(el().grow(1.0))
 }
 
-fn entry_row(state: &Library, look: &Look, entry: EntryMeta, busy: bool) -> El {
+fn entry_row(state: &Library, look: &Look, entry: EntryMeta, busy: bool, indent: bool) -> El {
     let selected = state.selected_id.as_deref() == Some(entry.id.as_str());
     let id = entry.id.clone();
     let copy_target = entry.clone();
     let pin_target = entry.clone();
-    let delete_target = entry.clone();
-    let pin = widgets::icon_button(
+    // Pointer controls: Tab goes from the list to the detail bar, which has the same actions
+    // for the selected entry, instead of stopping at a hidden button on every row.
+    let small = |button: El| {
+        button
+            .w(size::CONTROL_H_SM)
+            .h(size::CONTROL_H_SM)
+            .tab_index(-1)
+    };
+    let pin = small(widgets::icon_button(
         look,
         format!("row-pin-{}", entry.id),
         &format!(
@@ -773,189 +866,206 @@ fn entry_row(state: &Library, look: &Look, entry: EntryMeta, busy: bool) -> El {
             if entry.pinned { "Unpin" } else { "Pin" },
             entry.name
         ),
-        if entry.pinned {
-            &icons::UNPIN
-        } else {
-            &icons::PIN
-        },
-        if entry.pinned {
-            look.accent
-        } else {
-            look.muted
-        },
-    );
-    let delete = widgets::icon_button(
+        &icons::PIN,
+        if entry.pinned { look.muted } else { look.dim },
+    ));
+    let copy = small(widgets::icon_button(
         look,
-        format!("row-delete-{}", entry.id),
-        &format!("Delete {}", entry.name),
-        &icons::TRASH,
-        look.danger,
-    );
+        format!("row-copy-{}", entry.id),
+        &format!("Copy {}", entry.name),
+        &icons::COPY,
+        look.muted,
+    ))
+    .on_press(move |state: &mut Library| state.copy_entry(Some(copy_target.clone())));
+    // The row's own actions exist for the pointer and the keyboard, and are drawn only while
+    // one of them is on the row: at rest a list is names, not a grid of sixty icons.
+    let pinned = entry.pinned;
+    let pin = if busy {
+        widgets::disabled(pin)
+    } else {
+        pin.on_press(move |state: &mut Library| state.toggle_pin(Some(pin_target.clone())))
+    };
+    let actions = row()
+        .pin(None, Some(14.0), Some(6.0), None)
+        .gap(0.0)
+        .center_y()
+        // Not part of the list's arrow order: the arrows move between entries.
+        .focus_group()
+        .child(
+            copy.fill(if selected {
+                look.selected
+            } else {
+                look.sidebar()
+            })
+            .group_opacity(0.0, 1.0),
+        )
+        // A pinned row keeps its pin on show: it is the row's state as well as its control.
+        .child(if pinned {
+            pin.fill(if selected {
+                look.selected
+            } else {
+                look.sidebar()
+            })
+        } else {
+            pin.fill(if selected {
+                look.selected
+            } else {
+                look.sidebar()
+            })
+            .group_opacity(0.0, 1.0)
+        });
     let mut item = row()
         .key(format!("entry-row-{}", entry.id))
         .role("option")
         .label(entry.name.clone())
         .checked(selected)
         .focusable(true)
+        .focus_selected(selected)
         .focus_ring(2.0, 1.0, look.focus)
+        .hover_group_focus()
         .w_full()
-        .h(size::ROW_H + 4.0)
-        .pl(size::SP3)
-        .pr(4.0)
-        .gap(2.0)
+        .h(size::LIBRARY_ROW_H)
+        .pl(if indent { size::SP2 + 29.0 } else { size::SP2 })
+        .pr(if pinned {
+            size::CONTROL_H_SM + size::SP2
+        } else {
+            size::SP2
+        })
+        .gap(6.0)
         .center_y()
         .radius(size::RADIUS_ROW)
+        .border_sides(
+            [0.0, 0.0, 0.0, 2.0],
+            if selected {
+                look.accent
+            } else {
+                rune::Color::TRANSPARENT
+            },
+        )
         .cursor(Cursor::Pointer)
-        .hover(look.fg.alpha(0.04))
-        .on_press(move |state: &mut Library| state.select(&id))
-        .child(
-            text(entry.name.clone())
-                .font(ts::ROW)
-                .color(if selected { look.selected_fg } else { look.fg })
-                .truncate()
-                .grow(1.0)
-                .min_w(0.0),
-        )
-        .child(
-            widgets::icon_button(
-                look,
-                format!("row-copy-{}", entry.id),
-                &format!("Copy {}", entry.name),
-                &icons::COPY,
-                look.muted,
-            )
-            .on_press(move |state: &mut Library| state.copy_entry(Some(copy_target.clone()))),
-        )
-        .child(if busy {
-            widgets::disabled(pin)
-        } else {
-            pin.on_press(move |state: &mut Library| state.toggle_pin(Some(pin_target.clone())))
+        .help(entry.name.clone())
+        .hover(look.fg.alpha(0.05))
+        .on_press_tx(move |state: &mut Library, tx| {
+            tx.instant();
+            state.select(&id);
         })
-        .child(if busy {
-            widgets::disabled(delete)
-        } else {
-            delete.on_press(move |state: &mut Library| {
-                state.request_delete(Some(delete_target.clone()))
-            })
-        });
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(4.0)
+                .center_y()
+                .child(
+                    text(entry.name.clone())
+                        .key(format!("entry-name-{}", entry.id))
+                        .font(ts::LIBRARY_ROW)
+                        .color(if selected { look.selected_fg } else { look.fg })
+                        .truncate()
+                        .w_full(),
+                )
+                .child(
+                    text(if !entry.description.is_empty() {
+                        entry.description.clone()
+                    } else if !entry.working_directory.is_empty() {
+                        widgets::short_path(&entry.working_directory)
+                    } else {
+                        format!(
+                            "{} · Updated {}",
+                            entry.entry_type,
+                            relative_time_now(&entry.updated_at)
+                        )
+                    })
+                    .key(format!("entry-caption-{}", entry.id))
+                    .font(ts::SM)
+                    .color(look.muted)
+                    .truncate()
+                    .w_full(),
+                ),
+        );
+    item = item.child(actions);
     if selected {
-        item = item.fill(look.selected).border(1.0, look.selected_edge);
+        item = item.fill(look.selected);
     }
     item
 }
 
-fn details_view(state: &Library, details: &EntryDetails, look: &Look) -> El {
+/// One line under the name: what it is and when it last changed, in words.
+fn meta_line(meta: &EntryMeta, look: &Look) -> El {
+    let mut parts = Vec::new();
+    if let Some(project) = &meta.project {
+        parts.push(project.name.clone());
+    }
+    parts.extend(meta.tags.iter().map(|tag| format!("#{tag}")));
+    if meta.pinned {
+        parts.push("Pinned".into());
+    }
+    parts.push(format!("Updated {}", relative_time_now(&meta.updated_at)));
+    text(parts.join("  ·  "))
+        .key("details-meta")
+        .font(ts::SM)
+        .color(look.muted)
+        .wrap()
+        .w_full()
+        .help(format!(
+            "Revision {}, {}",
+            meta.revision,
+            absolute_time(&meta.updated_at)
+        ))
+}
+
+/// Monospaced content on the sunken plate: a command, a secret, a field value.
+pub(super) fn plate(look: &Look) -> El {
+    row()
+        .w_full()
+        .min_h(40.0)
+        .px(size::SP3)
+        .py(10.0)
+        .gap(size::SP2)
+        .center_y()
+        .radius(size::RADIUS_LG - 2.0)
+        .fill(look.sunken)
+        .border(1.0, look.line_hair)
+}
+
+fn details_view(
+    state: &Library,
+    details: &EntryDetails,
+    look: &Look,
+    kit: &Kit,
+    layer: &mut Vec<El>,
+) -> El {
     let meta = &details.meta;
     let secret = state.tab == Kind::Secret;
-    let mut context = row()
-        .gap(6.0)
-        .center_y()
-        .child(text(meta.entry_type.clone()).font(ts::SM).color(look.muted));
-    for tag in &meta.tags {
-        context = context.child(text(format!("· #{tag}")).font(ts::SM).color(look.muted));
-    }
-    if meta.pinned {
-        context = context
-            .child(text("·").font(ts::SM).color(look.muted))
-            .child(icon(&icons::PIN, 11.0).color(look.accent))
-            .child(text("Pinned").font(ts::SM).color(look.muted));
-    }
-    context = context
-        .child(
-            text(format!("· r{}", meta.revision))
-                .font(ts::SM)
-                .color(look.dim),
-        )
-        .child(
-            text(format!("· updated {}", relative_time_now(&meta.updated_at)))
-                .font(ts::SM)
-                .color(look.dim)
-                .help(absolute_time(&meta.updated_at)),
-        );
-    let kind_badge = row()
-        .h(22.0)
-        .px(8.0)
-        .gap(5.0)
-        .center_y()
-        .radius(999.0)
-        .fill(if secret {
-            look.secret_soft
-        } else {
-            look.accent_soft
-        })
-        .border(
-            1.0,
-            if secret {
-                look.kind_secret.alpha(0.5)
-            } else {
-                look.accent_line
-            },
-        )
-        .child(
-            icon(
-                if secret {
-                    &icons::SECRET
-                } else {
-                    &icons::COMMAND
-                },
-                11.0,
-            )
-            .color(if secret {
-                look.kind_secret
-            } else {
-                look.accent
-            }),
-        )
-        .child(
-            text(if secret { "Secret" } else { "Command" })
-                .font(ts::XS)
-                .color(if secret {
-                    look.kind_secret
-                } else {
-                    look.accent
-                }),
-        );
 
     let mut body = col()
         .key("entry-details")
         .w_full()
-        .px(size::SP4)
-        .py(size::SP4)
-        .gap(size::SP4)
+        .max_w(size::MEASURE)
+        .px(size::SP6)
+        .pt(size::SP5)
+        .pb(size::SP6)
+        .gap(size::SP5)
         .child(
-            row()
+            col()
                 .w_full()
-                .gap(size::SP3)
-                .child(widgets::kind_tile(look, secret, size::TILE_LG))
+                .gap(6.0)
                 .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .gap(6.0)
-                        .child(
-                            text(meta.name.clone())
-                                .key("details-name")
-                                .font(ts::XL)
-                                .color(look.fg)
-                                .wrap(),
-                        )
-                        .child(
-                            row()
-                                .gap(size::SP2)
-                                .center_y()
-                                .child(kind_badge)
-                                .child(context),
-                        ),
-                ),
+                    text(meta.name.clone())
+                        .key("details-name")
+                        .font(ts::DETAIL_TITLE)
+                        .color(look.fg)
+                        .wrap_anywhere()
+                        .selectable(true),
+                )
+                .child(meta_line(meta, look))
+                .children((!meta.description.is_empty()).then(|| {
+                    text(meta.description.clone())
+                        .font(ts::BODY)
+                        .color(look.fg)
+                        .wrap()
+                        .pt(size::SP1)
+                })),
         );
-    if !meta.description.is_empty() {
-        body = body.child(
-            text(meta.description.clone())
-                .font(ts::BODY)
-                .color(look.fg)
-                .wrap(),
-        );
-    }
     if secret {
         let shown = if state.revealed {
             details.value.clone().unwrap_or_default()
@@ -965,82 +1075,75 @@ fn details_view(state: &Library, details: &EntryDetails, look: &Look) -> El {
         body = body.child(
             col()
                 .w_full()
-                .gap(6.0)
+                .gap(size::SP2)
+                .child(widgets::section_label(look, "Value"))
                 .child(
-                    row()
-                        .gap(6.0)
-                        .child(widgets::section_label(look, "Value"))
-                        .children((!state.revealed).then(|| text("(masked)").font(ts::XS).color(look.muted))),
+                    plate(look).child(
+                        text(shown)
+                            .key("secret-value")
+                            .label(if state.revealed {
+                                "Secret value"
+                            } else {
+                                "Secret value (masked)"
+                            })
+                            .transition(Transition::none())
+                            .font(ts::MONO)
+                            .color(if state.revealed { look.fg } else { look.muted })
+                            .selectable(state.revealed)
+                            .grow(1.0)
+                            .wrap_anywhere(),
+                    ),
                 )
                 .child(
-                    row()
-                        .w_full()
-                        .min_h(44.0)
-                        .px(size::SP3)
-                        .gap(size::SP2)
-                        .center_y()
-                        .radius(size::RADIUS)
-                        .fill(look.sunken)
-                        .border(1.0, look.line)
-                        .child(text(shown).key("secret-value").transition(Transition::none()).font(ts::MONO).color(look.fg).selectable(state.revealed).grow(1.0).wrap_anywhere())
-                        .child(
-                            widgets::button_sm(look, "reveal-inline", if state.revealed { "Hide" } else { "Reveal" }, Some(if state.revealed { &icons::HIDE } else { &icons::REVEAL }), Variant::Ghost)
-                                .on_press_tx(|state: &mut Library, tx| {
-                                    tx.instant();
-                                    state.reveal();
-                                }),
-                        ),
-                )
-                .child(
-                    text("Values are never shown until you ask, never written to logs, and copied to the clipboard only for the expiry window you set.")
-                        .font(ts::SM)
-                        .color(look.muted)
-                        .wrap(),
+                    text(
+                        "A copy leaves the clipboard on its own after the expiry set in Settings.",
+                    )
+                    .font(ts::SM)
+                    .color(look.dim)
+                    .wrap(),
                 ),
         );
     } else {
         let mut section = col()
             .w_full()
-            .gap(6.0)
+            .gap(size::SP2)
             .child(widgets::section_label(look, "Command"))
             .child(
-                row()
-                    .w_full()
-                    .px(size::SP3)
-                    .py(size::SP3)
-                    .radius(size::RADIUS)
-                    .fill(look.sunken)
-                    .border(1.0, look.line)
-                    .child(
-                        text(details.command.clone().unwrap_or_default())
-                            .key("command-text")
-                            .font(ts::MONO)
-                            .color(look.fg)
-                            .selectable(true)
-                            .wrap_anywhere()
-                            .grow(1.0),
-                    ),
+                plate(look).child(
+                    text(details.command.clone().unwrap_or_default())
+                        .key("command-text")
+                        .font(ts::MONO)
+                        .color(look.fg)
+                        .selectable(true)
+                        .wrap_anywhere()
+                        .grow(1.0),
+                ),
             );
         if !details.working_directory.is_empty() {
             section = section.child(
                 row()
-                    .gap(4.0)
-                    .child(text("Runs in").font(ts::SM).color(look.muted))
+                    .gap(6.0)
+                    .center_y()
+                    .help(details.working_directory.clone())
+                    .child(icon(&icons::FOLDER, 12.0).color(look.dim))
                     .child(
-                        text(details.working_directory.clone())
+                        text(widgets::short_path(&details.working_directory))
+                            .key("working-directory")
+                            .label(format!("Runs in {}", details.working_directory))
                             .font(ts::MONO_SM)
-                            .color(look.fg)
-                            .selectable(true),
+                            .color(look.muted)
+                            .truncate(),
                     ),
             );
         }
         body = body.child(section);
     }
+    body = body.child(primary_actions(state, look, secret));
     if !details.notes.is_empty() {
         body = body.child(
             col()
                 .w_full()
-                .gap(6.0)
+                .gap(size::SP2)
                 .child(widgets::section_label(look, "Notes"))
                 .child(
                     text(details.notes.clone())
@@ -1052,119 +1155,62 @@ fn details_view(state: &Library, details: &EntryDetails, look: &Look) -> El {
         );
     }
     if !details.fields.is_empty() {
-        let mut grid = row()
-            .key("extra-fields")
-            .w_full()
-            .gap(size::SP2)
-            .flex_wrap();
-        for field in &details.fields {
+        let mut table = col().key("extra-fields").w_full();
+        for (index, field) in details.fields.iter().enumerate() {
             let value: El = if field.display == FieldDisplay::Url && is_openable_url(&field.value) {
                 let url = field.value.trim().to_owned();
                 text(field.value.clone())
                     .key(format!("field-url-{}", field.id))
                     .role("link")
                     .help("Open in browser")
-                    .font(ts::MONO)
+                    .font(ts::BODY)
                     .color(look.accent)
                     .cursor(Cursor::Pointer)
+                    .truncate()
                     .on_press(move |state: &mut Library| state.open_url(url.clone()))
             } else {
                 text(field.value.clone())
-                    .font(ts::MONO)
+                    .font(ts::BODY)
                     .color(look.fg)
                     .wrap_anywhere()
                     .selectable(true)
             };
-            grid = grid.child(
-                col()
-                    .min_w(240.0)
-                    .max_w(420.0)
-                    .gap(4.0)
-                    .padding(size::SP2)
-                    .radius(size::RADIUS)
-                    .fill(look.sunken)
-                    .border(1.0, look.line)
-                    .child(widgets::section_label(
-                        look,
-                        if field.label.is_empty() {
-                            "Field"
-                        } else {
-                            &field.label
-                        },
-                    ))
-                    .child(value),
-            );
+            let mut line = row()
+                .w_full()
+                .min_h(32.0)
+                .py(6.0)
+                .gap(size::SP3)
+                .child(
+                    text(if field.label.is_empty() {
+                        "Field".to_owned()
+                    } else {
+                        field.label.clone()
+                    })
+                    .font(ts::BODY)
+                    .color(look.muted)
+                    .wrap()
+                    .w(140.0),
+                )
+                .child(el().grow(1.0).min_w(0.0).child(value));
+            if index > 0 {
+                line = line.border_sides([1.0, 0.0, 0.0, 0.0], look.line_hair);
+            }
+            table = table.child(line);
         }
         body = body.child(
             col()
                 .w_full()
-                .gap(6.0)
-                .child(widgets::section_label(look, "Custom fields"))
-                .child(grid),
+                .gap(size::SP1)
+                .child(widgets::section_label(look, "Fields"))
+                .child(table),
         );
     }
-
-    let busy = state.saving;
-    let copy = widgets::button(look, "copy", "Copy", Some(&icons::COPY), Variant::Primary);
-    let actions = row()
-        .key("detail-actions")
-        .w_full()
-        .h(56.0)
-        .px(size::SP4)
-        .gap(size::SP2)
-        .center_y()
-        .border_sides([1.0, 0.0, 0.0, 0.0], look.line)
-        .child(if busy {
-            widgets::disabled(copy)
-        } else {
-            copy.on_press(|state: &mut Library| state.copy_entry(None))
-        })
-        .child(if secret {
-            widgets::button(
-                look,
-                "reveal",
-                if state.revealed { "Hide" } else { "Reveal" },
-                Some(&icons::REVEAL),
-                Variant::Default,
-            )
-            .on_press_tx(|state: &mut Library, tx| {
-                tx.instant();
-                state.reveal();
-            })
-        } else {
-            widgets::button(look, "run", "Run", Some(&icons::RUN), Variant::Default)
-                .on_press(|state: &mut Library| state.request_run())
-        })
-        .child(el().grow(1.0))
-        .child(
-            widgets::button(look, "edit", "Edit", Some(&icons::EDIT), Variant::Default)
-                .on_press(|state: &mut Library| state.start_edit()),
-        )
-        .child(
-            widgets::button(
-                look,
-                "pin",
-                if meta.pinned { "Unpin" } else { "Pin" },
-                Some(&icons::PIN),
-                Variant::Default,
-            )
-            .on_press(|state: &mut Library| state.toggle_pin(None)),
-        )
-        .child(
-            widgets::button(
-                look,
-                "delete",
-                "Delete",
-                Some(&icons::TRASH),
-                Variant::Danger,
-            )
-            .on_press(|state: &mut Library| state.request_delete(None)),
-        );
 
     col()
         .w_full()
         .grow(1.0)
         .min_h(0.0)
+        .child(detail_header(state, meta, look, kit, layer))
         .child(
             col()
                 .key("details-scroll")
@@ -1176,7 +1222,152 @@ fn details_view(state: &Library, details: &EntryDetails, look: &Look) -> El {
                 })
                 .child(body),
         )
-        .child(actions)
+}
+
+/// Stable navigation and editing controls; actions on the command live beside its content.
+fn detail_header(
+    state: &Library,
+    meta: &EntryMeta,
+    look: &Look,
+    kit: &Kit,
+    layer: &mut Vec<El>,
+) -> El {
+    let mut bar = row()
+        .key("detail-header")
+        .w_full()
+        .h(56.0)
+        .px(size::SP5)
+        .gap(size::SP2)
+        .center_y()
+        .border_sides([0.0, 0.0, 1.0, 0.0], look.line_hair);
+    if state.narrow {
+        bar = bar.child(
+            widgets::button_sm(
+                look,
+                "back-to-list",
+                "Library",
+                Some(&icons::BACK),
+                Variant::Ghost,
+            )
+            .on_press_tx(|state: &mut Library, tx| {
+                tx.instant();
+                state.back_to_list();
+            }),
+        );
+    } else {
+        bar = bar
+            .child(
+                icon(
+                    if meta.kind == Kind::Secret {
+                        &icons::SECRET
+                    } else {
+                        &icons::COMMAND
+                    },
+                    14.0,
+                )
+                .color(look.muted),
+            )
+            .child(
+                text(if meta.kind == Kind::Secret {
+                    "Secret"
+                } else {
+                    "Command"
+                })
+                .font(ts::SM)
+                .color(look.muted),
+            );
+    }
+    bar = bar.child(el().grow(1.0)).child(
+        widgets::button_sm(look, "edit", "Edit", Some(&icons::EDIT), Variant::Ghost)
+            .help("Edit entry (Ctrl+E)")
+            .on_press_tx(|state: &mut Library, tx| {
+                tx.instant();
+                state.start_edit();
+            }),
+    );
+    let more = Menu::new("entry-options")
+        .open(state.entry_options_open)
+        .placement(Placement::BottomEnd)
+        .trigger(
+            widgets::icon_button(look, "entry-more", "More actions", &icons::MORE, look.muted)
+                .on_press_tx(|state: &mut Library, tx| {
+                    tx.instant();
+                    state.entry_options_open = !state.entry_options_open;
+                }),
+        )
+        .item(
+            MenuItem::new(if meta.pinned {
+                "Unpin entry"
+            } else {
+                "Pin entry"
+            })
+            .icon(&icons::PIN)
+            .on_select(|state: &mut Library| {
+                state.entry_options_open = false;
+                state.toggle_pin(None);
+            }),
+        )
+        .separator()
+        .item(
+            MenuItem::new("Delete entry…")
+                .icon(&icons::TRASH)
+                .danger(true)
+                .on_select(|state: &mut Library| {
+                    state.entry_options_open = false;
+                    state.request_delete(None);
+                }),
+        )
+        .on_close(|state: &mut Library| state.entry_options_open = false)
+        .build(kit, layer);
+    bar.child(more)
+}
+
+fn primary_actions(state: &Library, look: &Look, secret: bool) -> El {
+    let copy = widgets::button(
+        look,
+        "copy",
+        if secret { "Copy value" } else { "Copy command" },
+        Some(&icons::COPY),
+        Variant::Primary,
+    )
+    .h(32.0);
+    row()
+        .key("detail-actions")
+        .w_full()
+        .gap(size::SP2)
+        .center_y()
+        .child(if state.saving {
+            widgets::disabled(copy)
+        } else {
+            copy.on_press(|state: &mut Library| state.copy_entry(None))
+        })
+        .child(if secret {
+            widgets::button(
+                look,
+                "reveal",
+                if state.revealed {
+                    "Hide value"
+                } else {
+                    "Reveal value"
+                },
+                Some(if state.revealed {
+                    &icons::HIDE
+                } else {
+                    &icons::REVEAL
+                }),
+                Variant::Default,
+            )
+            .h(32.0)
+            .on_press_tx(|state: &mut Library, tx| {
+                tx.instant();
+                state.reveal();
+            })
+        } else {
+            widgets::button(look, "run", "Run…", Some(&icons::RUN), Variant::Default)
+                .h(32.0)
+                .help("Review the command before running")
+                .on_press(|state: &mut Library| state.request_run())
+        })
 }
 
 impl Library {

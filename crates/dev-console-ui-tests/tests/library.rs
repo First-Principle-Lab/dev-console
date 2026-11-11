@@ -198,14 +198,17 @@ fn delete_asks_first_names_the_row_and_cancel_keeps_it() {
     let first = profile.command("first-one", "true");
     profile.command("second-one", "true");
     let mut library = profile.library();
-    assert!(library.press(&format!("row-delete-{first}")));
+    assert!(library.press(&format!("entry-row-{first}")));
+    assert!(library.press("entry-more"));
+    assert!(library.press("entry-options-item2"));
     assert_eq!(
         library.text_of("dialog-title").as_deref(),
         Some("Delete “first-one”?")
     );
     assert!(library.press("cancel-delete"));
     assert_eq!(commands(&profile).len(), 2);
-    library.press(&format!("row-delete-{first}"));
+    library.press("entry-more");
+    library.press("entry-options-item2");
     assert!(library.press("confirm-delete"));
     assert_eq!(commands(&profile), vec!["second-one"]);
     assert_eq!(
@@ -389,14 +392,15 @@ fn a_narrow_window_stacks_the_panes_with_a_way_back() {
     library.apply(|state| state.set_width(760.0));
     assert!(library.has("back-to-list"));
     assert!(!library.has("list-pane"));
+    assert!(library.press("back-to-list"));
+    assert!(library.has("list-pane"));
+    assert!(!library.has("detail-pane"));
+    // The stacked layout keeps what belongs to the whole library on the list, one step back.
     assert!(
         library.has("import-project"),
         "import stays reachable in a narrow window"
     );
     assert!(library.has("open-environment"));
-    assert!(library.press("back-to-list"));
-    assert!(library.has("list-pane"));
-    assert!(!library.has("detail-pane"));
 }
 
 #[test]
@@ -525,6 +529,7 @@ fn export_never_overwrites_without_the_explicit_card() {
     std::fs::write(&path, b"pre-existing synthetic bytes").unwrap();
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     library.apply(|state| {
         state
             .settings
@@ -551,6 +556,7 @@ fn the_recovery_credential_shows_on_request_and_a_lock_takes_it_away() {
     let profile = Profile::new("lib-recovery");
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     assert!(!library.has("recovery-secret"));
     library.apply(|state| state.reveal_recovery());
     assert!(library.has("recovery-secret"));

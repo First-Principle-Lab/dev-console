@@ -264,58 +264,47 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
     let mut head = row()
         .key("editor-head")
         .w_full()
-        .gap(size::SP3)
+        .h(56.0)
+        .min_h(56.0)
+        .border_sides([0.0, 0.0, 1.0, 0.0], look.line_hair)
+        .pl(size::SP6)
+        .pr(size::SP3)
+        .gap(size::SP2)
         .center_y()
-        .child(widgets::kind_tile(look, !command, size::TILE_LG))
         .child(
-            col()
-                .grow(1.0)
-                .min_w(0.0)
-                .gap(2.0)
-                .child(
-                    text(format!(
-                        "{} {}",
-                        if editor.id.is_some() { "Edit" } else { "New" },
-                        if command { "command" } else { "secret" }
-                    ))
-                    .key("editor-title")
-                    .font(ts::LG)
-                    .color(look.fg),
-                )
-                .child(if dirty {
-                    row()
-                        .key("dirty-indicator")
-                        .role("status")
-                        .self_start()
-                        .h(18.0)
-                        .px(6.0)
-                        .gap(4.0)
-                        .center_y()
-                        .radius(999.0)
-                        .fill(look.warn_soft)
-                        .child(rune::icon(&icons::ALERT, 10.0).color(look.warn))
-                        .child(text("unsaved changes").font(ts::XS).color(look.warn))
-                } else {
-                    text(if command {
-                        "Runs in your terminal after approval"
-                    } else {
-                        "Encrypted with the vault key"
-                    })
-                    .font(ts::SM)
-                    .color(look.muted)
-                }),
+            text(format!(
+                "{} {}",
+                if editor.id.is_some() { "Edit" } else { "New" },
+                if command { "command" } else { "secret" }
+            ))
+            .key("editor-title")
+            .font(ts::LG)
+            .color(look.fg),
         )
+        .children(dirty.then(|| {
+            text("unsaved changes")
+                .key("dirty-indicator")
+                .role("status")
+                .font(ts::SM)
+                .color(look.warn)
+        }))
+        .child(el().grow(1.0))
         .child(
-            widgets::button_sm(look, "cancel-edit", "Cancel", None, Variant::Default)
-                .on_press(|state: &mut Library| state.cancel_edit()),
+            widgets::button(look, "cancel-edit", "Cancel", None, Variant::Default)
+                .h(32.0)
+                .on_press_tx(|state: &mut Library, tx| {
+                    tx.instant();
+                    state.cancel_edit();
+                }),
         );
-    let save = widgets::button_sm(
+    let save = widgets::button(
         look,
         "save",
         if state.saving { "Saving…" } else { "Save" },
-        Some(&icons::CHECK),
+        None,
         Variant::Primary,
-    );
+    )
+    .h(32.0);
     head = head.child(if state.saving {
         widgets::disabled(save)
     } else {
@@ -326,8 +315,8 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
         .key("entry-editor")
         .role("form")
         .w_full()
-        .gap(size::SP3)
-        .child(head);
+        .max_w(size::MEASURE)
+        .gap(size::SP4);
 
     if let Some(error) = &state.save_error {
         form = form.child(widgets::status_line(
@@ -353,6 +342,11 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
             .label("Name")
             .invalid(spaced || (editor.attempted && editor.name.text.trim().is_empty()))
             .on_edit(|state: &mut Library| state.editor_field(|editor| &mut editor.name))
+            .on_key(
+                |state: &mut Library, ev: &rune::KeyEvent, tx: &mut rune::Tx| {
+                    state.editor_key(ev, tx)
+                },
+            )
             .on_submit(|state: &mut Library, _| state.save_draft())
             .build(kit)
             .key("field-name"),
@@ -368,7 +362,7 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
     form = form.child(name);
 
     if command {
-        let browse = widgets::button(
+        let browse = widgets::icon_button(
             look,
             "editor-project-browse",
             if editor.picking_folder {
@@ -376,9 +370,10 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
             } else {
                 "Browse…"
             },
-            Some(&icons::FOLDER),
-            Variant::Default,
-        );
+            &icons::FOLDER,
+            look.muted,
+        )
+        .help("Choose a folder");
         let mut folder = labelled(
             look,
             "Project folder",
@@ -422,13 +417,35 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
         form = form.child(folder).child(labelled(
             look,
             "Command",
-            TextArea::new(&editor.command)
-                .width(None)
-                .label("Command")
-                .rows(5)
-                .on_edit(|state: &mut Library| state.editor_field(|editor| &mut editor.command))
-                .build(kit)
-                .key("field-command"),
+            // A command is code: it is typed and read in the same monospace the detail pane
+            // shows it in. The kit's text area has no font option, so this is the plain field on
+            // the same well, with the same focus ring.
+            row()
+                .w_full()
+                .min_h(72.0)
+                .px(10.0)
+                .py(size::SP2)
+                .radius(size::RADIUS)
+                .fill(look.sunken)
+                .border(1.0, look.line)
+                .focus_within_ring(1.0, -1.0, look.focus)
+                .cursor(rune::Cursor::Text)
+                .child(
+                    rune::text_input(&editor.command, ts::MONO)
+                        .key("field-command")
+                        .label("Command")
+                        .w_full()
+                        .color(look.fg)
+                        .wrap_anywhere()
+                        .on_edit(|state: &mut Library| {
+                            state.editor_field(|editor| &mut editor.command)
+                        })
+                        .on_input_key(
+                            |state: &mut Library, ev: &rune::KeyEvent, tx: &mut rune::Tx| {
+                                state.editor_key(ev, tx)
+                            },
+                        ),
+                ),
         ));
     } else {
         let toggle = widgets::button_sm(
@@ -469,9 +486,9 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
                     .child(toggle),
             )
             .child(
-                text("Hidden while you type. It is written to the vault encrypted, never to logs.")
+                text("Hidden while you type, and encrypted in the vault.")
                     .font(ts::SM)
-                    .color(look.muted),
+                    .color(look.dim),
             ),
         );
     }
@@ -482,8 +499,13 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
         TextArea::new(&editor.notes)
             .width(None)
             .label("Notes")
-            .rows(4)
+            .auto_grow(2, 12)
             .on_edit(|state: &mut Library| state.editor_field(|editor| &mut editor.notes))
+            .on_key(
+                |state: &mut Library, ev: &rune::KeyEvent, tx: &mut rune::Tx| {
+                    state.editor_key(ev, tx)
+                },
+            )
             .build(kit)
             .key("field-notes"),
     ));
@@ -496,15 +518,24 @@ pub fn editor_view(state: &Library, editor: &Editor, look: &Look, kit: &Kit) -> 
         ));
     }
 
-    col()
-        .key("editor-scroll")
-        .w_full()
-        .grow(1.0)
-        .min_h(0.0)
-        .scroll(rune::ScrollSpec {
-            stick_bottom: false,
-        })
-        .child(col().w_full().px(size::SP4).py(size::SP4).child(form))
+    col().w_full().grow(1.0).min_h(0.0).child(head).child(
+        col()
+            .key("editor-scroll")
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .scroll(rune::ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(
+                col()
+                    .w_full()
+                    .px(size::SP6)
+                    .pt(size::SP2)
+                    .pb(size::SP6)
+                    .child(form),
+            ),
+    )
 }
 
 fn labelled(look: &Look, label: &str, control: El) -> El {
@@ -557,8 +588,8 @@ fn extra_fields_editor(editor: &Editor, look: &Look, kit: &Kit) -> El {
                 .w_full()
                 .gap(6.0)
                 .padding(size::SP2)
-                .radius(size::RADIUS)
-                .border(1.0, look.line)
+                .radius(size::RADIUS_LG - 2.0)
+                .fill(look.fg.alpha(0.04))
                 .child(
                     row()
                         .w_full()
@@ -639,6 +670,7 @@ fn extra_fields_editor(editor: &Editor, look: &Look, kit: &Kit) -> El {
             Some(&icons::PLUS),
             Variant::Ghost,
         )
+        .self_start()
         .on_press(|state: &mut Library| {
             if let Some(editor) = state.editing.as_mut() {
                 editor.add_field();

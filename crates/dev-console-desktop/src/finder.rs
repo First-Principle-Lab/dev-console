@@ -463,7 +463,6 @@ fn search_bar(state: &Finder, look: &Look) -> El {
                 .center_y()
                 .radius(999.0)
                 .fill(look.accent_soft)
-                .border(1.0, look.accent_line)
                 .cursor(Cursor::Pointer)
                 .on_press(|state: &mut Finder| state.ignore_context())
                 .child(icon(&icons::PROJECT, 12.0).color(look.accent))
@@ -476,23 +475,18 @@ fn search_bar(state: &Finder, look: &Look) -> El {
                 ),
         );
     }
-    if let Some(vault) = &state.vault {
-        let (ink, fill, glyph, label) = if vault.unlocked {
-            (look.ok, look.ok_soft, &icons::UNLOCK, "Vault unlocked")
-        } else {
-            (look.warn, look.warn_soft, &icons::LOCK, "Vault locked")
-        };
+    // An unlocked vault is the ordinary state and says nothing; a locked one explains why
+    // secrets are missing from the results.
+    if let Some(vault) = state.vault.as_ref().filter(|vault| !vault.unlocked) {
+        let _ = vault;
         bar = bar.child(
             row()
                 .key("finder-vault")
-                .h(22.0)
-                .px(size::SP2)
+                .label("Vault locked")
                 .gap(4.0)
                 .center_y()
-                .radius(999.0)
-                .fill(fill)
-                .child(icon(glyph, 12.0).color(ink))
-                .child(text(label).font(ts::XS).color(ink)),
+                .child(icon(&icons::LOCK, 12.0).color(look.warn))
+                .child(text("Vault locked").font(ts::XS).color(look.warn)),
         );
     }
     bar
@@ -525,7 +519,7 @@ fn results(state: &Finder, look: &Look) -> El {
         list = list.child(
             row()
                 .key(key)
-                .h(size::ROW_H)
+                .h(size::RESULT_H)
                 .px(size::SP3)
                 .gap(size::SP2)
                 .center_y()
@@ -542,6 +536,9 @@ fn results(state: &Finder, look: &Look) -> El {
         .w_full()
         .grow(1.0)
         .min_h(0.0)
+        // Results answer a keystroke from another thread. They replace the list at once: rows
+        // fading in and out behind the caret is what makes a palette feel slow.
+        .instant_changes()
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
@@ -608,7 +605,7 @@ fn result_row(state: &Finder, look: &Look, entry: SearchResult, index: usize, to
         );
     }
     if active {
-        trail = trail.child(widgets::keycap(look, "Enter"));
+        trail = trail.child(widgets::keycap(look, "↵"));
     }
     let id = entry.id.clone();
     let mut item = row()
@@ -617,7 +614,7 @@ fn result_row(state: &Finder, look: &Look, entry: SearchResult, index: usize, to
         .label(entry.name.clone())
         .position_in_set(index + 1, total)
         .w_full()
-        .min_h(size::ROW_H + 4.0)
+        .min_h(size::RESULT_H)
         .px(size::SP2)
         .py(5.0)
         .gap(size::SP2 + 2.0)
@@ -631,7 +628,7 @@ fn result_row(state: &Finder, look: &Look, entry: SearchResult, index: usize, to
         .child(body)
         .child(trail);
     if active {
-        item = item.fill(look.selected).border(1.0, look.selected_edge);
+        item = item.fill(look.selected);
     }
     item
 }
@@ -674,16 +671,18 @@ fn footer(state: &Finder, look: &Look) -> El {
         .px(size::SP3)
         .gap(size::SP3)
         .center_y()
-        .child(widgets::hint(look, &["Up", "Down"], "select"))
-        .child(widgets::hint(look, &["Tab"], "complete"))
-        .child(widgets::hint(look, &["Enter"], "copy"))
-        .child(widgets::hint(look, &["Ctrl", "O"], "details"))
-        .child(widgets::hint(look, &["Esc"], "dismiss"))
-        .child(el().grow(1.0))
         .child(
-            text(state.rows().len().to_string())
-                .key("finder-count")
-                .font(ts::XS)
-                .color(look.muted),
+            text(match state.rows().len() {
+                0 => String::new(),
+                1 => "1 result".to_owned(),
+                count => format!("{count} results"),
+            })
+            .key("finder-count")
+            .font(ts::XS)
+            .color(look.dim),
         )
+        .child(el().grow(1.0))
+        .child(widgets::hint(look, &["Tab"], "Complete"))
+        .child(widgets::hint(look, &["Ctrl", "O"], "Details"))
+        .child(widgets::hint(look, &["↵"], "Copy"))
 }

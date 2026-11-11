@@ -50,6 +50,7 @@
 
 pub mod argv;
 pub mod auth;
+pub mod autostart;
 pub mod backup;
 pub mod clipboard;
 pub mod context;

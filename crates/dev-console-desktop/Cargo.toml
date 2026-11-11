@@ -25,6 +25,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 time = { workspace = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
+minisign-verify = "0.3.0"
+base64 = "0.22.1"
+semver = "1.0.28"
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+# Signs the fixtures the updater tests verify, with the library the release signer uses.
+minisign = "=0.7.3"

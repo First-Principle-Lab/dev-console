@@ -111,3 +111,34 @@ fn unlocking_reloads_the_secret_tab_without_a_tab_switch() {
     assert_eq!(library.entries[0].name, "synthetic-token");
     assert!(!library.revealed);
 }
+
+#[test]
+fn a_suggestion_selection_refuses_an_older_saved_entry_answer() {
+    let fixture = Fixture::new("suggestion-late-answer");
+    fixture.seed_command("synthetic-command", "Shell", "true", &[]);
+    let hub = Hub::new(fixture.state.clone(), "0.0.0-test");
+    let mut library = Library::new(hub, Exec::Inline);
+    library
+        .suggestions
+        .push(dev_console_core::history::Suggestion {
+            key: "synthetic-suggestion".into(),
+            command: "echo synthetic".into(),
+            count: 3,
+            suggested_name: "synthetic-suggestion".into(),
+            project: None,
+            project_root: None,
+            working_directory: None,
+            project_count: 3,
+        });
+    let queue = TestQueue::default();
+    library.exec = Exec::Deferred(queue.clone());
+    library.select("synthetic-command");
+    library.select_suggestion("synthetic-suggestion");
+    queue.flush(&mut library);
+    assert_eq!(
+        library.selected_suggestion.as_deref(),
+        Some("synthetic-suggestion")
+    );
+    assert!(library.details.is_none());
+    assert!(library.editing.is_none());
+}

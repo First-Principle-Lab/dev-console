@@ -115,6 +115,24 @@ impl Look {
         }
     }
 
+    /// A distinct navigation surface, including palettes whose panel and page are identical.
+    pub fn sidebar(&self) -> Color {
+        if self.dark {
+            self.sunken
+        } else {
+            self.bg
+        }
+    }
+
+    /// The pane the selected entry is read in.
+    pub fn content(&self) -> Color {
+        if self.dark {
+            self.bg
+        } else {
+            self.panel
+        }
+    }
+
     /// The rune-kit token set the kit's controls (text fields, switches, selects) read, seeded
     /// from this palette so they sit in it instead of in Rune's own default.
     pub fn kit(&self) -> rune_kit::Kit {
@@ -126,6 +144,9 @@ impl Look {
             },
             rune_kit::PaletteFocus::Custom(self.focus),
         );
+        // A field is a well in the surface it sits on, with an edge that can be seen at rest.
+        kit.c.bg_base = self.sunken;
+        kit.c.border_base = self.line_strong;
         kit.radius.sm = 4.0;
         kit.radius.md = 6.0;
         kit.radius.lg = 10.0;
@@ -178,47 +199,66 @@ pub fn label(name: &str) -> String {
     title(name.strip_prefix("omarchy-").unwrap_or(name))
 }
 
-/// The type scale from `tokens.css` (`--text-xs` .. `--text-xl`, the row and search sizes).
+/// The type scale. Whole-point sizes only: the Library is mostly read on 1x displays, where a
+/// half-point size lands glyph stems between pixels and the text looks soft.
 pub mod text {
     use super::{Family, TextStyle};
 
     pub const XS: TextStyle = TextStyle::new(11.0, 400.0);
-    pub const SM: TextStyle = TextStyle::new(12.5, 400.0);
-    pub const BODY: TextStyle = TextStyle::new(13.5, 400.0);
-    pub const STRONG: TextStyle = TextStyle::new(13.5, 600.0);
+    pub const SM: TextStyle = TextStyle::new(12.0, 400.0);
+    pub const BODY: TextStyle = TextStyle::new(13.0, 400.0);
+    /// Button labels and the selected segment: one step up in weight, not in size.
+    pub const MEDIUM: TextStyle = TextStyle::new(13.0, 500.0);
+    pub const STRONG: TextStyle = TextStyle::new(13.0, 600.0);
     pub const LG: TextStyle = TextStyle::new(15.0, 600.0);
-    pub const XL: TextStyle = TextStyle::new(18.0, 600.0);
-    pub const ROW: TextStyle = TextStyle::new(13.5, 600.0);
-    pub const ROW_META: TextStyle = TextStyle::new(11.5, 400.0);
+    /// The one large size: the name of what the detail pane is showing.
+    pub const XL: TextStyle = TextStyle::new(20.0, 600.0).tracking(-0.2);
+    pub const ROW: TextStyle = TextStyle::new(13.0, 500.0);
+    pub const LIBRARY_ROW: TextStyle = TextStyle::new(14.0, 500.0);
+    pub const DETAIL_TITLE: TextStyle = TextStyle::new(24.0, 600.0).tracking(-0.3);
+    pub const SECTION: TextStyle = TextStyle::new(15.0, 600.0);
+    pub const PROJECT: TextStyle = TextStyle::new(13.0, 600.0);
+    pub const ROW_META: TextStyle = TextStyle::new(12.0, 400.0);
     pub const SEARCH: TextStyle = TextStyle::new(17.0, 400.0);
-    /// Section headings: small caps-style labels with the stylesheet's `--label-tracking`.
-    pub const LABEL: TextStyle = TextStyle::new(11.0, 600.0).tracking(0.66);
-    pub const MONO: TextStyle = TextStyle::new(12.5, 400.0).family(Family::SystemMono);
-    pub const MONO_SM: TextStyle = TextStyle::new(11.5, 400.0).family(Family::SystemMono);
+    /// Field and section labels: sentence case, quiet, never capitals.
+    pub const LABEL: TextStyle = TextStyle::new(12.0, 500.0);
+    pub const MONO: TextStyle = TextStyle::new(13.0, 400.0).family(Family::SystemMono);
+    pub const MONO_SM: TextStyle = TextStyle::new(13.0, 400.0).family(Family::SystemMono);
 }
 
-/// Sizes from `tokens.css`, in points.
+/// Sizes, in points, on a 4-point grid.
 pub mod size {
     pub const SP1: f32 = 4.0;
     pub const SP2: f32 = 8.0;
     pub const SP3: f32 = 12.0;
     pub const SP4: f32 = 16.0;
     pub const SP5: f32 = 24.0;
+    pub const SP6: f32 = 32.0;
     pub const RADIUS_SM: f32 = 4.0;
     pub const RADIUS: f32 = 6.0;
     pub const RADIUS_LG: f32 = 10.0;
-    pub const RADIUS_ROW: f32 = 8.0;
+    pub const RADIUS_ROW: f32 = 6.0;
     /// `--radius-shell`: the arc every floating surface (dialog, Settings sheet, palette) wears.
     pub const RADIUS_SHELL: f32 = 14.0;
-    pub const CONTROL_H: f32 = 30.0;
-    pub const CONTROL_H_SM: f32 = 26.0;
-    pub const ROW_H: f32 = 40.0;
+    pub const CONTROL_H: f32 = 28.0;
+    pub const CONTROL_H_SM: f32 = 24.0;
+    /// A Library list row: one line, dense enough to scan twenty without scrolling.
+    pub const ROW_H: f32 = 34.0;
+    /// A Finder result: two lines, name over context.
+    pub const RESULT_H: f32 = 44.0;
     pub const SEARCH_H: f32 = 46.0;
     pub const FOOTER_H: f32 = 34.0;
-    pub const TAB_H: f32 = 34.0;
+    pub const TAB_H: f32 = 26.0;
     pub const TILE_SM: f32 = 22.0;
     pub const TILE_LG: f32 = 32.0;
-    pub const PANE_LIST: f32 = 320.0;
+    pub const PANE_LIST: f32 = 420.0;
+    pub const PANE_LIST_MIN: f32 = 360.0;
+    pub const PANE_LIST_MAX: f32 = 560.0;
+    pub const LIBRARY_ROW_H: f32 = 52.0;
+    /// The bar across the top of each pane.
+    pub const BAR_H: f32 = 48.0;
+    /// Reading measure of the detail pane: text does not run the width of a wide window.
+    pub const MEASURE: f32 = 680.0;
 }
 
 #[cfg(test)]
@@ -271,5 +311,85 @@ mod tests {
             choices.len(),
             dev_console_core::theme::palette_names().len() + 1
         );
+    }
+
+    /// The revamp paints text on surfaces the shipped audit never measured: the two panes on a
+    /// light palette swap places, and controls sit on translucent washes of `--fg` rather than
+    /// on a token. Every pairing a view actually draws is measured here, in all 24 palettes,
+    /// against the same 4.5:1 the audit holds text to.
+    #[test]
+    fn revamp_text_clears_contrast_on_every_surface_it_is_drawn_on() {
+        use dev_console_core::theme::value::{contrast_ratio, Rgba};
+
+        fn over(top: &Rgba, alpha: f64, under: &Rgba) -> Rgba {
+            let mix = |a: f64, b: f64| a * alpha + b * (1.0 - alpha);
+            Rgba {
+                red: mix(top.red, under.red),
+                green: mix(top.green, under.green),
+                blue: mix(top.blue, under.blue),
+                alpha: 1.0,
+            }
+        }
+
+        let mut failures = Vec::new();
+        for theme in Theme::all() {
+            let colour = |token: &str| theme.colour(token).unwrap();
+            let stack = |layers: &[&str]| theme.stack(layers).unwrap();
+            let fg = colour("--fg");
+            let panes = [("bg", colour("--bg")), ("panel", colour("--bg-panel"))];
+            let mut surfaces: Vec<(String, Rgba)> = vec![
+                ("sunken plate".into(), colour("--bg-sunken")),
+                ("dialog".into(), colour("--shell-bg")),
+            ];
+            for (name, pane) in &panes {
+                surfaces.push((format!("{name} pane"), *pane));
+                surfaces.push((format!("hovered row on {name}"), over(&fg, 0.05, pane)));
+                surfaces.push((format!("plain button on {name}"), over(&fg, 0.12, pane)));
+                surfaces.push((
+                    format!("selected row on {name}"),
+                    stack(&[
+                        "--selected",
+                        &format!("--bg{}", if *name == "bg" { "" } else { "-panel" }),
+                    ]),
+                ));
+            }
+            surfaces.push((
+                "plain button on dialog".into(),
+                over(&fg, 0.12, &colour("--shell-bg")),
+            ));
+            for (surface, painted) in &surfaces {
+                for token in ["--fg", "--fg-muted", "--fg-dim"] {
+                    // The dimmest ink is for counts and footnotes on a pane or a plate; it is
+                    // never put on a button or a selected row.
+                    if token == "--fg-dim"
+                        && (surface.contains("button") || surface.contains("selected"))
+                    {
+                        continue;
+                    }
+                    let ratio = contrast_ratio(&colour(token), painted);
+                    if ratio < 4.5 {
+                        failures.push(format!(
+                            "{}: {token} on {surface} is {ratio:.2}:1",
+                            theme.name()
+                        ));
+                    }
+                }
+            }
+            let accent = colour("--accent");
+            for (name, pane) in &panes {
+                let ratio = contrast_ratio(&accent, pane);
+                if ratio < 4.5 {
+                    failures.push(format!("{}: link on {name} is {ratio:.2}:1", theme.name()));
+                }
+            }
+            let ratio = contrast_ratio(&colour("--accent-fg"), &accent);
+            if ratio < 4.5 {
+                failures.push(format!(
+                    "{}: filled button label is {ratio:.2}:1",
+                    theme.name()
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }

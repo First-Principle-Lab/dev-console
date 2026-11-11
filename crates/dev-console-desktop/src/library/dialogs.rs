@@ -28,12 +28,28 @@ pub fn shell(
     footer: Vec<El>,
     dismiss: impl Fn(&mut Library) + Clone + 'static,
 ) -> El {
+    shell_sized(look, key, title, wide, None, body, footer, dismiss)
+}
+
+/// [`shell`] with a body of a set height (less in a window too short for it), for a sheet whose
+/// pages differ in length: the sheet must not change size as the page does.
+#[allow(clippy::too_many_arguments)]
+pub fn shell_sized(
+    look: &Look,
+    key: &str,
+    title: &str,
+    wide: bool,
+    body_height: Option<f32>,
+    body: Vec<El>,
+    footer: Vec<El>,
+    dismiss: impl Fn(&mut Library) + Clone + 'static,
+) -> El {
     let mut content = col()
         .key(format!("{key}-body"))
         .w_full()
-        .gap(size::SP3)
-        .px(size::SP4)
-        .pb(size::SP4);
+        .gap(if wide { size::SP4 } else { size::SP3 })
+        .px(size::SP5)
+        .pb(size::SP5);
     for child in body {
         content = content.child(child);
     }
@@ -42,7 +58,7 @@ pub fn shell(
         .w_full()
         .gap(size::SP2)
         .center_y()
-        .px(size::SP4)
+        .px(size::SP5)
         .py(size::SP3);
     for child in footer {
         actions = actions.child(child);
@@ -52,7 +68,7 @@ pub fn shell(
         .role("dialog")
         .label(title.to_owned())
         .w_full()
-        .max_w(if wide { 760.0 } else { 480.0 })
+        .max_w(if wide { 640.0 } else { 440.0 })
         .min_h(0.0)
         .shrink()
         .radius(size::RADIUS_SHELL)
@@ -66,8 +82,8 @@ pub fn shell(
         .child(
             row()
                 .w_full()
-                .px(size::SP4)
-                .pt(size::SP4)
+                .px(size::SP5)
+                .pt(size::SP5)
                 .pb(size::SP3)
                 .child(
                     text(title.to_owned())
@@ -77,17 +93,16 @@ pub fn shell(
                         .wrap(),
                 ),
         )
-        .child(
-            col()
-                .w_full()
-                .max_h(if wide { 560.0 } else { 460.0 })
-                .min_h(0.0)
-                .shrink()
-                .scroll(ScrollSpec {
-                    stick_bottom: false,
-                })
-                .child(content),
-        )
+        .child({
+            let viewport = col().w_full().min_h(0.0).shrink().scroll(ScrollSpec {
+                stick_bottom: false,
+            });
+            match body_height {
+                Some(height) => viewport.h(height),
+                None => viewport.max_h(if wide { 560.0 } else { 460.0 }),
+            }
+            .child(content)
+        })
         .child(el().h(1.0).w_full().fill(look.line_hair))
         .child(actions)
         .modal(true, dismiss);
@@ -103,16 +118,19 @@ pub fn shell(
 }
 
 fn paragraph(look: &Look, words: &str) -> El {
-    text(words.to_owned()).font(ts::BODY).color(look.fg).wrap()
+    text(words.to_owned())
+        .font(ts::BODY)
+        .color(look.muted)
+        .wrap()
 }
 
 fn code_block(look: &Look, key: &str, words: &str) -> El {
     row()
         .w_full()
-        .padding(size::SP3)
-        .radius(size::RADIUS)
+        .px(size::SP3)
+        .py(10.0)
+        .radius(size::RADIUS_LG - 2.0)
         .fill(look.sunken)
-        .border(1.0, look.line)
         .child(
             text(words.to_owned())
                 .key(key.to_owned())
@@ -132,12 +150,16 @@ pub fn delete(target: &EntryMeta, look: &Look) -> El {
         false,
         vec![paragraph(
             look,
-            &format!("This removes the saved {} permanently. Encrypted backups you made earlier still hold it.", target.kind.as_str()),
+            &format!(
+                "The {} is removed for good. Backups made earlier still hold it.",
+                target.kind.as_str()
+            ),
         )],
         vec![
             el().grow(1.0),
-            widgets::button(look, "cancel-delete", "Cancel", None, Variant::Default).on_press(|state: &mut Library| state.cancel_delete()),
-            widgets::button(look, "confirm-delete", "Delete", Some(&icons::TRASH), Variant::Danger)
+            widgets::button(look, "cancel-delete", "Cancel", None, Variant::Default)
+                .on_press(|state: &mut Library| state.cancel_delete()),
+            widgets::button(look, "confirm-delete", "Delete", None, Variant::Danger)
                 .fill(look.danger_soft)
                 .on_press(|state: &mut Library| state.confirm_delete()),
         ],
@@ -147,18 +169,29 @@ pub fn delete(target: &EntryMeta, look: &Look) -> El {
 
 pub fn run(target: &EntryDetails, look: &Look) -> El {
     let mut body = vec![
-        paragraph(look, "Commands using sudo open your terminal for authentication. Other commands show their output here."),
-        code_block(look, "run-command", target.command.as_deref().unwrap_or_default()),
+        paragraph(
+            look,
+            "Output shows here. A command that uses sudo opens your terminal instead.",
+        ),
+        code_block(
+            look,
+            "run-command",
+            target.command.as_deref().unwrap_or_default(),
+        ),
     ];
     if !target.working_directory.is_empty() {
         body.push(
             row()
-                .gap(4.0)
-                .child(text("Working directory:").font(ts::SM).color(look.muted))
+                .gap(6.0)
+                .center_y()
+                .help(target.working_directory.clone())
+                .child(rune::icon(&icons::FOLDER, 12.0).color(look.dim))
                 .child(
-                    text(target.working_directory.clone())
+                    text(widgets::short_path(&target.working_directory))
+                        .label(format!("Working directory: {}", target.working_directory))
                         .font(ts::MONO_SM)
-                        .color(look.fg),
+                        .color(look.muted)
+                        .truncate(),
                 ),
         );
     }
@@ -172,14 +205,8 @@ pub fn run(target: &EntryDetails, look: &Look) -> El {
             el().grow(1.0),
             widgets::button(look, "cancel-run", "Cancel", None, Variant::Default)
                 .on_press(|state: &mut Library| state.cancel_run()),
-            widgets::button(
-                look,
-                "confirm-run",
-                "Run",
-                Some(&icons::RUN),
-                Variant::Primary,
-            )
-            .on_press(|state: &mut Library| state.confirm_run()),
+            widgets::button(look, "confirm-run", "Run", None, Variant::Primary)
+                .on_press(|state: &mut Library| state.confirm_run()),
         ],
         |state: &mut Library| state.cancel_run(),
     )
@@ -193,14 +220,19 @@ pub fn output(state: &Library, output: &RunOutput, look: &Look) -> El {
     let mut body = Vec::new();
     match &output.phase {
         RunPhase::Running => body.push(
-            text("Running command. Output appears when it finishes. Closing this view does not stop it.")
+            text("Running. Output appears when it finishes; closing this does not stop it.")
                 .key("command-running")
                 .role("status")
                 .font(ts::BODY)
                 .color(look.muted)
                 .wrap(),
         ),
-        RunPhase::Error(error) => body.push(widgets::status_line(look, "command-error", Tone::Error, error)),
+        RunPhase::Error(error) => body.push(widgets::status_line(
+            look,
+            "command-error",
+            Tone::Error,
+            error,
+        )),
         RunPhase::Done(result) => {
             let failed = result.timed_out || result.exit_code != Some(0);
             let mut summary = if result.timed_out {
@@ -214,7 +246,12 @@ pub fn output(state: &Library, output: &RunOutput, look: &Look) -> El {
             if result.truncated {
                 summary.push_str(" Output was shortened to 64 KiB per stream.");
             }
-            body.push(widgets::status_line(look, "command-exit", if failed { Tone::Error } else { Tone::Ok }, &summary));
+            body.push(widgets::status_line(
+                look,
+                "command-exit",
+                if failed { Tone::Error } else { Tone::Ok },
+                &summary,
+            ));
             for (stream, heading, label, value) in [
                 (Stream::Stdout, "Output", "Copy output", &result.stdout),
                 (Stream::Stderr, "Errors", "Copy errors", &result.stderr),
@@ -222,9 +259,19 @@ pub fn output(state: &Library, output: &RunOutput, look: &Look) -> El {
                 if value.is_empty() {
                     continue;
                 }
-                let key = if stream == Stream::Stdout { "stdout" } else { "stderr" };
+                let key = if stream == Stream::Stdout {
+                    "stdout"
+                } else {
+                    "stderr"
+                };
                 let copied = state.copied_stream == Some(stream);
-                let button = widgets::button_sm(look, format!("copy-command-{key}"), if copied { "Copied" } else { label }, Some(&icons::COPY), Variant::Default);
+                let button = widgets::button_sm(
+                    look,
+                    format!("copy-command-{key}"),
+                    if copied { "Copied" } else { label },
+                    Some(&icons::COPY),
+                    Variant::Default,
+                );
                 body.push(
                     col()
                         .w_full()
@@ -238,26 +285,47 @@ pub fn output(state: &Library, output: &RunOutput, look: &Look) -> El {
                                 .child(if state.copying_stream.is_some() {
                                     widgets::disabled(button)
                                 } else {
-                                    button.on_press(move |state: &mut Library| state.copy_run_stream(stream))
+                                    button.on_press(move |state: &mut Library| {
+                                        state.copy_run_stream(stream)
+                                    })
                                 }),
                         )
                         .child(
                             col()
                                 .w_full()
                                 .max_h(240.0)
-                                .scroll(ScrollSpec { stick_bottom: false })
-                                .radius(size::RADIUS)
+                                .scroll(ScrollSpec {
+                                    stick_bottom: false,
+                                })
+                                .radius(size::RADIUS_LG - 2.0)
                                 .fill(look.sunken)
-                                .border(1.0, look.line)
-                                .child(text(value.clone()).key(format!("command-{key}")).font(ts::MONO_SM).color(look.fg).selectable(true).wrap_anywhere().w_full().padding(size::SP3)),
+                                .child(
+                                    text(value.clone())
+                                        .key(format!("command-{key}"))
+                                        .font(ts::MONO_SM)
+                                        .color(look.fg)
+                                        .selectable(true)
+                                        .wrap_anywhere()
+                                        .w_full()
+                                        .padding(size::SP3),
+                                ),
                         ),
                 );
             }
             if let Some(error) = &state.output_copy_error {
-                body.push(widgets::status_line(look, "output-copy-error", Tone::Error, error));
+                body.push(widgets::status_line(
+                    look,
+                    "output-copy-error",
+                    Tone::Error,
+                    error,
+                ));
             }
             if result.stdout.is_empty() && result.stderr.is_empty() {
-                body.push(text("The command produced no output.").font(ts::BODY).color(look.muted));
+                body.push(
+                    text("The command produced no output.")
+                        .font(ts::BODY)
+                        .color(look.muted),
+                );
             }
         }
     }
