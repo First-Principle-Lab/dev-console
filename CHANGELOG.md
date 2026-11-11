@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+
+- Keep Super+F working after `dev-console --background` runs while the app is already open, as Hyprland's autostart does on every config reload. In 0.0.13 that stopped the running app from answering until it was restarted.
+
 ## 0.0.13 — 2026-11-12
 
 ### Added
