@@ -3,7 +3,7 @@
 #
 # SKIP_BUN_INSTALL=1     reuse the existing node_modules instead of installing
 # SKIP_KEYRING_TEST=1  do not try to start a Secret Service provider
-# SKIP_RELEASE_BUILD=1 stop after the Rust tests (release compile is slow on small hosts)
+# SKIP_RELEASE_BUILD=1 skip the native release compile and AppImage (slow on small hosts)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,10 +31,20 @@ bun run build:frontend
 echo "== browser E2E (runs against the IPC test double: proves UI behaviour only) =="
 bunx playwright test
 echo "== cargo fmt --check =="
+# The domain layer moved to the root Cargo workspace (`crates/dev-console-core`), so the gate covers
+# both trees: the workspace and the standalone desktop package in `src-tauri`. `--workspace` is what
+# runs the storage/vault/backup unit tests that used to live inside `src-tauri`, and it is what now
+# compiles and tests the native shell too (`dev-console-desktop`, `dev-console-ui-tests`): those
+# gates are headless by construction - the runtime is driven, never rendered - so they belong in the
+# same entrypoint as the rest, and a check nothing runs is a check that can rot. The render harness
+# is a different matter and still exits 77 (UNVERIFIED) on a host with no display.
+cargo fmt --all -- --check
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 echo "== clippy (warnings denied) =="
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 echo "== cargo test =="
+cargo test --workspace --locked
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 
 echo "== zsh environment directory hook =="
@@ -109,7 +119,7 @@ else
   code=0
   bash scripts/test-arch-package.sh || code=$?
   if [[ "$code" == "77" ]]; then
-    echo "UNVERIFIED: makepkg is not available here (the static half still ran)"
+    echo "UNVERIFIED: the Arch package build did not run here (the static half passed)"
   elif [[ "$code" != "0" ]]; then
     exit "$code"
   fi
@@ -128,22 +138,19 @@ else
   fi
 fi
 
-echo "== release compile =="
+echo "== native release compile, AppImage and command-line smoke =="
+# What a release ships: the Rune shell from the root workspace, packed by the pinned tooling and
+# started from the image. The Tauri binary is no longer compiled here because it is no longer
+# published; its tests above still run until the cutover removes the tree.
 if [[ "${SKIP_RELEASE_BUILD:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_RELEASE_BUILD=1)"
 else
-  bunx tauri build --no-bundle
-fi
-
-echo "== native smoke against the compiled binary =="
-if [[ "${SKIP_NATIVE_SMOKE:-0}" == "1" ]]; then
-  echo "skipped by request (SKIP_NATIVE_SMOKE=1)"
-else
-  binary="${DEV_CONSOLE_BINARY:-src-tauri/target/release/dev-console}"
+  cargo build --release --locked -p dev-console-desktop
+  bash scripts/build-appimage.sh
   code=0
-  bash scripts/smoke-native.sh "$binary" || code=$?
+  bash scripts/smoke-native-cli.sh target/appimage/Dev-Console.AppImage || code=$?
   if [[ "$code" == "77" ]]; then
-    echo "UNVERIFIED: this environment cannot host the native smoke test"
+    echo "UNVERIFIED: no AppImage to smoke-test"
   elif [[ "$code" != "0" ]]; then
     exit "$code"
   fi
@@ -154,7 +161,7 @@ if [[ "${SKIP_DEB_TEST:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_DEB_TEST=1)"
 else
   code=0
-  SKIP_NATIVE_SMOKE=1 bash scripts/build-deb.sh || code=$?
+  bash scripts/build-deb.sh || code=$?
   if [[ "$code" == "77" ]]; then
     echo "UNVERIFIED: dpkg-deb is not available here"
   elif [[ "$code" != "0" ]]; then

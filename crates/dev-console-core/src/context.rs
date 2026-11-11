@@ -139,9 +139,10 @@ pub fn focused_via_hyprctl() -> Option<FocusedWindow> {
     parse_active_window(&query_hyprctl()?)
 }
 
-/// Detects the project behind the window that has focus right now. [`crate::windows::show_finder`]
-/// does the same in two halves ([`focused_now`] before showing, [`resolve`] after), so the palette
-/// never waits on `/proc`; this whole-chain form is what the harness and benchmark measure.
+/// Detects the project behind the window that has focus right now. The desktop runtime's
+/// `windows::show_finder` does the same in two halves ([`focused_now`] before showing,
+/// [`resolve`] after), so the palette never waits on `/proc`; this whole-chain form is what the
+/// harness and benchmark measure.
 pub fn detect() -> Option<FinderContext> {
     resolve(&HyprlandFocus::from_env().focused()?)
 }

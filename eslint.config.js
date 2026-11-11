@@ -5,7 +5,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'src-tauri/target/**', 'src-tauri/gen/**', 'test-results/**', 'playwright-report/**', 'node_modules/**'] },
+  { ignores: ['dist/**', 'target/**', 'src-tauri/target/**', 'src-tauri/gen/**', 'test-results/**', 'playwright-report/**', 'node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...svelte.configs['flat/recommended'],

@@ -2,9 +2,10 @@
 # Build from a release tarball (the same PKGBUILD works locally and in AUR):
 #   makepkg -si
 #
-# The package ships: the Tauri release binary, the built frontend inside it (Tauri embeds
-# dist/ at compile time), the desktop launcher, the polkit policy plus its setuid-free helper,
-# and the hicolor icons. Nothing is downloaded at build time beyond the declared source.
+# The package ships: the native release binary, the desktop launcher, the polkit policy plus its
+# setuid-free helper, and the hicolor icons. Nothing is downloaded at build time beyond the
+# declared source and the crates Cargo.lock pins. A packaged binary never updates itself; that is
+# the AppImage's job.
 
 pkgname=dev-console
 pkgver=0.1.0
@@ -13,47 +14,38 @@ pkgdesc='Local-first tray app for saved commands and secrets (age vault, Secret 
 arch=('x86_64' 'aarch64')
 url='https://github.com/parththirwani/dev-console'
 license=('MIT')
-depends=('gcc-libs' 'glibc' 'glib2' 'gtk3' 'webkit2gtk-4.1' 'libsoup3' 'libappindicator-gtk3'
-         'dbus' 'sqlite' 'libsecret')
-makedepends=('bun' 'rust' 'cargo' 'desktop-file-utils' 'pkgconf')
+# The binary links only libc. The window system, GPU loader and font configuration are loaded at
+# run time, so they are dependencies makepkg cannot find by itself.
+depends=('gcc-libs' 'glibc' 'wayland' 'libxkbcommon' 'fontconfig' 'vulkan-icd-loader' 'dbus')
+makedepends=('rust' 'cargo' 'desktop-file-utils' 'pkgconf')
 optdepends=('gnome-keyring: Secret Service provider for the vault key'
             'kwallet: alternative Secret Service provider'
             'polkit: authenticated unlock from the tray and CLI'
-            'xclip: X11 clipboard support (Wayland uses its own primary/clipboard protocol)')
+            'xdg-desktop-portal: folder and file pickers'
+            'wl-clipboard: Wayland clipboard support'
+            'xclip: X11 clipboard support')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/parththirwani/dev-console/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')   # replace with the real digest before publishing
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
 
-  export BUN_INSTALL="$srcdir/bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
   export CARGO_HOME="$srcdir/cargo"
   export RUSTUP_HOME="$srcdir/rustup"
 
-  bun install --frozen-lockfile
-  bun run build:frontend
-
-  # `tauri/custom-protocol` is what makes the binary load the embedded assets. A plain
-  # `cargo build --release` compiles Tauri in dev mode, which points the webview at the
-  # Vite dev server URL and cannot run standalone.
-  cargo build --release --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol
+  cargo build --release --locked -p dev-console-desktop
 }
 
 check() {
   cd "$srcdir/$pkgname-$pkgver"
-  export BUN_INSTALL="$srcdir/bun"
-  export PATH="$BUN_INSTALL/bin:$PATH:$CARGO_HOME/bin"
-  bun run check
-  bun run lint
-  bun run test
-  cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+  export CARGO_HOME="$srcdir/cargo"
+  cargo test --release --locked -p dev-console-core -p dev-console-desktop --lib
 }
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"
 
-  install -Dm755 src-tauri/target/release/dev-console "$pkgdir/usr/bin/dev-console"
+  install -Dm755 target/release/dev-console "$pkgdir/usr/bin/dev-console"
 
   # Desktop entry, polkit policy and the helper it authorises.
   install -Dm644 packaging/dev-console.desktop \

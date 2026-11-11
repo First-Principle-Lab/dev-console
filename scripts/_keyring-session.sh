@@ -32,7 +32,7 @@ echo "== Dev Console keyring adapter (ignored tests: they need a real provider) 
 # Only the library's own provider probe runs here. The X11 clipboard and native-IPC suites are
 # ignored for their own reasons and are run by their own harnesses, which can supply the display
 # and the disposable profile they need.
-cargo test --manifest-path src-tauri/Cargo.toml --locked --lib keyring::tests::real_keyring_round_trip -- \
-  --nocapture --ignored
+cargo test -p dev-console-core --locked --lib keyring::tests::real_keyring_round_trip -- \
+  --exact --nocapture --ignored
 
 exit 0

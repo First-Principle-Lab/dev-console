@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # C02: produce an installable .deb with a SHA-256 checksum, extract it into a clean
-# filesystem root, and prove the *packaged* binary is what the native smoke runs against.
+# filesystem root, and prove the *packaged* binary is what the command-line smoke runs against.
 #
 # What it does NOT prove: that a distro package manager resolves dependencies or that a
 # real desktop launcher/icon cache behaves - those stay desktop checks.
@@ -14,12 +14,12 @@ command -v dpkg-deb >/dev/null || {
   exit 77
 }
 
-VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json | head -1)"
-BINARY="${DEV_CONSOLE_BINARY:-src-tauri/target/release/dev-console}"
+BINARY="${DEV_CONSOLE_BINARY:-target/release/dev-console}"
 [[ -x "$BINARY" ]] || {
-  echo "FAIL: no release binary at $BINARY (run 'bunx tauri build --no-bundle' first)"
+  echo "FAIL: no release binary at $BINARY (run 'cargo build --release --locked -p dev-console-desktop' first)"
   exit 1
 }
+VERSION="$("$BINARY" --version)"
 
 ARCH="$(dpkg --print-architecture)"
 NAME="dev-console_${VERSION}_${ARCH}"
@@ -38,7 +38,7 @@ Maintainer: Dev Console maintainers
 Section: utils
 Priority: optional
 Description: Encrypted command and secret library with a keyboard-first finder
- Tauri desktop app: SQLite command library, age-encrypted vault backed by the
+ Native desktop app: SQLite command library, age-encrypted vault backed by the
  OS keyring, clipboard handling with expiry, CLI control channel, and a finder
  window designed for a global shortcut.
 EOF
@@ -63,7 +63,7 @@ echo "== native smoke against the binary extracted from the package =="
 if [[ "${SKIP_NATIVE_SMOKE:-0}" == "1" ]]; then
   echo "skipped by request (SKIP_NATIVE_SMOKE=1)"
 else
-  bash scripts/smoke-native.sh "$PREFIXDIR/usr/bin/dev-console"
+  bash scripts/smoke-native-cli.sh "$PREFIXDIR/usr/bin/dev-console"
 fi
 
 echo "DEB ARTIFACT OK: $deb"

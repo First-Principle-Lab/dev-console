@@ -59,16 +59,46 @@ helper without touching system paths. It requires `minisign`.
 Source and distribution package installations include the binary, launcher, polkit
 policy, authentication helper, and icons.
 
+## Release AppImage and in-app updates
+
+Every release publishes three assets: `Dev-Console.AppImage`, `Dev-Console.AppImage.sig` and
+`latest.json`. The `build` job of the `verify` workflow produces them from the native shell:
+
+1. `cargo build --release --locked -p dev-console-desktop` compiles the binary. It links only
+   libc. Wayland, xkbcommon, the GPU loader and fontconfig are the host's, loaded at run time.
+2. `scripts/build-appimage.sh` assembles the AppDir (binary, desktop entry, icons) and packs it
+   with appimagetool and the type2 runtime. Both are pinned by version and SHA-256 in the script.
+   The script then starts the image and compares its `--version` with the binary's.
+3. `scripts/smoke-native-cli.sh` runs the documented command line against the image with a
+   disposable profile and no display.
+4. On `main` only, `cargo run -p dev-console-release -- <image> <version>` writes the signature.
+   The job then verifies it with `minisign` against `crates/dev-console-desktop/update-key.pub`,
+   the key installed clients pin, before anything is uploaded.
+
+The signature format is the one the Tauri bundler produced: a prehashed Minisign signature whose
+trusted comment carries `version:<x.y.z>`, base64-encoded. The signing key, the endpoint and the
+manifest shape are unchanged, so an installed Tauri build updates to a native release with its
+existing updater, and `install.sh` needs no change.
+
+The native updater (`crates/dev-console-desktop/src/updater.rs`) runs only from an AppImage. It
+checks at startup, when the Library gains focus, and every 15 minutes. **Update to x.y.z and
+restart** in Settings downloads the image from the release tag the manifest names, verifies the
+signature and the signed version, keeps the previous image as `Dev-Console.AppImage.previous`
+beside the installed one, replaces the installed image with one rename, and relaunches. A failed
+download, signature or write leaves the installed image as it was. To go back, quit the app and
+move the `.previous` file over `Dev-Console.AppImage`.
+
+Start at login writes `~/.config/autostart/dev-console.desktop`. From an AppImage the entry
+starts the installed image, not the temporary mount it is running from.
+
 ## Arch Linux
 
-`packaging/arch/PKGBUILD` builds from a release tarball with `bun install --frozen-lockfile`,
-`bun run build:frontend` and `cargo build --release --locked --features tauri/custom-protocol`
-(the feature flag is required: without it Tauri compiles in dev mode and the binary needs the
-Vite dev server), then installs:
+`packaging/arch/PKGBUILD` builds the native shell from a release tarball with
+`cargo build --release --locked -p dev-console-desktop`, then installs:
 
 | Path | From |
 | --- | --- |
-| `/usr/bin/dev-console` | `src-tauri/target/release/dev-console` |
+| `/usr/bin/dev-console` | `target/release/dev-console` |
 | `/usr/share/applications/dev-console.desktop` | `packaging/dev-console.desktop` |
 | `/usr/share/polkit-1/actions/ai.codemate.devconsole.policy` | `packaging/polkit/…` |
 | `/usr/lib/dev-console/dev-console-auth-helper` | `packaging/dev-console-auth-helper` |
@@ -90,14 +120,15 @@ because polkit policies resolve helper paths absolutely and ignore `PATH`.
 
 `scripts/test-arch-package.sh` validates the PKGBUILD (required variables, that every `install -D`
 destination is absolute under `$pkgdir`, that the desktop entry and policy are covered, and that
-the policy XML parses after the prefix rewrite). With `makepkg` available it also runs a staged
-`makepkg --repackage -d` inside a scratch directory; without it the script exits **77** and reports
-UNVERIFIED rather than pretending the package was built.
+the policy XML parses after the prefix rewrite). With `makepkg` available it also has makepkg read
+the PKGBUILD (`makepkg --printsrcinfo`). The package build itself needs a published release
+tarball, so the script always exits **77** and reports UNVERIFIED for it rather than pretending
+the package was built.
 
 ## Other distributions (Debian/Ubuntu and friends)
 
 ```bash
-bunx tauri build --no-bundle
+cargo build --release --locked -p dev-console-desktop
 sudo PREFIX=/usr/local bash packaging/install.sh install    # stages, validates, installs
 sudo PREFIX=/usr/local bash packaging/install.sh uninstall  # removes exactly what it placed
 ```

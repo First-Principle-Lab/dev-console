@@ -1,0 +1,25 @@
+[package]
+name = "dev-console-release"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Release tooling for Dev Console: signs the AppImage the way every published release is signed."
+publish = false
+
+# Kept out of `dev-console-desktop` so the signing library, its key derivation and its password
+# prompt are never linked into the shipped application.
+[[bin]]
+name = "sign-update"
+path = "src/main.rs"
+
+[dependencies]
+# The library, at the exact version, the Tauri bundler signed with. The pin is the point: later
+# releases stopped running the key derivation for an empty password, so they cannot open a key
+# `tauri signer generate` wrote without one - which is what the release secret is.
+minisign = "=0.7.3"
+base64 = "0.22.1"
+
+[dev-dependencies]
+minisign-verify = "0.3.0"
+tempfile = { workspace = true }

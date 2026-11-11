@@ -19,11 +19,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Runtime};
 
 use crate::cli::VaultCommand;
+use crate::effects;
 use crate::error::{AppError, AppResult};
 use crate::models::{EntriesChanged, VaultState};
+use crate::services::AppEvent;
 use crate::state::AppState;
 use crate::{tray, windows};
 
@@ -232,7 +234,10 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
             match result {
                 Ok(outcome) => {
                     if outcome.imported + outcome.renamed > 0 {
-                        let _ = app.emit("vault-state-changed", state.vault.state());
+                        let _ = effects::deliver(
+                            app,
+                            &AppEvent::VaultStateChanged(state.vault.state()),
+                        );
                     }
                     let mut message = format!(
                         "imported {} secrets, renamed {}, {} already existed",
@@ -292,15 +297,15 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
                     if outcome.imported > 0 {
                         // The library window reloads its command list; nothing about the folder
                         // itself is logged.
-                        let _ = app.emit(
-                            "entries-changed",
-                            EntriesChanged {
+                        let _ = effects::deliver(
+                            app,
+                            &AppEvent::EntriesChanged(EntriesChanged {
                                 kind: crate::models::Kind::Command,
                                 id: String::new(),
                                 revision: 0,
                                 operation: "reloaded",
                                 vault_generation: state.vault.generation(),
-                            },
+                            }),
                         );
                     }
                     let mut message = format!(
@@ -332,7 +337,7 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
                 Ok(()) => {
                     state.clipboard.clear_owned();
                     let vault = state.vault.state();
-                    let _ = app.emit("vault-state-changed", vault.clone());
+                    let _ = effects::deliver(app, &AppEvent::VaultStateChanged(vault.clone()));
                     let _ = tray::refresh_menu(app);
                     Reply {
                         ok: true,
@@ -352,7 +357,7 @@ pub fn dispatch<R: Runtime>(request: &Request, app: &AppHandle<R>, state: &Arc<A
         "vault.unlock" => match state.vault.unlock() {
             Ok(()) => {
                 let vault = state.vault.state();
-                let _ = app.emit("vault-state-changed", vault.clone());
+                let _ = effects::deliver(app, &AppEvent::VaultStateChanged(vault.clone()));
                 let _ = tray::refresh_menu(app);
                 Reply {
                     ok: vault.unlocked,
