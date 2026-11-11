@@ -51,6 +51,11 @@ NAMES = {
     "close": "x",
     "chevron": "chevron-down",
     "external": "external-link",
+    # Native-only: the sidebar's quiet actions.
+    "import": "folder-input",
+    "environment": "file-key",
+    "terminal": "square-terminal",
+    "more": "ellipsis",
 }
 
 DATA = re.compile(r"__iconData\s*=\s*(\{.*?\});", re.S)

@@ -18,8 +18,9 @@ echo "== PKGBUILD declares the required fields =="
 for field in pkgname pkgver pkgrel pkgdesc arch url license depends makedepends source "build()" "package()"; do
   grep -q "^[a-z]*\-*.*=\|^${field}" "$PKG" && ok "declares ${field}" || bad "missing ${field}"
 done
-grep -q 'bun install --frozen-lockfile' "$PKG" && ok 'builds JS deps with bun, frozen lockfile' || bad 'build does not use bun install --frozen-lockfile'
-grep -q 'cargo build --release .*--locked' "$PKG" && ok 'cargo build is --release --locked' || bad 'cargo build is not --release --locked'
+grep -q 'cargo build --release --locked -p dev-console-desktop' "$PKG" && ok 'builds the native shell, --release --locked' || bad 'build is not the locked native release build'
+grep -q 'install -Dm755 target/release/dev-console ' "$PKG" && ok 'packages the workspace binary' || bad 'does not package target/release/dev-console'
+! grep -q 'bun \|src-tauri/target' "$PKG" && ok 'no frontend or Tauri build' || bad 'still builds the frontend or the Tauri binary'
 
 echo "== every packaged file is absolute under \$pkgdir =="
 while IFS= read -r dest; do
@@ -55,18 +56,22 @@ else
   note 'desktop-file-validate not installed, skipped'
 fi
 
-echo "== real package build =="
+echo "== makepkg reads the PKGBUILD =="
 if ! command -v makepkg >/dev/null; then
   echo "UNVERIFIED: makepkg is not available on this host (Arch toolchain required)"
   echo "RESULT: exit 77"
   exit 77
 fi
-cp -a packaging src-tauri package.json bun.lock "$WORK/" 2>/dev/null || true
-( cd "$WORK" && makepkg --repackage -d --noconfirm ) || bad 'makepkg failed'
+cp "$PKG" "$WORK/PKGBUILD"
+( cd "$WORK" && makepkg --printsrcinfo >/dev/null ) && ok 'makepkg --printsrcinfo' || bad 'makepkg cannot read the PKGBUILD'
 
 if [[ "$fail" == 0 ]]; then
-  echo "ARCH PACKAGING CHECKS PASSED"
-  exit 0
+  # The source is a release tarball, and no tag carries this tree until it is released, so the
+  # build itself is not something this harness can run. Say so instead of passing.
+  echo "ARCH PACKAGING: static checks passed"
+  echo "UNVERIFIED: the package build needs the published release tarball (makepkg -si in packaging/arch)"
+  echo "RESULT: exit 77"
+  exit 77
 fi
 echo "ARCH PACKAGING CHECKS FAILED"
 exit 1

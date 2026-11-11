@@ -278,9 +278,14 @@ fn search_expands_only_the_project_groups_that_match() {
     }
     let mut library = profile.library();
     assert!(
+        ids.iter().all(|id| library.has(&format!("entry-row-{id}"))),
+        "a project group starts open, so the list shows what is selected"
+    );
+    assert!(library.press(&format!("project-toggle-{root}")));
+    assert!(
         ids.iter()
             .all(|id| !library.has(&format!("entry-row-{id}"))),
-        "the project group starts collapsed"
+        "folding the group hides its rows"
     );
     library.apply(|state| {
         state.query.replace_text("task-07");
@@ -309,6 +314,7 @@ fn backups_and_secret_reads_are_refused_while_the_vault_is_locked() {
     let profile = Profile::new("more-lockedbackup");
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     let mut effects = dev_console_core::Effects::default();
     let vault = profile.hub.library.lock_vault(&mut effects).unwrap();
     library.apply(|state| state.on_event(&AppEvent::VaultStateChanged(vault), &mut Tx::default()));
@@ -343,6 +349,10 @@ fn settings_load_in_a_locked_profile_and_a_general_setting_still_saves() {
     library.apply(|state| state.settings_toggle(|settings| &mut settings.autostart));
     library.press("save-settings");
     assert!(profile.hub.library.get_settings().autostart);
+    assert!(
+        dev_console_core::autostart::is_enabled(),
+        "saving the switch writes the login entry, inside the disposable profile"
+    );
 }
 
 #[test]
@@ -362,6 +372,7 @@ fn import_review_shows_the_archive_and_the_pre_backup_is_taken() {
         .unwrap();
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     let before = library.state().settings.as_ref().unwrap().backups.len();
     library.apply(|state| {
         state
@@ -397,6 +408,7 @@ fn a_damaged_archive_is_rejected_at_review() {
     std::fs::write(&path, b"not an archive").unwrap();
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     library.apply(|state| {
         state
             .settings
@@ -415,10 +427,12 @@ fn the_recovery_credential_is_not_kept_across_a_close_and_reopen() {
     let profile = Profile::new("more-recovery-close");
     let mut library = profile.library();
     library.press("settings");
+    library.press("settings-tab-backups");
     library.apply(|state| state.reveal_recovery());
     assert!(library.has("recovery-secret"));
     library.press("close-settings");
     library.press("settings");
+    library.press("settings-tab-backups");
     assert!(!library.has("recovery-secret"));
     assert!(library.has("recovery-steps") || library.has("recovery-reveal"));
 }
@@ -516,18 +530,29 @@ fn settings_offer_the_project_ranking_switch_and_store_it() {
 #[test]
 fn history_offers_ranked_suggestions_above_the_commands() {
     let profile = Profile::new("more-history");
+    let saved = profile.command("saved command", "echo synthetic");
     let library = with_history(&profile);
     assert!(library.has("history-suggestions"));
     assert!(library.has(&format!("history-suggestion-{AAA}")));
     assert!(library.shows("cargo test --workspace"));
-    assert!(library.shows("used 7×"));
-    assert!(library.shows("12 runs"));
+    assert!(library.shows("7×"));
+    let ([_, suggested_y, _, suggested_height], _) = library.box_of("history-suggestions").unwrap();
+    let ([_, command_y, _, _], _) = library.box_of(&format!("entry-row-{saved}")).unwrap();
+    assert!(
+        suggested_y + suggested_height <= command_y,
+        "Suggested must appear above saved commands"
+    );
 }
 
 #[test]
 fn saving_a_suggestion_opens_the_editor_prefilled_and_writes_nothing() {
     let profile = Profile::new("more-history-save");
     let mut library = with_history(&profile);
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(
+        library.state().editing.is_none(),
+        "selection previews without opening a draft"
+    );
     assert!(library.press(&format!("history-suggestion-save-{AAA}")));
     let editor = library.state().editing.as_ref().unwrap();
     assert_eq!(editor.command.text, "cargo test --workspace");
@@ -553,6 +578,11 @@ fn saving_a_suggestion_opens_the_editor_prefilled_and_writes_nothing() {
 fn dismissing_takes_the_suggestion_away_and_only_its_digest_is_remembered() {
     let profile = Profile::new("more-history-dismiss");
     let mut library = with_history(&profile);
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(
+        library.state().editing.is_none(),
+        "selection previews without opening a draft"
+    );
     assert!(library.press(&format!("history-suggestion-dismiss-{AAA}")));
     assert!(!library.has(&format!("history-suggestion-{AAA}")));
     assert_eq!(profile.hub.library.dismissed_suggestion_count().unwrap(), 1);
@@ -646,6 +676,9 @@ fn history_rows_accept_enter_and_delete_but_ignore_backspace() {
     library.press_key(Key::Backspace);
     assert!(library.has(&format!("history-suggestion-{AAA}")));
     library.press_key(Key::Enter);
+    assert!(library.has("suggestion-preview"));
+    assert!(library.state().editing.is_none());
+    assert!(library.press(&format!("history-suggestion-save-{AAA}")));
     assert_eq!(
         library.state().editing.as_ref().unwrap().command.text,
         "cargo test --workspace"
@@ -729,4 +762,137 @@ fn settings_footer_fits_the_minimum_window() {
         y >= 0.0 && y + height <= 520.0,
         "footer is outside viewport: {y} + {height}"
     );
+}
+
+#[test]
+fn suggestions_start_with_three_and_expand_without_displacing_the_toolbar() {
+    let profile = Profile::new("history-top-three");
+    profile.command("synthetic saved command", "true");
+    let mut library = with_history(&profile);
+    library.apply(|state| {
+        for index in 0..5 {
+            state.suggestions.push(suggestion(
+                &format!("{index:064x}"),
+                &format!("echo synthetic-{index}"),
+            ));
+        }
+    });
+    assert!(library.has(&format!("history-suggestion-{AAA}")));
+    assert!(library.has(&format!("history-suggestion-{:064x}", 0)));
+    assert!(!library.has(&format!("history-suggestion-{:064x}", 1)));
+    assert!(library.shows("Show all 7 suggestions"));
+    let toolbar = library.box_of("toolbar").unwrap().0;
+    assert!(library.press("history-suggestions-show-all"));
+    assert!(library.has(&format!("history-suggestion-{:064x}", 4)));
+    assert_eq!(library.box_of("toolbar").unwrap().0, toolbar);
+    assert!(library.press("history-suggestions-show-all"));
+    assert!(!library.has(&format!("history-suggestion-{:064x}", 4)));
+}
+
+#[test]
+fn a_suggestion_previews_the_full_command_and_saved_rows_leave_the_preview() {
+    let profile = Profile::new("history-preview-selection");
+    let saved = profile.command("synthetic saved command", "true");
+    let mut library = with_history(&profile);
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(library.has("suggestion-preview"));
+    assert_eq!(
+        library.text_of("suggestion-command-text").as_deref(),
+        Some("cargo test --workspace")
+    );
+    assert!(library.state().editing.is_none());
+    assert!(library.state().selected_id.is_none());
+    assert!(library.press(&format!("entry-row-{saved}")));
+    assert!(!library.has("suggestion-preview"));
+    assert!(library.state().selected_suggestion.is_none());
+    assert!(library.has("command-text"));
+}
+
+#[test]
+fn a_narrow_suggestion_preview_has_a_save_action_and_a_way_back() {
+    let profile = Profile::new("history-narrow-preview");
+    let seed = with_history(&profile);
+    let mut state = Library::new(profile.hub.clone(), dev_console_desktop::hub::Exec::Inline);
+    state.suggestions = seed.state().suggestions.clone();
+    let mut library = Stage::from_spec(
+        state,
+        &dev_console_desktop::app::library_spec(),
+        (760.0, 520.0),
+    );
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(library.has("suggestion-preview"));
+    assert!(!library.has("list-pane"));
+    assert!(library.press("back-to-list"));
+    assert!(library.has("list-pane"));
+    assert!(!library.has("suggestion-preview"));
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(library.press(&format!("history-suggestion-save-{AAA}")));
+    assert!(library.state().editing.is_some());
+}
+
+#[test]
+fn suggestion_highlights_have_equal_top_and_bottom_padding() {
+    let profile = Profile::new("history-row-padding");
+    let mut library = with_history(&profile);
+    for selected in [false, true] {
+        if selected {
+            assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+        }
+        assert!(library.hover(&format!("history-suggestion-command-{AAA}")));
+        let row = library
+            .box_of(&format!("history-suggestion-{AAA}"))
+            .unwrap()
+            .0;
+        let title = library
+            .box_of(&format!("history-suggestion-title-{AAA}"))
+            .unwrap()
+            .0;
+        let caption = library
+            .box_of(&format!("history-suggestion-caption-{AAA}"))
+            .unwrap()
+            .0;
+        let top = title[1] - row[1];
+        let bottom = row[1] + row[3] - caption[1] - caption[3];
+        assert!(top >= 6.0, "the title needs space above it: {top}");
+        assert!(
+            (top - bottom).abs() <= 1.0,
+            "uneven padding: top={top}, bottom={bottom}"
+        );
+    }
+}
+
+#[test]
+fn disabling_history_from_settings_clears_the_preview_before_narrowing() {
+    let profile = Profile::new("history-disable-preview-local");
+    profile.command("synthetic command", "true");
+    let mut library = with_history(&profile);
+    assert!(library.press(&format!("history-suggestion-command-{AAA}")));
+    assert!(library.press("settings"));
+    assert!(library.press("history-suggestions-setting"));
+    assert!(library.press("save-settings"));
+    library.apply(|state| state.set_width(760.0));
+    assert!(library.state().selected_suggestion.is_none());
+    assert!(library.has("list-pane"));
+    assert!(!library.has("suggestion-preview"));
+}
+
+#[test]
+fn disabling_history_from_an_event_returns_a_narrow_preview_to_the_list() {
+    let profile = Profile::new("history-disable-preview-event");
+    let seed = with_history(&profile);
+    let mut state = Library::new(profile.hub.clone(), dev_console_desktop::hub::Exec::Inline);
+    state.suggestions = seed.state().suggestions.clone();
+    state.select_suggestion(AAA);
+    let mut library = Stage::from_spec(
+        state,
+        &dev_console_desktop::app::library_spec(),
+        (760.0, 520.0),
+    );
+    assert!(library.has("suggestion-preview"));
+    let mut off = profile.hub.library.get_settings();
+    off.history_suggestions_enabled = false;
+    library.apply(|state| state.on_event(&AppEvent::SettingsSaved(off), &mut Tx::default()));
+    assert!(library.has("list-pane"));
+    assert!(library.state().selected_suggestion.is_none());
+    assert!(!library.has("suggestion-preview"));
 }

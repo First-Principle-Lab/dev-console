@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ACTION="${1:-install}"
 PREFIX="${PREFIX:-/usr/local}"
 DESTDIR="${DESTDIR:-}"
-BINARY="${BINARY:-$ROOT/src-tauri/target/release/dev-console}"
+BINARY="${BINARY:-$ROOT/target/release/dev-console}"
 MANIFEST_NAME="share/dev-console/installed-files.txt"
 
 target() { printf '%s%s' "$DESTDIR" "$1"; }
@@ -34,7 +34,7 @@ install_file() {
 case "$ACTION" in
   install)
     [[ -x "$BINARY" ]] || {
-      echo "no executable at $BINARY (build it first: bunx tauri build --no-bundle)" >&2
+      echo "no executable at $BINARY (build it first: cargo build --release --locked -p dev-console-desktop)" >&2
       exit 1
     }
     rm -f "$(manifest)"

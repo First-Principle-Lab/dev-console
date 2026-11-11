@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  # The release is built by the same compile that the native smoke test checks, in parallel
-  # with the other jobs; publish only runs once all of them pass.
+  # The release is the native shell's AppImage, built by the same steps on every run, in
+  # parallel with the other jobs; publish only runs once all of them pass.
   RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
   CARGO_TERM_COLOR: always
 
@@ -115,34 +115,30 @@ jobs:
         run: bash scripts/test-arch-package.sh || test "$?" = 77
 
   build:
-    # One release compile per run: on main it is bundled into the signed AppImage, everywhere
-    # else it stops at the binary. The native smoke test runs against it either way.
+    # One release compile of the native shell per run, packed into the AppImage and started from
+    # it. On main the image is also stamped with the next version and signed; everywhere else the
+    # same steps run unsigned, so a packaging break is found before promotion.
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
       - uses: dtolnay/rust-toolchain@stable
       # Restore before the version is stamped: the cache key hashes Cargo.toml and Cargo.lock,
       # and a key that changed with every release would never hit.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          key: release
       - name: Cache AppImage tooling
-        if: env.RELEASE == 'true'
         uses: actions/cache@v4
         with:
-          path: ~/.cache/tauri
-          key: tauri-bundler-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          path: ~/.cache/dev-console-appimage
+          key: appimage-tooling-${{ runner.os }}-${{ hashFiles('scripts/build-appimage.sh') }}
       - name: System dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev \
-            libsqlite3-dev pkg-config patchelf libfuse2t64 dbus-x11 xvfb x11-utils
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libfontconfig1-dev minisign
       - name: Choose next release version
         id: version
         if: env.RELEASE == 'true'
@@ -152,31 +148,35 @@ jobs:
           version="0.0.$(( ${last:-0} + 1 ))"
           python3 scripts/set-release-version.py "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - run: bun install --frozen-lockfile
       - name: Release compile
-        if: env.RELEASE != 'true'
-        run: bunx tauri build --no-bundle
-      - name: Build signed AppImage
+        run: cargo build --release --locked -p dev-console-desktop
+      - name: Build AppImage
+        run: bash scripts/build-appimage.sh target/release/dev-console release/Dev-Console.AppImage
+      - name: command-line smoke against the AppImage
+        run: bash scripts/smoke-native-cli.sh release/Dev-Console.AppImage
+      - name: Sign AppImage
         if: env.RELEASE == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
-          bunx tauri build --bundles appimage --ci
-      - name: native smoke against the compiled binary
-        run: bash scripts/smoke-native.sh src-tauri/target/release/dev-console || test "$?" = 77
+          test "$(release/Dev-Console.AppImage --appimage-extract-and-run --version)" = "$VERSION"
+          cargo run --release --locked -p dev-console-release -- release/Dev-Console.AppImage "$VERSION"
+          # Check the result the way install.sh will, against the key installed clients pin, so a
+          # wrong signing secret stops here and not on someone's machine.
+          key=$(sed -n 2p crates/dev-console-desktop/update-key.pub)
+          base64 -d release/Dev-Console.AppImage.sig > "$RUNNER_TEMP/update.minisig"
+          minisign -V -q -P "$key" -m release/Dev-Console.AppImage -x "$RUNNER_TEMP/update.minisig"
+          sed -n 3p "$RUNNER_TEMP/update.minisig" | tr '\t' '\n' | grep -qx "version:$VERSION"
       - name: Write updater manifest
         if: env.RELEASE == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
-          mkdir -p release
-          appimage=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -print -quit)
-          test -n "$appimage"
-          test -s "$appimage.sig"
-          cp "$appimage" release/Dev-Console.AppImage
-          cp "$appimage.sig" release/Dev-Console.AppImage.sig
           jq -n \
             --arg version "$VERSION" \
             --arg url 'https://github.com/First-Principle-Lab/dev-console/releases/latest/download/Dev-Console.AppImage' \

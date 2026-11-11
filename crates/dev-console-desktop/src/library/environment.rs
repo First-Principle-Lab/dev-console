@@ -230,10 +230,10 @@ impl Library {
 pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
     let busy = panel.busy;
     let mut body = vec![text(
-        "Local, encrypted versions of .env and .env.* files in the project folder. Entering a project folder in a tracked terminal starts sync automatically. Subfolders are not scanned.",
+        "Encrypted, local versions of the .env files at the top of a project folder. Sync starts when a tracked terminal enters the folder.",
     )
     .font(ts::BODY)
-    .color(look.fg)
+    .color(look.muted)
     .wrap()];
 
     let picker = widgets::button(
@@ -242,7 +242,7 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
         &if panel.root.is_empty() {
             "Choose a project folder".to_string()
         } else {
-            panel.root.clone()
+            widgets::short_path(&panel.root)
         },
         Some(&icons::CHEVRON),
         Variant::Default,
@@ -260,7 +260,7 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
             .w_full()
             .gap(size::SP2)
             .center_y()
-            .child(text("Project").font(ts::SM).color(look.muted))
+            .child(text("Project").font(ts::BODY).color(look.fg).grow(1.0))
             .child(if busy {
                 widgets::disabled(picker)
             } else {
@@ -283,8 +283,7 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
             .gap(2.0)
             .padding(4.0)
             .radius(size::RADIUS)
-            .fill(look.panel)
-            .border(1.0, look.line);
+            .fill(look.fg.alpha(0.04));
         for project in &panel.projects {
             let root = project.root.clone();
             options = options.child(
@@ -301,7 +300,7 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
                     .hover(look.fg.alpha(0.05))
                     .on_press(move |state: &mut Library| state.choose_environment(root.clone()))
                     .child(
-                        text(project.root.clone())
+                        text(widgets::short_path(&project.root))
                             .font(ts::MONO_SM)
                             .color(look.fg)
                             .truncate(),
@@ -344,17 +343,25 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
                 .center_y()
                 .child(
                     text(if project.enabled {
-                        "Syncs every 30 seconds while Dev Console is running and the vault is unlocked."
+                        "Syncs every 30 seconds while the vault is unlocked."
                     } else {
-                        "Automatic sync paused. Saved versions are kept."
+                        "Sync paused. Saved versions are kept."
                     })
                     .font(ts::SM)
                     .color(look.muted)
                     .wrap()
                     .grow(1.0),
                 )
-                .child(if busy { widgets::disabled(toggle) } else { toggle.on_press(|state: &mut Library| state.toggle_environment_sync()) })
-                .child(if busy { widgets::disabled(sync) } else { sync.on_press(move |state: &mut Library| state.sync_environment(root.clone())) }),
+                .child(if busy {
+                    widgets::disabled(toggle)
+                } else {
+                    toggle.on_press(|state: &mut Library| state.toggle_environment_sync())
+                })
+                .child(if busy {
+                    widgets::disabled(sync)
+                } else {
+                    sync.on_press(move |state: &mut Library| state.sync_environment(root.clone()))
+                }),
         );
     }
     if let Some(error) = &panel.error {
@@ -376,7 +383,7 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
     let files = panel.files();
     if panel.project().is_some() && files.is_empty() {
         body.push(
-            text("No environment files found yet. Sync will pick them up when they appear.")
+            text("No .env files here yet. They are picked up when they appear.")
                 .key("environment-empty")
                 .font(ts::SM)
                 .color(look.muted)
@@ -440,9 +447,9 @@ pub fn view(_state: &Library, panel: &Environment, look: &Look) -> El {
         body.push(section);
     }
     body.push(
-        text("Deleting or losing a project file keeps its saved versions here. Use Copy to recover it. These snapshots stay on this machine and are included in encrypted Dev Console backups.")
+        text("Versions stay here even if the file is deleted, and are part of your encrypted backups.")
             .font(ts::SM)
-            .color(look.muted)
+            .color(look.dim)
             .wrap(),
     );
     dialogs::shell(

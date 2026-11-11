@@ -1,6 +1,6 @@
 # Dev Console migration from Tauri to Rune
 
-Status: planned, not implemented.
+Status: milestones 1 to 5 are implemented. Releases are built from the native shell. Milestone 6, removing the Svelte frontend and the Tauri tree, is not done. A real update from an installed Tauri build to the first native release is still to be confirmed on the first release that ships it.
 
 ## 1. Target architecture and scope
 

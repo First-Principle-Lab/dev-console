@@ -27,7 +27,7 @@ fn the_first_result_is_selected_and_labelled_for_assistive_tech() {
         finder.label_of("finder-input").as_deref(),
         Some("Search commands and secrets")
     );
-    assert_eq!(finder.text_of("finder-count").as_deref(), Some("2"));
+    assert_eq!(finder.text_of("finder-count").as_deref(), Some("2 results"));
 }
 
 #[test]
@@ -217,8 +217,13 @@ fn a_detected_project_shows_a_chip_resets_the_selection_and_ctrl_p_ignores_it() 
 fn the_footer_names_the_bindings_the_field_routes() {
     let profile = Profile::new("finder-footer");
     let finder = profile.finder();
-    for words in ["select", "complete", "copy", "details", "dismiss"] {
+    // The three bindings a person has to be told about. Arrows and Escape are routed too, and
+    // are left out on purpose: every list and every palette already works that way.
+    for words in ["Complete", "Details", "Copy"] {
         assert!(finder.shows(words), "footer is missing {words}");
+    }
+    for words in ["select", "dismiss"] {
+        assert!(!finder.shows(words), "footer spells out {words}");
     }
 }
 

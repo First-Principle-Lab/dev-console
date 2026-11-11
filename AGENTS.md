@@ -38,6 +38,12 @@ git switch -c feat/<name> origin/dev
 
 You don't edit version numbers by hand. The `build` job picks the next `v0.0.N` tag and stamps it into `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `Cargo.lock`, and the root workspace's `Cargo.toml` (`[workspace.package] version`, which the `crates/*` members inherit) and root `Cargo.lock`, at build time (`scripts/set-release-version.py`). The repo files stay at their committed value. `dev-console-core` stamps that version into the sealed-backup header, so both trees must carry the same number.
 
+## Release build
+
+A release ships the native Rune shell in `crates/dev-console-desktop`, not the Tauri app. The Svelte frontend and `src-tauri` stay in the tree, with their checks, until the last milestone of `docs/plans/rune-migration.md` removes them. A change the owner should see in a release goes in `crates/`.
+
+The `build` job runs the same steps on every push: `cargo build --release --locked -p dev-console-desktop`, `scripts/build-appimage.sh`, then `scripts/smoke-native-cli.sh` against the image. On `main` it also signs the image with `cargo run -p dev-console-release` and verifies the signature against `crates/dev-console-desktop/update-key.pub`. Installed clients pin that key, so never change the key, the `latest.json` shape, the asset names or the signature's `version:` field without a migration for them. `docs/packaging/packaging.md` has the details.
+
 ## Local checks
 
 Run these before pushing to `dev`:
@@ -48,6 +54,9 @@ bun run check        # svelte-check
 bun run lint         # eslint
 bun run test         # vitest unit tests
 bun run test:e2e     # builds the frontend, then runs Playwright
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked   # the native shell, its scripted UI tests and the release signer
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --locked

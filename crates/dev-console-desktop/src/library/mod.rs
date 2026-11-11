@@ -12,7 +12,7 @@ mod editor;
 mod environment;
 mod history;
 mod import;
-mod settings;
+pub mod settings;
 mod view;
 
 use std::collections::BTreeSet;
@@ -40,13 +40,18 @@ use crate::hub::{message, Exec, Hub};
 
 /// The width at and under which the Library stacks its panes (`max-width: 900px`).
 pub const NARROW: f32 = 900.0;
+/// How a status that reports success begins. These are drawn as confirmations and leave sooner.
+pub const STATUS_CONFIRMATIONS: [&str; 5] = ["Copied", "Saved", "Deleted", "Launched", "Imported"];
 
+pub const UNSAVED_ESCAPE: &str = "This entry has unsaved edits. Save, or Cancel to discard them.";
 pub const BUSY_EDIT: &str = "Save or discard the open edit first.";
 
 static NEW_ENTRY: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+n").expect("valid chord"));
 static SAVE: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+s").expect("valid chord"));
 static COMMANDS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+1").expect("valid chord"));
 static SECRETS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+2").expect("valid chord"));
+static FILTER: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+f").expect("valid chord"));
+static EDIT: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+e").expect("valid chord"));
 
 /// The command-output dialog's state.
 #[derive(Debug, Clone)]
@@ -73,12 +78,16 @@ pub struct Library {
     hub: Hub,
     exec: Exec<Library>,
     pub theme: String,
+    pub updates: crate::updater::State,
     pub app: Option<AppStateInfo>,
     pub vault: Option<VaultState>,
     pub tab: Kind,
     pub query: TextEdit,
     pub entries: Vec<EntryMeta>,
     pub selected_id: Option<String>,
+    pub selected_suggestion: Option<String>,
+    pub history_expanded: bool,
+    pub entry_options_open: bool,
     pub details: Option<EntryDetails>,
     /// A secret's value is on screen. Hiding it drops the plaintext, not just the mask.
     pub revealed: bool,
@@ -99,8 +108,12 @@ pub struct Library {
     /// The unsaved-changes prompt raised by a close request.
     pub pending_close: bool,
     /// Project groups the reader opened.
-    pub expanded: BTreeSet<String>,
+    /// Project groups the person folded shut. Groups start open: a list you have to unfold
+    /// before it shows anything is a list that hides the selection.
+    pub collapsed: BTreeSet<String>,
     pub narrow: bool,
+    pub sidebar_width: f32,
+    window_width: f32,
     pub authenticating: bool,
     pub suggestions: Vec<Suggestion>,
     pub suggestions_busy: bool,
@@ -115,6 +128,8 @@ pub struct Library {
     details_serial: u64,
     sensitive_serial: u64,
     settings_serial: u64,
+    /// The status the toast is showing and the clock time it leaves at.
+    status_shown: Option<(String, f64)>,
 }
 
 impl Library {
@@ -122,6 +137,7 @@ impl Library {
         let app = hub.library.app_state();
         let mut library = Library {
             theme: hub.library.get_theme(),
+            updates: crate::updater::State::default(),
             vault: Some(app.vault.clone()),
             app: Some(app),
             hub,
@@ -130,6 +146,9 @@ impl Library {
             query: TextEdit::new(String::new()),
             entries: Vec::new(),
             selected_id: None,
+            selected_suggestion: None,
+            history_expanded: false,
+            entry_options_open: false,
             details: None,
             revealed: false,
             loading: true,
@@ -147,8 +166,10 @@ impl Library {
             copied_stream: None,
             output_copy_error: None,
             pending_close: false,
-            expanded: BTreeSet::new(),
+            collapsed: BTreeSet::new(),
             narrow: false,
+            sidebar_width: crate::theme::size::PANE_LIST,
+            window_width: 1040.0,
             authenticating: false,
             suggestions: Vec::new(),
             suggestions_busy: false,
@@ -162,7 +183,9 @@ impl Library {
             details_serial: 0,
             sensitive_serial: 0,
             settings_serial: 0,
+            status_shown: None,
         };
+        library.check_updates_if_due();
         library.load_suggestions();
         library.load_list();
         library
@@ -250,7 +273,10 @@ impl Library {
                             .is_some_and(|id| state.entries.iter().any(|entry| &entry.id == id));
                         if state.selected_id.is_some() && !still_there {
                             state.selected_id = state.entries.first().map(|entry| entry.id.clone());
-                        } else if state.selected_id.is_none() && !state.narrow {
+                        } else if state.selected_id.is_none()
+                            && state.selected_suggestion.is_none()
+                            && !state.narrow
+                        {
                             // A narrow window opens on the list: selecting silently would drop the
                             // reader into a detail pane they did not ask for.
                             state.selected_id = state.entries.first().map(|entry| entry.id.clone());
@@ -319,6 +345,8 @@ impl Library {
             return false;
         }
         self.editing = None;
+        self.selected_suggestion = None;
+        self.entry_options_open = false;
         self.tab = next;
         self.selected_id = None;
         self.details = None;
@@ -332,6 +360,8 @@ impl Library {
             return;
         }
         self.editing = None;
+        self.selected_suggestion = None;
+        self.entry_options_open = false;
         self.selected_id = Some(id.to_owned());
         self.load_details(id.to_owned());
     }
@@ -339,6 +369,8 @@ impl Library {
     /// The narrow layout's "List" button: back from the detail pane.
     pub fn back_to_list(&mut self) {
         self.selected_id = None;
+        self.selected_suggestion = None;
+        self.entry_options_open = false;
         self.details = None;
     }
 
@@ -363,6 +395,8 @@ impl Library {
             String::new()
         };
         let mut draft = empty_draft(self.tab);
+        self.selected_suggestion = None;
+        self.entry_options_open = false;
         draft.working_directory = project_directory;
         self.selected_id = None;
         self.details = None;
@@ -458,6 +492,7 @@ impl Library {
                             editor.wipe();
                         }
                         state.revealed = false;
+                        state.selected_suggestion = None;
                         state.selected_id = Some(row.0.id.clone());
                         state.status = Some("Saved.".into());
                         state.pending_close = false;
@@ -535,7 +570,10 @@ impl Library {
                     state.status = Some(if result.excluded {
                         format!("Copied for about {seconds}s (excluded from clipboard history).")
                     } else {
-                        format!("Copied for about {seconds}s. {}", result.exclusion.detail)
+                        format!(
+                            "Copied for about {seconds}s. {}",
+                            settings::sentence(&result.exclusion.detail)
+                        )
                     });
                 }
                 Err(error) => state.status = Some(message(&error)),
@@ -784,6 +822,7 @@ impl Library {
         let was_locked = self.vault.as_ref().is_some_and(|vault| !vault.unlocked);
         self.vault = Some(vault);
         if locked {
+            self.entry_options_open = false;
             self.list_serial += 1;
             self.details_serial += 1;
             self.sensitive_serial += 1;
@@ -886,6 +925,7 @@ impl Library {
 
     /// Drops every decrypted value this window holds.
     pub fn clear_sensitive(&mut self) {
+        self.entry_options_open = false;
         self.sensitive_serial += 1;
         self.details_serial += 1;
         self.revealed = false;
@@ -938,6 +978,13 @@ impl Library {
                 state.suggestions_busy = false;
                 state.history_enabled = enabled;
                 state.suggestions = suggestions;
+                if state
+                    .selected_suggestion
+                    .as_ref()
+                    .is_some_and(|key| !state.suggestions.iter().any(|s| &s.key == key))
+                {
+                    state.selected_suggestion = None;
+                }
             },
         );
     }
@@ -957,6 +1004,8 @@ impl Library {
             return;
         };
         self.tab = Kind::Command;
+        self.entry_options_open = false;
+        self.details_serial += 1;
         self.selected_id = None;
         self.details = None;
         let mut draft = empty_draft(Kind::Command);
@@ -985,6 +1034,9 @@ impl Library {
     }
 
     pub fn dismiss_suggestion(&mut self, key: &str) {
+        if self.selected_suggestion.as_deref() == Some(key) {
+            self.selected_suggestion = None;
+        }
         // Gone immediately; the backend only ever learns the digest.
         self.suggestions.retain(|suggestion| suggestion.key != key);
         let actions = self.hub.library.clone();
@@ -1027,8 +1079,9 @@ impl Library {
 
     /// Opening a project group syncs its environment snapshot, as the web list does.
     pub fn toggle_group(&mut self, key: &str, root: &str) {
-        if !self.expanded.remove(key) {
-            self.expanded.insert(key.to_owned());
+        if !self.collapsed.remove(key) {
+            self.collapsed.insert(key.to_owned());
+        } else {
             if !root.is_empty() && self.vault.as_ref().is_some_and(|vault| vault.unlocked) {
                 let actions = self.hub.library.clone();
                 let root = root.to_owned();
@@ -1047,28 +1100,139 @@ impl Library {
         }
     }
 
+    /// The frame hook: a status is a toast, so it leaves on its own. A confirmation ("Copied",
+    /// "Saved") stays long enough to be read once; anything else stays twice as long.
+    pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        if crate::updater::target().is_some() {
+            if self
+                .updates
+                .last_check
+                .is_none_or(|time| time.elapsed() >= std::time::Duration::from_secs(900))
+            {
+                self.check_for_updates();
+            }
+            tx.wake_after(std::time::Duration::from_secs(900));
+        }
+        let Some(status) = &self.status else {
+            self.status_shown = None;
+            return false;
+        };
+        match &self.status_shown {
+            Some((shown, until)) if shown == status => {
+                if clock < *until {
+                    return false;
+                }
+                self.status = None;
+                self.status_shown = None;
+                true
+            }
+            _ => {
+                let confirmation = STATUS_CONFIRMATIONS
+                    .iter()
+                    .any(|prefix| status.starts_with(prefix));
+                // Long enough to read: a base, then time for every word past the first eight.
+                let extra = status.split_whitespace().count().saturating_sub(8) as f64 * 0.4;
+                let stay = (if confirmation { 4.0 } else { 8.0 } + extra).min(20.0);
+                self.status_shown = Some((status.clone(), clock + stay));
+                tx.wake_after(std::time::Duration::from_secs_f64(stay));
+                false
+            }
+        }
+    }
+
     pub fn filter_changed(&mut self) {
         self.load_list();
     }
 
     pub fn set_width(&mut self, width: f32) {
+        self.window_width = width;
         let narrow = width <= NARROW;
         if narrow != self.narrow {
             self.narrow = narrow;
+            if !narrow
+                && self.selected_id.is_none()
+                && self.selected_suggestion.is_none()
+                && self.editing.is_none()
+            {
+                if let Some(id) = self.entries.first().map(|entry| entry.id.clone()) {
+                    self.select(&id);
+                }
+            }
         }
     }
 
+    pub fn resize_sidebar(&mut self, width: f32) {
+        let max = crate::theme::size::PANE_LIST_MAX.min(self.window_width - 406.0);
+        self.sidebar_width = width.clamp(
+            crate::theme::size::PANE_LIST_MIN,
+            max.max(crate::theme::size::PANE_LIST_MIN),
+        );
+    }
+
+    pub fn sidebar_width(&self) -> f32 {
+        self.sidebar_width
+            .min((self.window_width - 406.0).max(crate::theme::size::PANE_LIST_MIN))
+    }
+
+    /// Whether a confirmation, a panel or the Settings sheet is over the window.
+    pub fn dialog_open(&self) -> bool {
+        self.pending_delete.is_some()
+            || self.pending_run.is_some()
+            || self.run_output.is_some()
+            || self.pending_close
+            || self.import.is_some()
+            || self.environment.is_some()
+            || self.settings.is_some()
+    }
+
+    /// Escape in the editor, from the window or from one of its fields. It leaves an editor
+    /// nothing was typed in. With edits it does nothing: a key this easy to hit must not be able
+    /// to lose them.
+    pub fn editor_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if ev.key != rune::Key::Escape
+            || ev.mods != rune::Mods::default()
+            || self.editing.is_none()
+            || self.dialog_open()
+        {
+            return false;
+        }
+        if self.draft_dirty() {
+            // Say why nothing happened, rather than leave the key looking broken.
+            self.status = Some(UNSAVED_ESCAPE.into());
+            return true;
+        }
+        tx.instant();
+        self.cancel_edit();
+        true
+    }
+
     /// The window's key router, `<svelte:window onkeydown>`.
-    pub fn route_key(&mut self, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+    pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        // A dialog owns the keyboard. Nothing behind it changes while it is up.
+        if self.dialog_open() || self.entry_options_open {
+            return false;
+        }
         if NEW_ENTRY.matches(ev) {
+            tx.instant();
             self.start_new();
+        } else if FILTER.matches(ev) {
+            // The list's filter, from anywhere in the window.
+            self.query.focused = true;
+        } else if EDIT.matches(ev) {
+            if self.editing.is_none() && self.details.is_some() {
+                tx.instant();
+                self.start_edit();
+            }
+        } else if self.editor_key(ev, tx) {
         } else if SAVE.matches(ev) {
             if self.editing.is_some() {
                 self.save_draft();
             }
         } else if COMMANDS.matches(ev) {
+            tx.instant();
             self.select_tab(Kind::Command);
         } else if SECRETS.matches(ev) {
+            tx.instant();
             self.select_tab(Kind::Secret);
         } else {
             return false;
@@ -1093,12 +1257,7 @@ impl Library {
                 self.apply_vault(vault.clone());
             }
             AppEvent::SettingsSaved(saved) => {
-                self.history_enabled = saved.history_suggestions_enabled;
-                if saved.history_suggestions_enabled {
-                    self.load_suggestions();
-                } else {
-                    self.suggestions.clear();
-                }
+                self.on_saved_settings(saved);
                 self.theme = saved.theme.clone();
             }
             AppEvent::ThemeChanged(theme) => self.theme = theme.clone(),
@@ -1107,6 +1266,8 @@ impl Library {
                 self.request_close();
             }
             AppEvent::WindowIntent(intent) => {
+                self.selected_suggestion = None;
+                self.entry_options_open = false;
                 self.tab = intent.kind;
                 if intent.action == "new-entry" {
                     self.load_list();

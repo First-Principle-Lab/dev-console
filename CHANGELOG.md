@@ -7,11 +7,33 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ### Added
 
-- Port Library, Finder, entry editing, project import, environment versions, history suggestions, and Settings to the staged Rune shell. Production continues to use Tauri while the remaining migration milestones are completed.
+- Port Library, Finder, entry editing, project import, environment versions, history suggestions, and Settings to the native Rune shell.
+- Ship the native Rune shell as the released app. The AppImage is now built from it with Cargo and pinned AppImage tooling, and is about a tenth of the size. An installed AppImage updates to it through the existing in-app updater: the signing key, signature format, endpoint and the three release assets are unchanged.
+- Add signed updates to the native shell. Settings shows **Update to x.y.z and restart** when a release is available. The update is verified before it replaces the installed AppImage, the previous image is kept beside it as `Dev-Console.AppImage.previous`, and a failed download or check leaves the installed app as it was.
+- Give the native shell the full command line: `--background`, `--finder`, `vault lock|unlock|status`, `import bitwarden`, `import project` and `history setup`, with the same exit codes and the same control socket as before.
+- Apply **Start at login** from the native shell. From an AppImage the login entry starts the installed image, and an entry left pointing at a previous AppImage mount is repaired at the next start.
 - Add native scripted UI tests over disposable encrypted profiles and a live Hyprland check with synthetic entries, repeated Finder opens, hover, keyboard copy, tray Quit, and clipboard cleanup.
+- Move through the Library list with Up, Down, Home, End and by typing a name. Ctrl+F focuses the filter, Ctrl+E edits the selected entry, and Escape leaves an editor nothing was typed in.
+- Add `cargo run -p dev-console-ui-tests --example capture`, which renders any screen of the native shell to a PNG offscreen over a synthetic profile, for design review without mapping a window.
+
+### Changed
+
+- Build the Arch package, the source install and the `.deb` from the native shell. They no longer need Bun or WebKitGTK.
+- Keep Suggested above saved commands, initially showing three compact rows with Show all. Selecting a suggestion previews its full command; Save opens a draft for review.
+- Balance the native Library list and detail panes with a resizable divider and distinct surfaces. Give saved entries consistent name/context rows, a clear selection, and full text space when row actions are hidden.
+- Compose entry details around the title, command/value, and nearby Copy and Run/Reveal actions. Keep Edit visible and move Pin and Delete into a dismissible More menu. Label Import and Environment beside the list controls and Settings beside vault status. Strengthen form labels and empty-state guidance.
+- Redesign the staged Rune shell around one sidebar and one detail pane. The Library drops its header band, tab strip and toolbar for a segmented Commands/Secrets switch, a filter and a New button above the list; project tools sit beside the list controls, while vault status and Settings sit at the foot of the sidebar. Project groups start open.
+- Cut the buttons. A list row shows a name and context: its copy and pin controls appear under the pointer or keyboard focus. The detail pane has one filled button (Copy) with Run or Reveal beside it; Edit and More sit in its header.
+- Replace content at once instead of cross-fading it. Selecting an entry, switching tabs, folding a group, opening the editor and resizing the window across the narrow layout no longer animate; Finder results replace the list as they arrive.
+- Show status as a toast over the bottom of the window that moves nothing and leaves on its own, instead of a banner that pushed the Library down and stayed. A copied command is confirmed in one sentence; a copied secret keeps the clipboard caveat.
+- Lay Settings out as grouped rows with switches, shorten its explanations, and list the keyboard shortcuts. Dialogs lose their boxed sections and say what they do in a sentence or two.
+- Use whole-point font sizes, sentence-case labels and one large title. Paths read from `~` and keep their last two folders; the full path is the tooltip.
+- Trim the Finder: the vault badge shows only when the vault is locked, the selected row loses its outline, and the footer names Tab, Ctrl+O and Enter instead of five bindings.
 
 ### Fixed
 
+- Close More when the vault locks so keyboard shortcuts keep working. Clear the selected suggestion when history suggestions are disabled so narrow windows return to the library list.
+- Center both lines vertically within suggestion highlights so the top and bottom padding match.
 - Paint native dialogs and the Settings sheet in the selected palette's shell surface instead of a raised surface, so a theme whose two shades differ (Kanagawa, Tokyo Night) no longer shows a dialog body in one colour and its footer in another. The native Settings theme list drops its `Omarchy: ` prefix and names palettes exactly as the shipped app does.
 - Reject late secret and recovery reveals after closing, cancelling, locking, switching tabs, or reopening Settings. Reload the Secrets tab after unlock and secure its editor before the first frame.
 - Keep modal footers and project actions reachable in narrow native windows, support Enter on history suggestions, and hide project import on the Secrets tab.

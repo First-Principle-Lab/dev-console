@@ -49,11 +49,13 @@ fn button_sized(
     variant: Variant,
     small: bool,
 ) -> El {
-    let (fill, ink, border) = match variant {
-        Variant::Default => (look.raised, look.fg, Some(look.line)),
-        Variant::Primary => (look.accent, look.accent_fg, None),
-        Variant::Ghost => (rune::Color::TRANSPARENT, look.muted, None),
-        Variant::Danger => (rune::Color::TRANSPARENT, look.danger, None),
+    // One filled button per view (the primary); the rest sit on the surface and only show a
+    // plate when the pointer is on them, so a row of actions reads as text, not as boxes.
+    let (fill, ink) = match variant {
+        Variant::Default => (look.fg.alpha(0.06), look.fg),
+        Variant::Primary => (look.accent, look.accent_fg),
+        Variant::Ghost => (rune::Color::TRANSPARENT, look.muted),
+        Variant::Danger => (rune::Color::TRANSPARENT, look.danger),
     };
     let height = if small {
         size::CONTROL_H_SM
@@ -67,28 +69,20 @@ fn button_sized(
         .focusable(true)
         .focus_ring(2.0, 1.0, look.focus)
         .h(height)
-        .px(if small { size::SP2 } else { size::SP3 })
+        .px(if small { size::SP2 } else { 10.0 })
         .gap(6.0)
-        .center_y()
+        .center()
         .radius(size::RADIUS)
         .fill(fill)
         .hover(look.fg.alpha(0.06))
         .press(look.fg.alpha(0.1))
         .cursor(Cursor::Pointer);
-    if let Some(border) = border {
-        button = button.border(1.0, border);
-    }
     if let Some(glyph) = glyph {
-        button = button.child(icon(glyph, 14.0).color(ink));
+        button = button.child(icon(glyph, if small { 13.0 } else { 14.0 }).color(ink));
     }
-    let font = if variant == Variant::Primary {
-        ts::STRONG
-    } else {
-        ts::BODY
-    };
     button.child(
         text(label.to_owned())
-            .font(if small { ts::SM } else { font })
+            .font(if small { ts::SM } else { ts::MEDIUM })
             .color(ink),
     )
 }
@@ -139,25 +133,27 @@ pub fn badge(look: &Look, label: &str, ink: rune::Color, fill: rune::Color) -> E
 /// `Keycap.svelte`: one key of a shortcut hint.
 pub fn keycap(look: &Look, label: &str) -> El {
     row()
-        .h(20.0)
-        .px(6.0)
-        .center_y()
+        .h(18.0)
+        .min_w(18.0)
+        .px(5.0)
+        .center()
         .radius(size::RADIUS_SM)
-        .fill(look.raised)
-        .border(1.0, look.line)
+        .fill(look.fg.alpha(0.08))
         .child(text(label.to_owned()).font(ts::XS).color(look.muted))
 }
 
 /// A shortcut hint: the keys joined by `+`, then what they do.
 pub fn hint(look: &Look, keys: &[&str], action: &str) -> El {
-    let mut chip = row().gap(4.0).center_y();
-    for (index, key) in keys.iter().enumerate() {
-        if index > 0 {
-            chip = chip.child(text("+").font(ts::XS).color(look.dim));
-        }
+    let mut chip = row().gap(3.0).center_y();
+    for key in keys {
         chip = chip.child(keycap(look, key));
     }
-    chip.child(text(action.to_owned()).font(ts::XS).color(look.dim))
+    chip.child(
+        text(action.to_owned())
+            .font(ts::XS)
+            .color(look.muted)
+            .pl(3.0),
+    )
 }
 
 /// `StatusLine.svelte`'s tones.
@@ -169,7 +165,7 @@ pub enum Tone {
     Error,
 }
 
-/// One line of feedback under the toolbar. Errors are an alert, the rest a polite status.
+/// One line of feedback. Errors are an alert, the rest a polite status.
 pub fn status_line(look: &Look, key: &'static str, tone: Tone, message: &str) -> El {
     let (ink, fill, glyph) = match tone {
         Tone::Ok => (look.ok, look.ok_soft, &icons::CHECK),
@@ -186,14 +182,14 @@ pub fn status_line(look: &Look, key: &'static str, tone: Tone, message: &str) ->
         })
         .label(message.to_owned())
         .w_full()
-        .min_h(30.0)
-        .px(size::SP3)
+        .min_h(size::CONTROL_H)
+        .px(10.0)
         .py(6.0)
         .gap(size::SP2)
         .center_y()
         .radius(size::RADIUS)
         .fill(fill)
-        .child(icon(glyph, 14.0).color(ink))
+        .child(icon(glyph, 13.0).color(ink))
         .child(
             text(message.to_owned())
                 .font(ts::SM)
@@ -201,6 +197,57 @@ pub fn status_line(look: &Look, key: &'static str, tone: Tone, message: &str) ->
                 .wrap()
                 .grow(1.0),
         )
+}
+
+/// Feedback that floats over the bottom of the window instead of pushing the layout down: a copy
+/// or a save must not move what the pointer is on.
+///
+/// `spoken` is the whole message for assistive technology when `message` is a shortened form.
+pub fn toast(look: &Look, key: &'static str, tone: Tone, message: &str, spoken: &str) -> El {
+    let (ink, glyph) = match tone {
+        Tone::Ok => (look.ok, &icons::CHECK),
+        Tone::Info => (look.muted, &icons::INBOX),
+        Tone::Warn => (look.warn, &icons::ALERT),
+        Tone::Error => (look.danger, &icons::ALERT),
+    };
+    let pill = row()
+        .key(key)
+        .role(if tone == Tone::Error {
+            "alert"
+        } else {
+            "status"
+        })
+        .label(spoken.to_owned())
+        .max_w(480.0)
+        .shrink()
+        .min_h(32.0)
+        .px(size::SP3)
+        .py(size::SP2)
+        .gap(size::SP2)
+        .center_y()
+        .radius(size::RADIUS_LG)
+        .fill(look.shell)
+        .border(1.0, look.line_shell)
+        .shadow(8.0, 24.0, rune::Color::BLACK.alpha(0.3))
+        .child(icon(glyph, 13.0).color(ink))
+        .child(
+            text(message.to_owned())
+                .font(ts::SM)
+                .color(look.fg)
+                .wrap()
+                .min_w(0.0)
+                .shrink(),
+        );
+    col()
+        .key(format!("{key}-layer"))
+        .absolute(0.0, 0.0)
+        .w_full()
+        .h_full()
+        .padding(size::SP4)
+        // Not `inert`: that would hide the message from assistive technology too. Nothing in
+        // the layer takes a press, so presses reach what is under it.
+        .child(el().grow(1.0))
+        .child(row().w_full().center().child(pill))
 }
 
 /// `EmptyState.svelte`: a centred tile, a title, a hint and any actions.
@@ -223,23 +270,15 @@ pub fn empty_state(
         .center()
         .gap(size::SP2)
         .px(size::SP5)
-        .child(
-            row()
-                .w(size::TILE_LG + 8.0)
-                .h(size::TILE_LG + 8.0)
-                .center()
-                .radius(size::RADIUS_LG)
-                .fill(look.raised)
-                .border(1.0, look.line)
-                .child(icon(glyph, 18.0).color(look.muted)),
-        )
-        .child(text(title.to_owned()).font(ts::LG).color(look.fg))
+        .child(icon(glyph, 22.0).color(look.dim))
+        .child(el().h(size::SP1))
+        .child(text(title.to_owned()).font(ts::STRONG).color(look.fg))
         .child(
             text(hint_text.to_owned())
                 .font(ts::SM)
                 .color(look.muted)
                 .wrap()
-                .max_w(380.0)
+                .max_w(320.0)
                 .align(rune::Align::Center),
         )
         .child(el().h(size::SP1))
@@ -262,7 +301,27 @@ pub fn kind_tile(look: &Look, secret: bool, side: f32) -> El {
         .child(icon(glyph, side * 0.55).color(ink))
 }
 
-/// An uppercase section heading (`h3` in the details pane).
+/// A field or section label: sentence case, quiet.
 pub fn section_label(look: &Look, label: &str) -> El {
-    text(label.to_uppercase()).font(ts::LABEL).color(look.muted)
+    text(label.to_owned()).font(ts::PROJECT).color(look.fg)
+}
+
+/// A path as a person reads it: the home folder as `~`, and a long one cut in the middle so the
+/// last two folders - the ones that say where you are - survive.
+pub fn short_path(path: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let shown = match path.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_owned(),
+    };
+    if shown.chars().count() <= 44 {
+        return shown;
+    }
+    let parts: Vec<&str> = shown.split('/').filter(|part| !part.is_empty()).collect();
+    match parts.as_slice() {
+        [.., parent, last] => format!("…/{parent}/{last}"),
+        _ => shown,
+    }
 }

@@ -8,6 +8,7 @@ resolver = "3"
 members = [
     "crates/dev-console-core",
     "crates/dev-console-desktop",
+    "crates/dev-console-release",
     "crates/dev-console-ui-tests",
 ]
 exclude = ["src-tauri"]

@@ -82,6 +82,9 @@ pub fn isolate() -> &'static Isolation {
         );
         std::env::set_var("DEV_CONSOLE_RUNTIME_DIR", home.path().join("runtime"));
         std::env::remove_var("HISTFILE");
+        // A terminal started from an AppImage exports this, and the Library checks for updates
+        // over the network when it is set.
+        std::env::remove_var("APPIMAGE");
         std::env::set_var("WAYLAND_DISPLAY", "dev-console-test");
         std::env::remove_var("DISPLAY");
         Isolation {
@@ -247,6 +250,10 @@ impl<S: 'static> Stage<S> {
         let Some((x, y)) = self.centre_of(key) else {
             return false;
         };
+        // A pointer arrives before it presses. Controls a row only shows under the pointer
+        // (its copy and pin) are not there to be pressed until it has.
+        self.runtime.pointer_move(x, y);
+        self.settle();
         self.runtime.pointer_down(x, y);
         self.runtime.pointer_up(x, y);
         self.settle();
@@ -300,6 +307,64 @@ impl<S: 'static> Stage<S> {
 
     pub fn shows(&self, needle: &str) -> bool {
         self.strings().iter().any(|shown| shown.contains(needle))
+    }
+
+    /// The controls a person can see and press right now: focusable, drawn (not faded out by a
+    /// hover group), inside the window and not under a modal. This is what "too many buttons"
+    /// counts, so the budgets in `tests/revamp.rs` are stated in it.
+    pub fn visible_controls(&self) -> Vec<String> {
+        self.runtime
+            .elements()
+            .into_iter()
+            .filter(|element| {
+                element.focusable
+                    && !element.inert
+                    && !element.exiting
+                    && element.opacity > 0.05
+                    && element.visible[2] > 0.0
+                    && element.visible[3] > 0.0
+            })
+            .map(|element| element.key.unwrap_or(element.path))
+            .collect()
+    }
+
+    /// Whether the element with this key draws words (a labelled button) rather than only a glyph.
+    pub fn text_inside(&self, key: &str) -> bool {
+        let elements = self.runtime.elements();
+        let Some(owner) = elements
+            .iter()
+            .find(|element| element.key.as_deref() == Some(key))
+        else {
+            return false;
+        };
+        let prefix = format!("{}/", owner.path);
+        elements
+            .iter()
+            .any(|element| element.path.starts_with(&prefix) && element.text.is_some())
+    }
+
+    /// Moves the pointer onto an element without pressing, as a hand on the way to a click does.
+    pub fn hover(&mut self, key: &str) -> bool {
+        let Some((x, y)) = self.centre_of(key) else {
+            return false;
+        };
+        self.runtime.pointer_move(x, y);
+        self.settle();
+        true
+    }
+
+    /// Drags a native control in window points, including intermediate frames.
+    pub fn drag(&mut self, key: &str, dx: f32, dy: f32) -> bool {
+        let Some((x, y)) = self.centre_of(key) else {
+            return false;
+        };
+        self.runtime.pointer_move(x, y);
+        self.runtime.pointer_down(x, y);
+        self.runtime.pointer_move(x + dx, y + dy);
+        self.runtime.frame(1.0 / 60.0);
+        self.runtime.pointer_up(x + dx, y + dy);
+        self.settle();
+        true
     }
 
     /// Keys of the elements whose key starts with `prefix`, in tree order.

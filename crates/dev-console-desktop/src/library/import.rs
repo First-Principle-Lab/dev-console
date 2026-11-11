@@ -273,13 +273,14 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
         .on_submit(|state: &mut Library, _| state.scan_project())
         .build(kit)
         .key("project-path");
-    let browse = widgets::button(
+    let browse = widgets::icon_button(
         look,
         "project-browse",
         "Browse…",
-        Some(&icons::FOLDER),
-        Variant::Default,
-    );
+        &icons::FOLDER,
+        look.muted,
+    )
+    .help("Choose a folder");
     let scan = widgets::button(
         look,
         "project-scan",
@@ -288,30 +289,26 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
         } else {
             "Rescan"
         },
-        Some(&icons::SEARCH),
+        None,
         Variant::Default,
     );
-    let mut body = vec![col()
-        .w_full()
-        .gap(6.0)
-        .child(widgets::section_label(look, "Project folder"))
-        .child(
-            row()
-                .w_full()
-                .gap(size::SP2)
-                .center_y()
-                .child(el().grow(1.0).min_w(0.0).child(field))
-                .child(if blocked {
-                    widgets::disabled(browse)
-                } else {
-                    browse.on_press_tx(|state: &mut Library, tx| state.browse_project(tx))
-                })
-                .child(if blocked {
-                    widgets::disabled(scan)
-                } else {
-                    scan.on_press(|state: &mut Library| state.scan_project())
-                }),
-        )];
+    let mut body = vec![col().w_full().child(
+        row()
+            .w_full()
+            .gap(size::SP2)
+            .center_y()
+            .child(el().grow(1.0).min_w(0.0).child(field))
+            .child(if blocked {
+                widgets::disabled(browse)
+            } else {
+                browse.on_press_tx(|state: &mut Library, tx| state.browse_project(tx))
+            })
+            .child(if blocked {
+                widgets::disabled(scan)
+            } else {
+                scan.on_press(|state: &mut Library| state.scan_project())
+            }),
+    )];
     if let Some(error) = &panel.error {
         body.push(widgets::status_line(
             look,
@@ -330,7 +327,7 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
     match &panel.scan {
         None => body.push(
             text(
-                "Dev Console reads the task definitions a folder already publishes — package.json scripts, Makefile targets, justfile recipes and Docker Compose services — and offers them as commands that run in that folder. Nothing inside the folder is executed by scanning or by importing.",
+                "Finds package.json scripts, Makefile targets, justfile recipes and Docker Compose services. Nothing inside the folder is executed by scanning or by importing.",
             )
             .font(ts::SM)
             .color(look.muted)
@@ -343,11 +340,11 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
                     .gap(size::SP2)
                     .center_y()
                     .child(text(scan.project.clone()).font(ts::STRONG).color(look.fg))
-                    .child(text(scan.dir.clone()).font(ts::MONO_SM).color(look.muted).truncate()),
+                    .child(text(widgets::short_path(&scan.dir)).font(ts::MONO_SM).color(look.muted).truncate()),
             );
             if scan.candidates.is_empty() {
                 body.push(
-                    text("No tasks found. Dev Console looks for package.json scripts, Makefile targets, justfile recipes and Docker Compose services in this folder itself.")
+                    text("No tasks found. Only package.json, Makefile, justfile and Docker Compose files at the top of this folder are read.")
                         .key("project-empty")
                         .font(ts::SM)
                         .color(look.muted)
@@ -427,7 +424,7 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
                                 words
                             });
                         if candidate.already_imported {
-                            line = line.opacity(0.7).child(widgets::badge(look, "Already saved", look.muted, look.panel).key(format!("project-already-saved-{}", candidate.name)));
+                            line = line.opacity(0.7).child(widgets::badge(look, "Already saved", look.muted, look.fg.alpha(0.06)).key(format!("project-already-saved-{}", candidate.name)));
                         } else {
                             line = line
                                 .focusable(true)
@@ -470,7 +467,7 @@ pub fn view(panel: &ProjectImport, look: &Look, kit: &Kit) -> El {
     dialogs::shell(
         look,
         "project-import-dialog",
-        "Import tasks from a project",
+        "Import from project",
         true,
         body,
         vec![

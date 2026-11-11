@@ -31,8 +31,8 @@ for name, pattern, expected in (
     ("Cargo.toml", r'(?m)^(version = ")[^"]+(".*)$', 1),
     (
         "Cargo.lock",
-        r'(?m)^(name = "dev-console-(?:core|desktop|ui-tests)"\nversion = ")[^"]+(".*)$',
-        3,
+        r'(?m)^(name = "dev-console-(?:core|desktop|release|ui-tests)"\nversion = ")[^"]+(".*)$',
+        4,
     ),
 ):
     path = root / name

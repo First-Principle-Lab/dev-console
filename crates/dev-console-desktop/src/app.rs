@@ -59,6 +59,7 @@ pub fn library_spec() -> rune::AppSpec<Library> {
     rune::AppSpec::<Library> {
         min_size: Some(LIBRARY_MIN_SIZE),
         on_key: Some(Library::route_key),
+        poll: Some(Library::poll),
         ..rune::AppSpec::new(
             LIBRARY_TITLE,
             LIBRARY_SIZE,
@@ -149,7 +150,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     start_background_work(&state);
-    let hub = Hub::new(state, env!("CARGO_PKG_VERSION"));
+    let hub = Hub::new(state.clone(), env!("CARGO_PKG_VERSION"));
 
     rune::set_app_id(crate::APP_ID);
 
@@ -161,6 +162,11 @@ pub fn run(args: &[String]) -> i32 {
         .init(move || Library::new(library_hub, Exec::Thread(library_exec)))
         .window_options(library_options())
         .on_close(library_closed)
+        .on_focus(|library, focused, _| {
+            if focused {
+                library.check_updates_if_due();
+            }
+        })
         .windowless()
         .keep_running();
 
@@ -194,6 +200,7 @@ pub fn run(args: &[String]) -> i32 {
         tray: tray_refresh,
     });
 
+    let owns_control = crate::control::serve(&hub, state.clone());
     if let Some(intent) = intent {
         open(&hub, intent);
     }
@@ -209,6 +216,38 @@ pub fn run(args: &[String]) -> i32 {
 
     let outcome = library_app.try_run();
     drop(tray_handle);
+    // Another build of the app may have been listening first; its socket is not ours to remove.
+    if owns_control {
+        crate::control::remove_socket();
+    }
+    if outcome.is_ok()
+        && hub
+            .restart_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        let executable = std::env::var_os("APPIMAGE")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_exe().ok());
+        // The wakeup thread still answers on the instance socket until this process is gone.
+        // Unlink it first, so the replacement starts as the resident instance and does not hand
+        // its launch to a process that is about to exit.
+        std::fs::remove_file(&socket).ok();
+        drop(_lock);
+        if let Some(executable) = executable {
+            let mut command = std::process::Command::new(executable);
+            command.arg("--library");
+            if std::env::var_os("APPIMAGE").is_some() {
+                for key in ["APPIMAGE", "APPDIR", "ARGV0", "OWD", "LD_LIBRARY_PATH"] {
+                    command.env_remove(key);
+                }
+            }
+            if command.spawn().is_ok() {
+                return EXIT_OK;
+            }
+        }
+        eprintln!("dev-console: restart failed; the previous AppImage is retained beside the installed image");
+        return EXIT_ERROR;
+    }
     match outcome {
         Ok(()) => EXIT_OK,
         Err(message) => {
@@ -236,6 +275,14 @@ fn start_background_work(state: &Arc<AppState>) {
     dev_console_core::environment::spawn_sync_worker(Arc::clone(state));
     if dev_console_core::project_history::refresh_installed_zsh_hook().is_err() {
         eprintln!("dev-console: could not refresh the installed shell hook");
+    }
+    // The Tauri build wrote its login entry with the AppImage's temporary mount path, which is gone
+    // after a reboot. Rewriting it at every start repairs an upgraded install without a visit to
+    // Settings, and keeps the entry on the installed image if that ever moves.
+    if state.settings.get().autostart {
+        if let Err(error) = dev_console_core::autostart::apply(true) {
+            eprintln!("dev-console: could not refresh the login entry ({error})");
+        }
     }
 }
 
