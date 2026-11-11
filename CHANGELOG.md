@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.13 — 2026-11-12
+
 ### Added
 
 - Port Library, Finder, entry editing, project import, environment versions, history suggestions, and Settings to the native Rune shell.
