@@ -114,8 +114,11 @@ in `docs/design/raycast-ui-research-2026-11-02.md`; the shipped material is an o
 | Where | Keys |
 | --- | --- |
 | Desktop | `Super+F` Finder (configured in your compositor, see below) |
-| Library | `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+S` save, `Esc` dismiss dialogs |
+| Library (defaults) | `Ctrl+K` search, `Ctrl+1`/`Ctrl+2` tabs, `Ctrl+N` new, `Ctrl+E` edit, `Ctrl+S` save, `Esc` dismiss dialogs |
 | Finder | `↑`/`↓` select, `Tab` complete, `Enter` copy, `Ctrl+O` open in library, `Ctrl+P` ignore the detected project, `Esc` close |
+
+Library shortcuts can be changed in the native app under **Settings → Keyboard**.
+They are stored in the settings file and validated for conflicts before saving.
 
 ## Desktop integration (Hyprland and other Wayland compositors)
 

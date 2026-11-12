@@ -5,6 +5,13 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.15 — 2026-11-12
+
+### Added
+
+- Customize Library shortcuts in Settings → Keyboard, with conflict validation, saved preferences and a reset to defaults. Ctrl+K now focuses search by default.
+- Add a CLI Proxy usage tab to the native Library and web companion, laid out like T3 Code's Usage page: Cost, Tokens and Limits; a period selector; the total beside a daily or hourly chart with a hover tooltip; totals; a cost or token share by type; a model or day breakdown; and Codex limit windows with pace and reset time for the signed-in account, refreshed read-only. Cost and tokens count only the Codex sessions run through the proxy.
+
 ## 0.0.14 — 2026-11-12
 
 ### Fixed

@@ -25,6 +25,8 @@ impl SettingsStore {
         {
             settings.terminal = execution::recommended_terminal();
         }
+        settings.keybindings = crate::keybindings::validated(&settings.keybindings)
+            .unwrap_or_else(|_| crate::keybindings::defaults());
         Ok(SettingsStore {
             path,
             cached: Mutex::new(settings),
@@ -37,6 +39,7 @@ impl SettingsStore {
 
     pub fn save(&self, settings: Settings) -> AppResult<Settings> {
         let mut settings = settings;
+        settings.keybindings = crate::keybindings::validated(&settings.keybindings)?;
         settings.clipboard_expiry_seconds = settings.clipboard_expiry_seconds.clamp(5, 3600);
         if settings.terminal.is_empty() {
             settings.terminal = execution::recommended_terminal();
@@ -120,6 +123,47 @@ fn file_name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcuts_migrate_persist_and_reject_conflicts_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"theme":"dark","clipboardExpirySeconds":45}"#).unwrap();
+        let store = SettingsStore::load(path.clone()).unwrap();
+        assert_eq!(store.get().keybindings["search"], "ctrl+k");
+        assert_eq!(store.get().theme, "dark");
+        let mut settings = store.get();
+        settings
+            .keybindings
+            .insert("search".into(), "Shift+CTRL+J".into());
+        store.save(settings).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        assert_eq!(
+            SettingsStore::load(path.clone()).unwrap().get().keybindings["search"],
+            "ctrl+shift+j"
+        );
+        let mut conflict = store.get();
+        conflict
+            .keybindings
+            .insert("newEntry".into(), "CTRL+SHIFT+J".into());
+        assert!(store.save(conflict).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        assert_eq!(store.get().keybindings["newEntry"], "ctrl+n");
+    }
+
+    #[test]
+    fn malformed_shortcuts_fall_back_without_losing_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"theme":"dark","keybindings":{"search":"invalid"}}"#,
+        )
+        .unwrap();
+        let settings = SettingsStore::load(path).unwrap().get();
+        assert_eq!(settings.theme, "dark");
+        assert_eq!(settings.keybindings, crate::keybindings::defaults());
+    }
 
     #[test]
     fn missing_legacy_terminal_uses_an_installed_one() {

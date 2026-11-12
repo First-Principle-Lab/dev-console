@@ -11,6 +11,7 @@
   import Dialog from '../components/Dialog.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ProjectImport from '../components/ProjectImport.svelte';
+  import CliProxyUsage from '../components/cliproxy/CliProxyUsage.svelte';
   import Icon from '../components/Icon.svelte';
   import Keycap from '../components/Keycap.svelte';
   import StatusLine from '../components/StatusLine.svelte';
@@ -37,6 +38,9 @@
   let app = $state<AppStateInfo | null>(null);
   let vault = $state<VaultState | null>(null);
   let tab = $state<Kind>('command');
+  /** The CLI Proxy tab is a usage dashboard, not an entry list, so it sits beside
+   * the Kind tabs without extending the backend enum. */
+  let cliproxyActive = $state(false);
   let query = $state('');
   let entries = $state<EntryMeta[]>([]);
   let selectedId = $state<string | null>(null);
@@ -163,12 +167,18 @@
     }
   }
 
-  function selectTab(next: Kind): void {
-    if (tab === next) return;
-    if (mode === 'edit' && draftDirty) {
+  function selectTab(next: Kind | 'cliproxy'): void {
+    const current: Kind | 'cliproxy' = cliproxyActive ? 'cliproxy' : tab;
+    if (next !== current && mode === 'edit' && draftDirty) {
       status = 'Save or discard the open edit first.';
       return;
     }
+    if (next === 'cliproxy') {
+      cliproxyActive = true;
+      return;
+    }
+    cliproxyActive = false;
+    if (tab === next) return;
     tab = next;
     selectedId = null;
     details = null;
@@ -520,6 +530,9 @@
     } else if (event.ctrlKey && event.key === '2') {
       event.preventDefault();
       selectTab('secret');
+    } else if (event.ctrlKey && event.key === '3') {
+      event.preventDefault();
+      selectTab('cliproxy');
     } else if (event.key === 'Escape' && pendingDelete) {
       pendingDelete = null;
     } else if (event.key === 'Escape' && pendingRun) {
@@ -562,12 +575,16 @@
           count: secretMetadataHidden ? null : counts.secret,
           icon: 'secret',
           testId: 'tab-secrets'
-        }
+        },
+        { id: 'cliproxy', label: 'CLI Proxy', count: null, badge: null, icon: 'history', testId: 'tab-cliproxy' }
       ]}
-      active={tab}
-      onSelect={(id) => selectTab(id === 'secret' ? 'secret' : 'command')}
+      active={cliproxyActive ? 'cliproxy' : tab}
+      onSelect={(id) => selectTab(id === 'cliproxy' ? 'cliproxy' : id === 'secret' ? 'secret' : 'command')}
     />
     <div class="tools">
+      {#if cliproxyActive}
+        <!-- The dashboard refreshes itself; list tools do not apply here. -->
+      {:else}
       <div class="search">
         <span class="search-icon" aria-hidden="true"><Icon name="search" size={13} /></span>
         <input
@@ -590,15 +607,23 @@
         data-testid="import-project"
         >Import from project</Button
       >
+      {/if}
     </div>
   </div>
 
-  {#if listError && !(secretMetadataHidden && /locked/i.test(listError))}
+  {#if !cliproxyActive && listError && !(secretMetadataHidden && /locked/i.test(listError))}
     <StatusLine tone="error" message={listError} />
-  {:else if status}
+  {:else if !cliproxyActive && status}
     <StatusLine tone={status.startsWith('Copied') || status.startsWith('Saved') || status.startsWith('Deleted') || status.startsWith('Launched') ? 'ok' : 'info'} message={status} />
   {/if}
 
+  {#if cliproxyActive}
+    <main class="panes" id="entry-pane">
+      <section id="cliproxy-pane" class="cliproxy-pane" aria-label="CLI Proxy usage">
+        <CliProxyUsage />
+      </section>
+    </main>
+  {:else}
   <main class="panes" class:stacked={narrow} id="entry-pane">
     {#if !narrow || (mode === 'view' && !selectedId)}
       <section class="list-pane" aria-label="Entry list">
@@ -709,6 +734,7 @@
     </section>
     {/if}
   </main>
+  {/if}
 </div>
 
 {#if pendingDelete}
@@ -902,6 +928,14 @@
     display: grid;
     grid-template-columns: var(--pane-list) minmax(var(--pane-detail-min), 1fr);
     min-height: 0;
+  }
+  /* the CLI Proxy dashboard takes the whole pane instead of the list/detail split */
+  .cliproxy-pane {
+    grid-column: 1 / -1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--bg-panel);
   }
   .panes.stacked {
     grid-template-columns: 1fr;

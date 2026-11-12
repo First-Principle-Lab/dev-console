@@ -13,6 +13,7 @@ mod environment;
 mod history;
 mod import;
 pub mod settings;
+pub mod usage;
 mod view;
 
 use std::collections::BTreeSet;
@@ -28,7 +29,6 @@ use dev_console_core::services::{AppEvent, Effects};
 use dev_console_core::validation::{empty_draft, validate_editor_draft};
 use dev_console_core::Surface;
 use rune::{Chord, KeyEvent, TextEdit, Tx};
-use std::sync::LazyLock;
 
 pub use editor::Editor;
 pub use environment::Environment;
@@ -45,13 +45,6 @@ pub const STATUS_CONFIRMATIONS: [&str; 5] = ["Copied", "Saved", "Deleted", "Laun
 
 pub const UNSAVED_ESCAPE: &str = "This entry has unsaved edits. Save, or Cancel to discard them.";
 pub const BUSY_EDIT: &str = "Save or discard the open edit first.";
-
-static NEW_ENTRY: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+n").expect("valid chord"));
-static SAVE: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+s").expect("valid chord"));
-static COMMANDS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+1").expect("valid chord"));
-static SECRETS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+2").expect("valid chord"));
-static FILTER: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+f").expect("valid chord"));
-static EDIT: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+e").expect("valid chord"));
 
 /// The command-output dialog's state.
 #[derive(Debug, Clone)]
@@ -78,10 +71,12 @@ pub struct Library {
     hub: Hub,
     exec: Exec<Library>,
     pub theme: String,
+    pub keybindings: std::collections::BTreeMap<String, String>,
     pub updates: crate::updater::State,
     pub app: Option<AppStateInfo>,
     pub vault: Option<VaultState>,
     pub tab: Kind,
+    pub usage: usage::Usage,
     pub query: TextEdit,
     pub entries: Vec<EntryMeta>,
     pub selected_id: Option<String>,
@@ -137,12 +132,14 @@ impl Library {
         let app = hub.library.app_state();
         let mut library = Library {
             theme: hub.library.get_theme(),
+            keybindings: hub.library.get_settings().keybindings,
             updates: crate::updater::State::default(),
             vault: Some(app.vault.clone()),
             app: Some(app),
             hub,
             exec,
             tab: Kind::Command,
+            usage: usage::Usage::default(),
             query: TextEdit::new(String::new()),
             entries: Vec::new(),
             selected_id: None,
@@ -337,7 +334,7 @@ impl Library {
 
     /// Ctrl+1 / Ctrl+2 and the tab strip. Refused while an unsaved edit is open.
     pub fn select_tab(&mut self, next: Kind) -> bool {
-        if self.tab == next {
+        if self.tab == next && !self.usage.open {
             return false;
         }
         if self.draft_dirty() {
@@ -347,6 +344,7 @@ impl Library {
         self.editing = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
+        self.usage.open = false;
         self.tab = next;
         self.selected_id = None;
         self.details = None;
@@ -362,12 +360,14 @@ impl Library {
         self.editing = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
+        self.usage.open = false;
         self.selected_id = Some(id.to_owned());
         self.load_details(id.to_owned());
     }
 
     /// The narrow layout's "List" button: back from the detail pane.
     pub fn back_to_list(&mut self) {
+        self.usage.open = false;
         self.selected_id = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
@@ -376,6 +376,7 @@ impl Library {
 
     /// Ctrl+N and New: an empty draft on the current tab, in the selected command's project.
     pub fn start_new(&mut self) {
+        self.usage.open = false;
         if self.draft_dirty() {
             self.status = Some(BUSY_EDIT.into());
             return;
@@ -947,6 +948,7 @@ impl Library {
             return;
         }
         self.editing = None;
+        self.usage.open = false;
         self.tab = kind;
         match entry_id {
             Some(id) => {
@@ -1206,34 +1208,62 @@ impl Library {
         true
     }
 
+    pub fn shortcut_label(&self, action: &str) -> String {
+        self.keybindings
+            .get(action)
+            .map(|key| {
+                key.split('+')
+                    .map(|part| {
+                        let mut chars = part.chars();
+                        chars
+                            .next()
+                            .map(|c| c.to_uppercase().to_string() + chars.as_str())
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+")
+            })
+            .unwrap_or_default()
+    }
+
+    fn shortcut_matches(&self, action: &str, event: &KeyEvent, tx: &Tx) -> bool {
+        self.keybindings
+            .get(action)
+            .and_then(|key| Chord::parse(key).ok())
+            .is_some_and(|chord| chord.matches_tx(event, tx))
+    }
+
     /// The window's key router, `<svelte:window onkeydown>`.
     pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         // A dialog owns the keyboard. Nothing behind it changes while it is up.
         if self.dialog_open() || self.entry_options_open {
             return false;
         }
-        if NEW_ENTRY.matches(ev) {
+        if self.shortcut_matches("newEntry", ev, tx) {
             tx.instant();
             self.start_new();
-        } else if FILTER.matches(ev) {
+        } else if self.shortcut_matches("search", ev, tx) {
             // The list's filter, from anywhere in the window.
             self.query.focused = true;
-        } else if EDIT.matches(ev) {
+        } else if self.shortcut_matches("editEntry", ev, tx) {
             if self.editing.is_none() && self.details.is_some() {
                 tx.instant();
                 self.start_edit();
             }
         } else if self.editor_key(ev, tx) {
-        } else if SAVE.matches(ev) {
+        } else if self.shortcut_matches("saveEditor", ev, tx) {
             if self.editing.is_some() {
                 self.save_draft();
             }
-        } else if COMMANDS.matches(ev) {
+        } else if self.shortcut_matches("commands", ev, tx) {
             tx.instant();
             self.select_tab(Kind::Command);
-        } else if SECRETS.matches(ev) {
+        } else if self.shortcut_matches("secrets", ev, tx) {
             tx.instant();
             self.select_tab(Kind::Secret);
+        } else if self.shortcut_matches("cliProxy", ev, tx) {
+            tx.instant();
+            self.open_usage();
         } else {
             return false;
         }
@@ -1266,6 +1296,7 @@ impl Library {
                 self.request_close();
             }
             AppEvent::WindowIntent(intent) => {
+                self.usage.open = false;
                 self.selected_suggestion = None;
                 self.entry_options_open = false;
                 self.tab = intent.kind;

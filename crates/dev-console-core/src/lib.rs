@@ -61,6 +61,7 @@ pub mod finder_state;
 pub mod freshness;
 pub mod history;
 pub mod import;
+pub mod keybindings;
 pub mod keyring;
 pub mod models;
 pub mod paths;
@@ -83,3 +84,5 @@ pub use error::{AppError, AppResult};
 pub use services::{AppEvent, Effects, FinderActions, LibraryActions, Surface, WindowCommand};
 pub use state::AppState;
 pub use theme::{Appearance, Palette, Theme};
+
+pub mod cliproxy;

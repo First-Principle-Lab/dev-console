@@ -10,6 +10,11 @@ use dev_console_desktop::library::{Library, RunPhase, Stream};
 use dev_console_ui_tests::{clear_clipboard, clipboard_text, Profile, Stage, SYNTHETIC_SECRET};
 use rune::{Key, Tx};
 
+// Saving settings updates the process-wide disposable autostart entry. Keep every
+// settings-save test under one guard until its filesystem assertions finish, so
+// another profile saving autostart=false cannot remove the entry being checked.
+static SETTINGS_SAVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const AAA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BBB: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const CCC: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
@@ -331,6 +336,9 @@ fn backups_and_secret_reads_are_refused_while_the_vault_is_locked() {
 
 #[test]
 fn settings_load_in_a_locked_profile_and_a_general_setting_still_saves() {
+    let _settings = SETTINGS_SAVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let profile = Profile::new("more-lockedsettings");
     let mut effects = dev_console_core::Effects::default();
     profile.hub.library.lock_vault(&mut effects).unwrap();
@@ -467,6 +475,9 @@ fn the_recovery_credential_copies_through_the_core_clipboard() {
 
 #[test]
 fn the_terminal_field_parses_quoted_arguments_and_saves_them() {
+    let _settings = SETTINGS_SAVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let profile = Profile::new("more-terminal");
     let mut library = profile.library();
     library.press("settings");
@@ -492,6 +503,9 @@ fn the_terminal_field_parses_quoted_arguments_and_saves_them() {
 
 #[test]
 fn settings_offer_the_project_ranking_switch_and_store_it() {
+    let _settings = SETTINGS_SAVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let profile = Profile::new("more-ranking");
     let state = Library::new(profile.hub.clone(), dev_console_desktop::hub::Exec::Inline);
     let mut library = Stage::from_spec(
@@ -692,6 +706,9 @@ fn history_rows_accept_enter_and_delete_but_ignore_backspace() {
 
 #[test]
 fn a_failed_settings_write_keeps_the_changed_value_and_error() {
+    let _settings = SETTINGS_SAVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let profile = Profile::new("settings-write-failure");
     let mut library = profile.library();
     library.press("settings");
@@ -863,6 +880,9 @@ fn suggestion_highlights_have_equal_top_and_bottom_padding() {
 
 #[test]
 fn disabling_history_from_settings_clears_the_preview_before_narrowing() {
+    let _settings = SETTINGS_SAVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let profile = Profile::new("history-disable-preview-local");
     profile.command("synthetic command", "true");
     let mut library = with_history(&profile);

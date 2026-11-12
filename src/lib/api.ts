@@ -21,6 +21,7 @@ import type {
   Theme,
   VaultState
 } from './models';
+import type { CliproxyUsage } from './usage';
 
 export type IpcCall = (command: string, payload?: Record<string, unknown>) => Promise<unknown>;
 
@@ -125,5 +126,9 @@ export const api = {
   },
   scanProject: (path: string): Promise<ProjectScan> => call('scan_project', { request: { path } }),
   importProject: (path: string, names: string[]): Promise<ProjectImportOutcome> =>
-    call('import_project', { request: { path, names } })
+    call('import_project', { request: { path, names } }),
+  /** Codex usage for the CLI Proxy tab: account, rate-limit windows and the
+   * per-response token records inside [since, until] (ISO timestamps). */
+  cliproxyUsage: (since: string, until: string): Promise<CliproxyUsage> =>
+    call('cliproxy_usage', { since, until })
 };

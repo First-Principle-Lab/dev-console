@@ -21,6 +21,7 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let mut layer = Vec::new();
     let editing = state.editing.is_some();
     let has_selection = state.selected_id.is_some() || state.selected_suggestion.is_some();
+    let has_selection = has_selection || state.usage.open;
     let show_list = !state.narrow || (!editing && !has_selection);
     let show_detail = !state.narrow || has_selection || editing;
     // The panes are swapped and resized, never animated: a window the compositor resizes as it
@@ -219,7 +220,8 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
             Kind::Secret,
             "Secrets",
             (!hidden).then_some(state.counts[1]),
-        ));
+        ))
+        .child(usage_tab(state, look));
     let filter = TextInput::new(&state.query)
         .width(None)
         .label("Search this tab")
@@ -241,13 +243,17 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
         Variant::Default,
     )
     .h(32.0)
-    .help(if state.tab == Kind::Secret {
-        "New secret (Ctrl+N)"
-    } else {
-        "New command (Ctrl+N)"
-    })
+    .help(format!(
+        "New {} ({})",
+        if state.tab == Kind::Secret {
+            "secret"
+        } else {
+            "command"
+        },
+        state.shortcut_label("newEntry")
+    ))
     .on_press(|state: &mut Library| state.start_new());
-    let mut toolbar = col()
+    let toolbar = col()
         .key("toolbar")
         .w_full()
         .padding(size::SP3)
@@ -261,48 +267,48 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
                 .child(el().grow(1.0).min_w(0.0).child(filter))
                 .child(add),
         );
-    if state.tab == Kind::Command {
-        toolbar = toolbar.child(
-            row()
-                .w_full()
-                .gap(size::SP1)
-                .center_y()
-                .child(
-                    widgets::button_sm(
-                        look,
-                        "import-project",
-                        "Import",
-                        Some(&icons::IMPORT),
-                        Variant::Ghost,
-                    )
-                    .help("Import commands from a project folder")
-                    .on_press(|state: &mut Library| state.start_project_import()),
+    // The library-wide actions sit in one row on every tab; Import switches to Commands itself.
+    toolbar.child(
+        row()
+            .key("library-actions")
+            .w_full()
+            .gap(size::SP1)
+            .center_y()
+            .flex_wrap()
+            .child(
+                widgets::button_sm(
+                    look,
+                    "import-project",
+                    "Import",
+                    Some(&icons::IMPORT),
+                    Variant::Ghost,
                 )
-                .child(
-                    widgets::button_sm(
-                        look,
-                        "open-environment",
-                        "Environment",
-                        Some(&icons::ENVIRONMENT),
-                        Variant::Ghost,
-                    )
-                    .help("Manage environment files for the selected project")
-                    .on_press(|state: &mut Library| {
-                        let root = state
-                            .meta()
-                            .and_then(|meta| meta.project.as_ref())
-                            .map(|project| project.root.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        state.open_environment(root);
-                    }),
-                ),
-        );
-    }
-    toolbar
+                .help("Import commands from a project folder")
+                .on_press(|state: &mut Library| state.start_project_import()),
+            )
+            .child(
+                widgets::button_sm(
+                    look,
+                    "open-environment",
+                    "Environment",
+                    Some(&icons::ENVIRONMENT),
+                    Variant::Ghost,
+                )
+                .help("Manage environment files for the selected project")
+                .on_press(|state: &mut Library| {
+                    let root = state
+                        .meta()
+                        .and_then(|meta| meta.project.as_ref())
+                        .map(|project| project.root.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    state.open_environment(root);
+                }),
+            ),
+    )
 }
 
 fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {
-    let active = state.tab == kind;
+    let active = state.tab == kind && !state.usage.open;
     let mut chip = row()
         .key(if kind == Kind::Command {
             "tab-commands"
@@ -316,7 +322,7 @@ fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Opt
         .focus_selected(active)
         .focus_ring(2.0, 1.0, look.focus)
         .grow(1.0)
-        .w_frac(0.5)
+        .w_frac(1.0 / 3.0)
         .shrink()
         .h_full()
         .gap(6.0)
@@ -335,6 +341,40 @@ fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Opt
     if let Some(count) = count {
         chip = chip.child(text(count.to_string()).font(ts::XS).color(look.dim));
     }
+    if active {
+        chip = chip.fill(look.accent_soft).border(1.0, look.accent_line);
+    }
+    chip
+}
+
+/// The CLI Proxy tab: the same chip as Commands and Secrets, opening the usage dashboard.
+fn usage_tab(state: &Library, look: &Look) -> El {
+    let active = state.usage.open;
+    let mut chip = row()
+        .key("tab-cliproxy")
+        .role("tab")
+        .label("CLI Proxy")
+        .checked(active)
+        .focusable(true)
+        .focus_selected(active)
+        .focus_ring(2.0, 1.0, look.focus)
+        .grow(1.0)
+        .w_frac(1.0 / 3.0)
+        .shrink()
+        .h_full()
+        .gap(6.0)
+        .center()
+        .radius(size::RADIUS - 1.0)
+        .cursor(Cursor::Pointer)
+        .on_press_tx(|state: &mut Library, tx| {
+            tx.instant();
+            state.open_usage();
+        })
+        .child(
+            text("CLI Proxy")
+                .font(if active { ts::MEDIUM } else { ts::BODY })
+                .color(if active { look.fg } else { look.muted }),
+        );
     if active {
         chip = chip.fill(look.accent_soft).border(1.0, look.accent_line);
     }
@@ -467,6 +507,9 @@ fn status(state: &Library, look: &Look) -> Option<El> {
 }
 
 fn detail_body(state: &Library, look: &Look, kit: &Kit, layer: &mut Vec<El>) -> El {
+    if state.usage.open {
+        return super::usage::view(state, look);
+    }
     if let Some(editor) = &state.editing {
         return editor::editor_view(state, editor, look, kit);
     }
@@ -1279,7 +1322,10 @@ fn detail_header(
     }
     bar = bar.child(el().grow(1.0)).child(
         widgets::button_sm(look, "edit", "Edit", Some(&icons::EDIT), Variant::Ghost)
-            .help("Edit entry (Ctrl+E)")
+            .help(format!(
+                "Edit entry ({})",
+                state.shortcut_label("editEntry")
+            ))
             .on_press_tx(|state: &mut Library, tx| {
                 tx.instant();
                 state.start_edit();
