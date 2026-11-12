@@ -6,6 +6,8 @@
     id: string;
     label: string;
     count: number | null;
+    /** Replaces the count pill entirely; `null` means the tab carries no pill. */
+    badge?: string | null;
     icon: IconName;
     /** Stable automation id (the tab id itself is a backend `Kind`). */
     testId: string;
@@ -35,10 +37,11 @@
 <div class="tabbar" role="tablist" tabindex="-1" aria-label="Entry kinds" onkeydown={onkeydown}>
   {#each items as item (item.id)}
     <button
+      type="button"
       role="tab"
       id="tab-{item.id}"
       aria-selected={active === item.id}
-      aria-controls="entry-list"
+      aria-controls={item.id === 'cliproxy' ? 'cliproxy-pane' : 'entry-list'}
       tabindex={active === item.id ? 0 : -1}
       class="tab"
       class:active={active === item.id}
@@ -47,11 +50,13 @@
     >
       <Icon name={item.icon} size={13} />
       <span>{item.label}</span>
-      {#if item.count === null}
+      {#if item.badge !== undefined && item.badge !== null}
+        <span class="count">{item.badge}</span>
+      {:else if item.count === null && item.badge !== null}
         <span class="count" title="Count hidden while the vault is locked" aria-label="Count hidden while the vault is locked">
           <Icon name="lock" size={10} />
         </span>
-      {:else}
+      {:else if item.count !== null}
         <span class="count" aria-label="{item.count} entries">{item.count}</span>
       {/if}
     </button>
@@ -64,6 +69,7 @@
     gap: var(--sp-1);
     border-bottom: var(--border-hair);
     padding: 0 var(--sp-1);
+    min-width: 0;
   }
   .tab {
     position: relative;
@@ -106,6 +112,17 @@
     min-width: var(--badge-min);
     text-align: center;
     font-variant-numeric: tabular-nums;
+  }
+  /* three tabs must fit a phone-width window: drop the icons and tighten the
+     padding rather than scroll the page sideways */
+  @media (max-width: 480px) {
+    .tab {
+      padding: 0 var(--sp-2);
+      gap: var(--sp-1);
+    }
+    .tab > :global(svg:first-child) {
+      display: none;
+    }
   }
   .count :global(svg) {
     display: block;

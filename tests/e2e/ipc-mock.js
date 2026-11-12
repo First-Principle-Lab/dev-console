@@ -13,6 +13,7 @@
 
   const state = {
     backups: [],
+    cliproxyCalls: [],
     environments: seed.environments || [],
     exportedPaths: [],
     commands: (seed.commands || []).map((c) => ({ value: '', ...c })),
@@ -442,6 +443,102 @@
     };
   }
 
+  /* ----------------------------------------------------------------------------------------------
+   * CLI Proxy usage. Deterministic synthetic Codex activity generated relative to the real clock
+   * (not state.now) so records always fall inside the window the component requests. The limits
+   * mirror the Codex wham/usage response shape the Rust backend maps.
+   */
+  const cliproxy = seed.cliproxy ?? {};
+
+  const DAY_MS = 86_400_000;
+  const MINUTE_MS = 60_000;
+
+  /** Deterministic pseudo-random in [0, 1) from an integer seed. */
+  function jitter(seedInt) {
+    const x = Math.sin(seedInt) * 10_000;
+    return x - Math.floor(x);
+  }
+
+  function cliproxyRecords(sinceIso, untilIso) {
+    const since = Date.parse(sinceIso);
+    const until = Date.parse(untilIso);
+    if (cliproxy.records === 'empty') return [];
+    const records = [];
+    const models = ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'codex-auto-review'];
+    const startDay = Math.floor(since / DAY_MS);
+    const endDay = Math.floor(until / DAY_MS);
+    let counter = 0;
+    for (let day = startDay; day <= endDay; day += 1) {
+      const count = 3 + Math.floor(jitter(day * 7) * 5);
+      for (let i = 0; i < count; i += 1) {
+        const hour = (i * 3 + (day % 4)) % 24;
+        const at = Math.min(until, day * DAY_MS + hour * 3_600_000 + 17 * MINUTE_MS);
+        if (at < since || at > until) continue;
+        const model = models[(day + i) % models.length];
+        const base = model === 'codex-auto-review' ? 3_000 : 12_000;
+        const noise = jitter(day * 13 + i * 29);
+        counter += 1;
+        records.push({
+          ts: new Date(at).toISOString(),
+          session: `sess-${1000 + (counter % 12)}`,
+          model,
+          inputTokens: Math.round(base * (1 + noise)),
+          cachedInputTokens: Math.round(base * 2 * (0.3 + noise)),
+          cacheCreationTokens: Math.round(base * 0.2),
+          outputTokens: Math.round(base * (0.15 + noise / 2)),
+          reasoningTokens: Math.round(base * (0.05 + noise / 4))
+        });
+      }
+    }
+    return records;
+  }
+
+  function cliproxyLimits() {
+    const nowMs = Date.now();
+    return {
+      checkedAt: new Date(nowMs).toISOString(),
+      plan: 'plus',
+      windows: [
+        {
+          id: 'session',
+          kind: 'session',
+          label: 'Session',
+          usedPercent: 34,
+          windowDurationMins: 300,
+          resetsAt: new Date(nowMs + 205 * MINUTE_MS).toISOString()
+        },
+        {
+          id: 'weekly',
+          kind: 'weekly',
+          label: 'Weekly',
+          usedPercent: 9,
+          windowDurationMins: 10_080,
+          resetsAt: new Date(nowMs + 5.5 * DAY_MS).toISOString()
+        }
+      ],
+      resetCredits: { availableCount: 3 }
+    };
+  }
+
+  function handleCliproxyUsage(payload) {
+    state.cliproxyCalls.push({ since: payload.since, until: payload.until });
+    if (cliproxy.fail) throw new Error(cliproxy.fail);
+    if (cliproxy.limitsError) {
+      return {
+        account: { email: 'user@example.com', plan: 'plus' },
+        limits: null,
+        limitsError: cliproxy.limitsError,
+        records: cliproxyRecords(payload.since, payload.until)
+      };
+    }
+    return {
+      account: { email: 'user@example.com', plan: 'plus' },
+      limits: cliproxyLimits(),
+      limitsError: null,
+      records: cliproxyRecords(payload.since, payload.until)
+    };
+  }
+
   async function handle(command, payload) {
     const request = (payload && payload.request) || {};
     if (command === 'app_state') {
@@ -793,6 +890,7 @@
       if (seed.settingsSaveError) throw new Error(seed.settingsSaveError);
       state.settings = clone(payload.settings); return clone(state.settings);
     }
+    if (command === 'cliproxy_usage') return handleCliproxyUsage(payload);
     throw new Error(`unmocked command ${command}`);
   }
 

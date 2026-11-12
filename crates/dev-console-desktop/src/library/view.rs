@@ -21,8 +21,8 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let mut layer = Vec::new();
     let editing = state.editing.is_some();
     let has_selection = state.selected_id.is_some() || state.selected_suggestion.is_some();
-    let show_list = !state.narrow || (!editing && !has_selection);
-    let show_detail = !state.narrow || has_selection || editing;
+    let show_list = state.usage.open || !state.narrow || (!editing && !has_selection);
+    let show_detail = state.usage.open || !state.narrow || has_selection || editing;
     // The panes are swapped and resized, never animated: a window the compositor resizes as it
     // maps must not open on a cross-fade between its two layouts.
     let mut panes = row()
@@ -147,6 +147,39 @@ fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
     } else {
         side.w(state.sidebar_width())
     };
+    if state.usage.open {
+        return side
+            .w(180.0)
+            .child(
+                col()
+                    .padding(12.0)
+                    .gap(8.0)
+                    .child(
+                        tab(state, look, Kind::Command, "Commands", None)
+                            .h(32.0)
+                            .w_full(),
+                    )
+                    .child(
+                        tab(state, look, Kind::Secret, "Secrets", None)
+                            .h(32.0)
+                            .w_full(),
+                    )
+                    .child(
+                        widgets::button_sm(
+                            look,
+                            "tab-cliproxy",
+                            "CLI Proxy",
+                            None,
+                            Variant::Default,
+                        )
+                        .role("tab")
+                        .checked(true)
+                        .on_press(|s: &mut Library| s.open_usage()),
+                    ),
+            )
+            .child(el().grow(1.0))
+            .child(sidebar_footer(state, look));
+    }
     let mut scroll = col().w_full();
     if state.tab == Kind::Command && state.history_enabled {
         scroll = scroll.child(history::view(state, look));
@@ -179,6 +212,19 @@ fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
     );
     scroll = scroll.child(entry_list(state, look));
     side.child(toolbar(state, look, kit))
+        .child(
+            widgets::button_sm(
+                look,
+                "tab-cliproxy",
+                "CLI Proxy",
+                Some(&icons::HISTORY),
+                Variant::Ghost,
+            )
+            .role("tab")
+            .checked(false)
+            .mx(12.0)
+            .on_press(|s: &mut Library| s.open_usage()),
+        )
         .child(
             col()
                 .key("list-scroll")
@@ -302,7 +348,7 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
 }
 
 fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {
-    let active = state.tab == kind;
+    let active = state.tab == kind && !state.usage.open;
     let mut chip = row()
         .key(if kind == Kind::Command {
             "tab-commands"
@@ -365,7 +411,10 @@ fn sidebar_footer(state: &Library, look: &Look) -> El {
                 .color(look.muted),
         );
     }
-    bar.child(
+    // The usage dashboard narrows the sidebar, which leaves room for the gear alone.
+    let settings = if state.usage.open {
+        widgets::icon_button(look, "settings", "Settings", &icons::GEAR, look.muted)
+    } else {
         widgets::button_sm(
             look,
             "settings",
@@ -373,8 +422,8 @@ fn sidebar_footer(state: &Library, look: &Look) -> El {
             Some(&icons::GEAR),
             Variant::Ghost,
         )
-        .on_press(|state: &mut Library| state.open_settings()),
-    )
+    };
+    bar.child(settings.on_press(|state: &mut Library| state.open_settings()))
 }
 
 fn vault_status(state: &Library, vault: &dev_console_core::models::VaultState, look: &Look) -> El {
@@ -467,6 +516,9 @@ fn status(state: &Library, look: &Look) -> Option<El> {
 }
 
 fn detail_body(state: &Library, look: &Look, kit: &Kit, layer: &mut Vec<El>) -> El {
+    if state.usage.open {
+        return super::usage::view(state, look);
+    }
     if let Some(editor) = &state.editing {
         return editor::editor_view(state, editor, look, kit);
     }

@@ -13,6 +13,7 @@ mod environment;
 mod history;
 mod import;
 pub mod settings;
+pub mod usage;
 mod view;
 
 use std::collections::BTreeSet;
@@ -82,6 +83,7 @@ pub struct Library {
     pub app: Option<AppStateInfo>,
     pub vault: Option<VaultState>,
     pub tab: Kind,
+    pub usage: usage::Usage,
     pub query: TextEdit,
     pub entries: Vec<EntryMeta>,
     pub selected_id: Option<String>,
@@ -143,6 +145,7 @@ impl Library {
             hub,
             exec,
             tab: Kind::Command,
+            usage: usage::Usage::default(),
             query: TextEdit::new(String::new()),
             entries: Vec::new(),
             selected_id: None,
@@ -337,7 +340,7 @@ impl Library {
 
     /// Ctrl+1 / Ctrl+2 and the tab strip. Refused while an unsaved edit is open.
     pub fn select_tab(&mut self, next: Kind) -> bool {
-        if self.tab == next {
+        if self.tab == next && !self.usage.open {
             return false;
         }
         if self.draft_dirty() {
@@ -347,6 +350,7 @@ impl Library {
         self.editing = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
+        self.usage.open = false;
         self.tab = next;
         self.selected_id = None;
         self.details = None;
@@ -376,6 +380,7 @@ impl Library {
 
     /// Ctrl+N and New: an empty draft on the current tab, in the selected command's project.
     pub fn start_new(&mut self) {
+        self.usage.open = false;
         if self.draft_dirty() {
             self.status = Some(BUSY_EDIT.into());
             return;

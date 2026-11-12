@@ -5,6 +5,7 @@
 // one implementation of each rule.
 pub mod autostart;
 pub mod cli;
+pub mod cliproxy;
 pub mod control;
 pub mod desktop_icons;
 pub mod effects;
@@ -183,7 +184,8 @@ fn build(argv: Vec<String>) {
             ipc::environment_projects,
             ipc::sync_environment,
             ipc::set_environment_sync,
-            ipc::copy_environment
+            ipc::copy_environment,
+            ipc::cliproxy_usage
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

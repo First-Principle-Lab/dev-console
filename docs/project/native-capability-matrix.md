@@ -5,8 +5,8 @@ screens") asks for more than a list of screens that exist. It asks for **every u
 behaviour the shipped app has** to be mapped either to the native test that now decides it or to an
 explicit statement of what is still missing. This document is that map.
 
-**Read the summary first.** Of the 169 behaviours inventoried below, **119 are decided by a native
-test**, **17 are partly decided** and **33 are not decided by any test**. The screens are built:
+**Read the summary first.** Of the 194 behaviours inventoried below, **119 are decided by a native
+test**, **17 are partly decided** and **58 are not decided by a native test**. The screens are built:
 Library (list, project groups, details, editor, extra fields, run approval and output, delete and
 unsaved-changes dialogs, narrow layout), Finder (search, completion, copy, project context, locked
 vault), history suggestions, project import, project environment and Settings (themes, terminal,
@@ -14,10 +14,10 @@ backups, export, import review, recovery credential). They run on the real core 
 real profile, and the scripted tests in `crates/dev-console-ui-tests/tests/` drive them headlessly
 over temporary profiles.
 
-Of the 33 rows no test decides, 27 are **paint**: what a row, a focus ring, a truncation or a
+Of the 58 rows no native test decides, 27 are **paint**: what a row, a focus ring, a truncation or a
 screenshot looks like. A headless runtime cannot decide that, and those rows stay open here even
 though the screens were captured and checked by hand on the owner's Hyprland/NVIDIA desktop on
-2026-11-08 (`docs/project/native-feasibility-ledger.md`). The other 6 are named below with the seam
+2026-11-08 (`docs/project/native-feasibility-ledger.md`). The other 31 are named below with the seam
 each waits on. The updater (4 rows) is not ported; it is plan milestone 5.
 
 ## Why a document this blunt is a gate rather than a confession
@@ -325,6 +325,41 @@ The pure logic the views call, ported into `dev-console-core` with its own tests
 | `rejects blank labels and non-http URLs in custom fields` | NATIVE-TEST | `rejects_blank_labels_and_non_http_urls_in_custom_fields` |
 | `only treats http(s) as openable URLs` | NATIVE-TEST | `only_treats_http_s_as_openable_urls`, plus the service-side gate that hands nothing else to an opener: `only_an_http_or_https_link_is_handed_to_the_opener`, `only_an_http_or_https_link_may_be_opened` |
 
+### tests/e2e/cliproxy.spec.ts
+
+| Behaviour (the test title) | Status | What the native shell has, or what is missing |
+| --- | --- | --- |
+| `CLI Proxy shows cost, tokens, period breakdown and remaining quota` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `missing quota does not hide token history` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `empty data and a failed request are explicit` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+
+### tests/unit/usage.test.ts
+
+| Behaviour (the test title) | Status | What the native shell has, or what is missing |
+| --- | --- | --- |
+| `formats USD with two decimals` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `formats token counts with suffixes` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `shows a sub-threshold percent with a < sign` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `formats reset durations in coarse units` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `reports remaining quota, clamped` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `classifies pace against elapsed window time` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `returns null pace without a reset clock` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `prices a plain request from the rate table` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `bills cached input at the cached rate` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `bills cache writes at 1.25x input` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `applies the long-context tier` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `leaves reviewer models unpriced` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `prices dated model snapshots like their family prefix` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `totals tokens and counts distinct sessions` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `splits models by share and marks unpriced ones` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `buckets records by local day and hour, sorted` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `credits cache savings against the uncached rate` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `builds four cost and token segments in T3 order` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `picks a nice tick scale above the peak` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `maps zero to the baseline and the peak to the plot top` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `keeps monotone tangents flat across local extrema` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `zero-fills quiet periods so the axis never skips days` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+
 ## Where the gaps cluster
 
 Machine-checked against the rows above: `the_matrix_summary_counts_match_its_rows`.
@@ -333,11 +368,12 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 | --- | --- |
 | NATIVE-TEST | 119 |
 | PARTIAL | 17 |
-| NOT COVERED | 33 |
-| **Total** | **169** |
+| NOT COVERED | 58 |
+| **Total** | **194** |
 
 | Missing seam | Rows waiting on it | What the rows still need |
 | --- | --- | --- |
+| `usage-analytics` | 25 | Native assertions for the web usage math and data-state fixtures. |
 | `paint` | 27 | rasterised appearance: what a row, a ring, a truncation or a screenshot looks like. A headless runtime cannot decide it; the owner's desktop checks in the feasibility ledger are evidence, not tests |
 | `folder-picker` | 5 | the XDG portal file chooser, which a headless runtime cannot answer; the picker itself is built and was used by hand on the owner's desktop |
 
@@ -358,6 +394,8 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 
 | Spec | Rows | NATIVE-TEST | PARTIAL | NOT COVERED |
 | --- | --- | --- | --- | --- |
+| `tests/e2e/cliproxy.spec.ts` | 3 | 0 | 0 | 3 |
+| `tests/unit/usage.test.ts` | 22 | 0 | 0 | 22 |
 | `tests/e2e/environment.spec.ts` | 4 | 3 | 1 | 0 |
 | `tests/e2e/finder.spec.ts` | 24 | 19 | 5 | 0 |
 | `tests/e2e/history.spec.ts` | 14 | 12 | 0 | 2 |

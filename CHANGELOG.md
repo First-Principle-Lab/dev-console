@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+- Add a CLI Proxy usage tab to the native Library and web companion, laid out like T3 Code's Usage page: Cost, Tokens and Limits; a period selector; the total beside a daily or hourly chart with a hover tooltip; totals; a cost or token share by type; a model or day breakdown; and Codex limit windows with pace and reset time, refreshed read-only.
+
 ## 0.0.14 — 2026-11-12
 
 ### Fixed
