@@ -196,7 +196,7 @@
     <UsageLimitsView limits={data?.limits ?? null} error={data?.limitsError ?? null} now={limitsNow} />
   {:else}
     <div class="overview">
-      <p class="sub dim">Local Codex transcripts · API-equivalent estimate, not a subscription bill. Limits cover the proxy account.</p>
+      <p class="sub dim">Codex sessions run through the proxy on this machine, whichever proxy account served them · API-equivalent estimate, not a subscription bill. Limits are the signed-in account's.</p>
       <section class="grid">
         <div class="left">
           <div class="figure-block">

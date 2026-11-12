@@ -8,7 +8,10 @@
 //!      routes through;
 //!   2. the Codex CLI's own session transcripts (`~/.codex/sessions/**/*.jsonl`), whose
 //!      `token_usage_record` events carry per-response token counts. These feed the cost and token
-//!      graphs; prices are applied on the frontend so the estimate stays inspectable.
+//!      graphs; prices are applied on the frontend so the estimate stays inspectable. Only
+//!      sessions whose `session_meta` names the proxy as `model_provider` count: a session on
+//!      Codex's own login is not proxy usage. Transcripts do not say which proxy account served
+//!      them, so this is the proxy's usage on this machine, not one account's.
 //!
 //! Nothing here logs, prints or stores the access token: it is sent to curl over stdin, never in process arguments.
 
@@ -28,6 +31,8 @@ const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const FIVE_HOURS_MINS: i64 = 5 * 60;
 const WEEK_MINS: i64 = 7 * 24 * 60;
 const MONTH_MINS: i64 = 30 * 24 * 60;
+/// The `model_provider` Codex records for a session routed through CLIProxyAPI.
+const PROXY_PROVIDER: &str = "cliproxy";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,7 +390,8 @@ fn collect_records(path: &Path, range: &WindowRange, records: &mut Vec<UsageReco
         .to_string_lossy()
         .into_owned();
     let mut seen = std::collections::HashSet::new();
-    let start_index = records.len();
+    let mut provider = None;
+    let mut own = Vec::new();
     let mut legacy = Vec::new();
     let mut last_total: Option<Value> = None;
     for line in BufReader::new(file).lines() {
@@ -402,7 +408,7 @@ fn collect_records(path: &Path, range: &WindowRange, records: &mut Vec<UsageReco
                     continue;
                 }
                 record.session = session.clone();
-                records.push(record);
+                own.push(record);
             }
         } else if line.contains("\"token_count\"") {
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
@@ -446,6 +452,9 @@ fn collect_records(path: &Path, range: &WindowRange, records: &mut Vec<UsageReco
                     if let Some(id) = value["payload"]["id"].as_str() {
                         session = id.to_owned();
                     }
+                    if let Some(name) = value["payload"]["model_provider"].as_str() {
+                        provider = Some(name.to_owned());
+                    }
                 }
                 if let Some(next) = value
                     .get("payload")
@@ -457,11 +466,13 @@ fn collect_records(path: &Path, range: &WindowRange, records: &mut Vec<UsageReco
             }
         }
     }
+    // A session on Codex's own login, or one that never says, is not proxy usage.
+    if provider.as_deref() != Some(PROXY_PROVIDER) {
+        return;
+    }
     // Current Codex emits both representations. Prefer per-response records when present,
     // never add cumulative snapshots a second time. Older files use snapshots only.
-    if records.len() == start_index {
-        records.extend(legacy);
-    }
+    records.extend(if own.is_empty() { legacy } else { own });
 }
 
 fn parse_usage_record(line: &str, model: &str, range: &WindowRange) -> Option<UsageRecord> {
@@ -595,7 +606,7 @@ mod tests {
     #[test]
     fn scan_keeps_session_identity_and_deduplicates_response_ids() {
         let dir = tempfile::tempdir().unwrap();
-        let header = json!({"type":"session_meta","payload":{"id":"synthetic-session"}});
+        let header = json!({"type":"session_meta","payload":{"id":"synthetic-session","model_provider":"cliproxy"}});
         let context = json!({"type":"turn_context","payload":{"model":"gpt-6-sol"}});
         let record = json!({"type":"token_usage_record","timestamp":"2026-11-12T10:00:00Z","payload":{"response_id":"synthetic-response","usage":{"input_tokens":100}}});
         std::fs::write(
@@ -613,5 +624,35 @@ mod tests {
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].session, "synthetic-session");
         assert_eq!(r[0].model, "gpt-6-sol");
+    }
+    #[test]
+    fn only_sessions_routed_through_the_proxy_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = json!({"type":"token_usage_record","timestamp":"2026-11-12T10:00:00Z","payload":{"usage":{"input_tokens":100}}});
+        for (name, provider) in [
+            ("proxy", Some("cliproxy")),
+            ("own-login", Some("openai")),
+            ("unknown", None),
+        ] {
+            let mut payload = json!({"id": name});
+            if let Some(provider) = provider {
+                payload["model_provider"] = json!(provider);
+            }
+            let header = json!({"type":"session_meta","payload":payload});
+            std::fs::write(
+                dir.path().join(format!("{name}.jsonl")),
+                format!("{header}\n{record}\n"),
+            )
+            .unwrap();
+        }
+        let r = scan_sessions(
+            dir.path(),
+            &WindowRange {
+                since: None,
+                until: i64::MAX,
+            },
+        );
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].session, "proxy");
     }
 }

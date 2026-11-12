@@ -1213,7 +1213,7 @@ fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
     )
     .child(
         caption(
-            "Cost and tokens come from local Codex transcripts; limits come from the proxy account.",
+            "Cost and tokens count the Codex sessions run through the proxy on this machine, whichever proxy account served them. Limits are the signed-in account's.",
             look,
         )
         .wrap()
