@@ -18,6 +18,9 @@ use dev_console_ui_tests::Profile;
 use rune::App;
 
 const SCENES: &[&str] = &[
+    "usage-cost",
+    "usage-tokens",
+    "usage-limits",
     "library",
     "library-empty",
     "library-filter",
@@ -94,7 +97,7 @@ fn main() {
         "--snap".to_owned(),
         out.clone(),
         "--size".to_owned(),
-        size,
+        size.clone(),
         "--scale".to_owned(),
         "2".to_owned(),
         "--theme".to_owned(),
@@ -118,7 +121,23 @@ fn main() {
     }
 
     let mut state = Library::new(profile.hub.clone(), Exec::Inline);
+    // A single-frame capture draws before the first layout reports the window width.
+    if let Some(width) = size.split('x').next().and_then(|w| w.parse().ok()) {
+        state.set_width(width);
+    }
     match scene.as_str() {
+        "usage-cost" | "usage-tokens" | "usage-limits" => {
+            state.usage.open = true;
+            state.usage.days = 7;
+            state.usage.metric = if scene == "usage-limits" {
+                2
+            } else if scene == "usage-tokens" {
+                1
+            } else {
+                0
+            };
+            state.usage.data = Some(dev_console_ui_tests::usage_fixture());
+        }
         "library" | "library-big" => state.select(&ids.command),
         "history-unselected" => state.back_to_list(),
         "history-preview" => {

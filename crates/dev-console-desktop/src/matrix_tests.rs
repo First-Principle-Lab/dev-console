@@ -82,6 +82,7 @@ const SEAMS: &[&str] = &[
     "settings",
     "theme-switch",
     "updates",
+    "usage-analytics",
     "vault-state",
     "window-lifecycle",
 ];

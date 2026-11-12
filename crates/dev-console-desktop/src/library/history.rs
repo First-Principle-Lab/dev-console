@@ -48,6 +48,7 @@ impl Library {
         self.selected_id = None;
         self.details = None;
         self.selected_suggestion = Some(key.into());
+        self.usage.open = false;
         self.entry_options_open = false;
     }
 }

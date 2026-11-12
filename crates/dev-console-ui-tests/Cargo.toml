@@ -13,6 +13,7 @@ path = "src/lib.rs"
 doctest = false
 
 [dependencies]
+time = { workspace = true }
 dev-console-core = { path = "../dev-console-core" }
 dev-console-desktop = { path = "../dev-console-desktop" }
 rune = { workspace = true }

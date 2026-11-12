@@ -99,6 +99,20 @@ pub fn clear_finder_context<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
     palette(&app).clear_finder_context()
 }
 
+/// Codex usage for the CLI Proxy tab (read-only, library surface only). The scan and the network
+/// call run off the main thread; the token is read and dropped inside `cliproxy`.
+#[tauri::command]
+pub async fn cliproxy_usage<R: Runtime>(
+    window: WebviewWindow<R>,
+    since: Option<String>,
+    until: Option<String>,
+) -> AppResult<crate::cliproxy::CliproxyUsageResponse> {
+    surface(&window).require_library()?;
+    tauri::async_runtime::spawn_blocking(move || crate::cliproxy::cliproxy_usage(since, until))
+        .await
+        .map_err(|error| AppError::Other(format!("usage scan failed: {error}")))?
+}
+
 #[tauri::command]
 pub fn get_theme<R: Runtime>(app: AppHandle<R>) -> String {
     palette(&app).get_theme()
