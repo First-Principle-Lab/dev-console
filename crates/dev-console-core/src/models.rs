@@ -351,6 +351,8 @@ pub struct AppStateInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    #[serde(default = "crate::keybindings::defaults")]
+    pub keybindings: std::collections::BTreeMap<String, String>,
     pub theme: String,
     pub autostart: bool,
     pub clipboard_expiry_seconds: u64,
@@ -366,6 +368,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            keybindings: crate::keybindings::defaults(),
             theme: "system".into(),
             autostart: false,
             clipboard_expiry_seconds: 30,

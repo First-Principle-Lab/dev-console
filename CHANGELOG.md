@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Added
+
+- Customize Library shortcuts in Settings → Keyboard, with conflict validation, saved preferences and a reset to defaults. Ctrl+K now focuses search by default.
+
 ## 0.0.14 — 2026-11-12
 
 ### Fixed

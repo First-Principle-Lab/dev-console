@@ -289,7 +289,7 @@ fn arrows_walk_the_list_and_the_detail_pane_follows() {
 fn the_filter_and_the_editor_have_their_own_keys() {
     let profile = Profile::new("revamp-keys");
     let (mut library, _, _) = busy_library(&profile);
-    library.press_ctrl('f');
+    library.press_ctrl('k');
     // Typing lands in the filter, which is what having the focus means.
     library.type_text("loose");
     assert_eq!(library.state().query.text, "loose");
@@ -399,22 +399,18 @@ fn settings_says_when_a_change_is_not_saved_yet() {
 
 #[test]
 fn every_chord_settings_lists_is_one_the_window_answers() {
-    use dev_console_desktop::library::settings::SHORTCUTS;
+    use dev_console_core::keybindings::ACTIONS;
     let profile = Profile::new("revamp-shortcuts");
     let (mut library, _, _) = busy_library(&profile);
     library.press("settings");
     library.press("settings-tab-keyboard");
-    for (what, _) in SHORTCUTS {
+    for (_, what, _) in ACTIONS {
         assert!(library.shows(what), "Settings does not list {what:?}");
     }
     library.press("close-settings");
     let mut tx = Tx::default();
-    for (what, chord) in SHORTCUTS {
-        let [modifier, letter] = chord else { continue };
-        if *modifier != "Ctrl" {
-            continue;
-        }
-        let key = letter.to_lowercase().chars().next().unwrap();
+    for (_, what, chord) in ACTIONS {
+        let key = chord.chars().last().unwrap();
         let event = rune::KeyEvent {
             key: rune::Key::Command(key),
             mods: rune::Mods {
@@ -424,7 +420,7 @@ fn every_chord_settings_lists_is_one_the_window_answers() {
             },
         };
         let taken = library.apply(|state| state.route_key(&event, &mut tx));
-        assert!(taken, "{what:?} is listed but Ctrl+{letter} is not routed");
+        assert!(taken, "{what:?} is listed but {chord} is not routed");
     }
 }
 

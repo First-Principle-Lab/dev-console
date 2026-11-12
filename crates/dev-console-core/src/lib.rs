@@ -61,6 +61,7 @@ pub mod finder_state;
 pub mod freshness;
 pub mod history;
 pub mod import;
+pub mod keybindings;
 pub mod keyring;
 pub mod models;
 pub mod paths;

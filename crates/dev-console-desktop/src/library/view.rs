@@ -241,11 +241,15 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
         Variant::Default,
     )
     .h(32.0)
-    .help(if state.tab == Kind::Secret {
-        "New secret (Ctrl+N)"
-    } else {
-        "New command (Ctrl+N)"
-    })
+    .help(format!(
+        "New {} ({})",
+        if state.tab == Kind::Secret {
+            "secret"
+        } else {
+            "command"
+        },
+        state.shortcut_label("newEntry")
+    ))
     .on_press(|state: &mut Library| state.start_new());
     let mut toolbar = col()
         .key("toolbar")
@@ -1279,7 +1283,10 @@ fn detail_header(
     }
     bar = bar.child(el().grow(1.0)).child(
         widgets::button_sm(look, "edit", "Edit", Some(&icons::EDIT), Variant::Ghost)
-            .help("Edit entry (Ctrl+E)")
+            .help(format!(
+                "Edit entry ({})",
+                state.shortcut_label("editEntry")
+            ))
             .on_press_tx(|state: &mut Library, tx| {
                 tx.instant();
                 state.start_edit();

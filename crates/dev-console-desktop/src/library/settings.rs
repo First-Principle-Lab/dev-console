@@ -24,19 +24,6 @@ use crate::icons;
 use crate::theme::{self, size, text as ts, Look};
 use crate::widgets::{self, Tone, Variant};
 
-/// The keys the Library answers, as Settings lists them. The Finder's own are in its footer.
-pub const SHORTCUTS: [(&str, &[&str]); 9] = [
-    ("Open the Finder", &["Super", "F"]),
-    ("Move through the list", &["↑", "↓"]),
-    ("Filter the list", &["Ctrl", "F"]),
-    ("New entry", &["Ctrl", "N"]),
-    ("Edit the selected entry", &["Ctrl", "E"]),
-    ("Save the editor", &["Ctrl", "S"]),
-    ("Leave an unchanged editor", &["Esc"]),
-    ("Commands", &["Ctrl", "1"]),
-    ("Secrets", &["Ctrl", "2"]),
-];
-
 /// The pages of the Settings sheet. One is shown at a time, so no page is long enough to scroll
 /// past what you came to change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,6 +65,8 @@ pub struct SettingsPanel {
     pub settings: Option<Settings>,
     /// The theme on disk, restored if the panel closes without saving.
     pub saved_theme: String,
+    pub shortcuts: Vec<TextEdit>,
+    pub shortcut_error: Option<String>,
     pub expiry: TextEdit,
     pub terminal: TextEdit,
     pub terminal_tokens: Vec<String>,
@@ -115,6 +104,8 @@ impl SettingsPanel {
             baseline: None,
             settings: None,
             saved_theme: theme,
+            shortcuts: Vec::new(),
+            shortcut_error: None,
             expiry: TextEdit::new(String::new()),
             terminal: TextEdit::new(String::new()),
             terminal_tokens: Vec::new(),
@@ -189,7 +180,16 @@ impl SettingsPanel {
     pub fn changed(&self) -> bool {
         match (&self.baseline, &self.settings) {
             (Some((saved, expiry, terminal)), Some(now)) => {
-                saved != now || *expiry != self.expiry.text || *terminal != self.terminal.text
+                saved != now
+                    || *expiry != self.expiry.text
+                    || *terminal != self.terminal.text
+                    || dev_console_core::keybindings::ACTIONS
+                        .iter()
+                        .zip(&self.shortcuts)
+                        .any(|((id, _, default), field)| {
+                            field.text
+                                != saved.keybindings.get(*id).map_or(*default, String::as_str)
+                        })
             }
             _ => false,
         }
@@ -367,6 +367,18 @@ impl Library {
                     panel.expiry.text.clone(),
                     panel.terminal.text.clone(),
                 ));
+                panel.shortcuts = dev_console_core::keybindings::ACTIONS
+                    .iter()
+                    .map(|(id, _, default)| {
+                        TextEdit::new(
+                            settings
+                                .keybindings
+                                .get(*id)
+                                .cloned()
+                                .unwrap_or_else(|| default.to_string()),
+                        )
+                    })
+                    .collect();
                 panel.settings = Some(settings);
             },
         );
@@ -416,13 +428,39 @@ impl Library {
         }
     }
 
+    pub fn shortcuts_edited(&mut self) {
+        if let Some(panel) = self.settings.as_mut() {
+            let bindings = dev_console_core::keybindings::ACTIONS
+                .iter()
+                .zip(&panel.shortcuts)
+                .map(|((id, _, _), field)| (id.to_string(), field.text.clone()))
+                .collect();
+            panel.shortcut_error = dev_console_core::keybindings::validated(&bindings)
+                .err()
+                .map(|error| message(&error));
+        }
+    }
+
+    pub fn reset_shortcuts(&mut self) {
+        if let Some(panel) = self.settings.as_mut() {
+            for (field, (_, _, default)) in panel
+                .shortcuts
+                .iter_mut()
+                .zip(dev_console_core::keybindings::ACTIONS)
+            {
+                field.replace_text(default.to_string());
+            }
+            panel.shortcut_error = None;
+        }
+    }
+
     pub fn save_settings(&mut self) {
         let hub = self.hub().clone();
         let actions = self.hub().library.clone();
         let Some(panel) = self.panel() else {
             return;
         };
-        if panel.terminal_error.is_some() || panel.saving {
+        if panel.terminal_error.is_some() || panel.shortcut_error.is_some() || panel.saving {
             return;
         }
         let Some(mut settings) = panel.settings.clone() else {
@@ -430,6 +468,18 @@ impl Library {
         };
         if let Some(seconds) = panel.expiry_seconds() {
             settings.clipboard_expiry_seconds = seconds;
+        }
+        settings.keybindings = dev_console_core::keybindings::ACTIONS
+            .iter()
+            .zip(&panel.shortcuts)
+            .map(|((id, _, _), field)| (id.to_string(), field.text.clone()))
+            .collect();
+        match dev_console_core::keybindings::validated(&settings.keybindings) {
+            Ok(bindings) => settings.keybindings = bindings,
+            Err(error) => {
+                panel.shortcut_error = Some(message(&error));
+                return;
+            }
         }
         panel.error = None;
         panel.saving = true;
@@ -474,6 +524,7 @@ impl Library {
     }
 
     pub(super) fn on_saved_settings(&mut self, saved: &Settings) {
+        self.keybindings = saved.keybindings.clone();
         self.history_enabled = saved.history_suggestions_enabled;
         if saved.history_suggestions_enabled {
             self.load_suggestions();
@@ -1487,28 +1538,47 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
     }
     archives.push(recovery);
 
-    let mut keys = lead_section("shortcuts", "Keyboard").gap(size::SP1);
-    for (what, chord) in SHORTCUTS {
-        let mut caps = row().gap(3.0).center_y();
-        for key in chord.iter() {
-            caps = caps.child(widgets::keycap(look, key));
-        }
+    let mut keys = lead_section("shortcuts", "Keyboard").gap(size::SP2)
+        .child(detail(look, "Shortcuts work inside Dev Console. Enter Ctrl or Alt, optional Shift, and a letter or digit, for example Ctrl+K. Save to apply."));
+    for (index, ((id, label, _), field)) in dev_console_core::keybindings::ACTIONS
+        .iter()
+        .zip(&panel.shortcuts)
+        .enumerate()
+    {
         keys = keys.child(
             row()
                 .w_full()
-                .min_h(size::CONTROL_H_SM)
                 .gap(size::SP3)
                 .center_y()
+                .child(text(*label).font(ts::BODY).color(look.fg).grow(1.0))
                 .child(
-                    text(what)
-                        .font(ts::BODY)
-                        .color(look.fg)
-                        .grow(1.0)
-                        .min_w(0.0),
-                )
-                .child(caps),
+                    TextInput::new(field)
+                        .width(Some(180.0))
+                        .label(*label)
+                        .on_edit(move |state: &mut Library| {
+                            state
+                                .settings
+                                .as_mut()
+                                .and_then(|panel| panel.shortcuts.get_mut(index))
+                                .unwrap_or(&mut state.scratch)
+                        })
+                        .on_change(|state: &mut Library, _| state.shortcuts_edited())
+                        .build(kit)
+                        .key(format!("shortcut-{id}")),
+                ),
         );
     }
+    if let Some(error) = &panel.shortcut_error {
+        keys = keys.child(widgets::status_line(
+            look,
+            "shortcut-error",
+            Tone::Error,
+            error,
+        ));
+    }
+    keys = keys.child(widgets::button(look, "reset-shortcuts", "Reset to defaults", None, Variant::Default)
+        .on_press(|state: &mut Library| state.reset_shortcuts()))
+        .child(detail(look, "Arrow keys move through lists. Escape dismisses dialogs or an unchanged editor. The global Finder shortcut is managed by your desktop settings."));
     keyboard.push(keys);
 
     if let Some((kind, summary)) = &panel.review {
@@ -1719,7 +1789,11 @@ pub fn view(state: &Library, panel: &SettingsPanel, look: &Look, kit: &Kit) -> E
                 Variant::Default,
             )
             .on_press(|state: &mut Library| state.close_settings()),
-            if panel.saving || panel.terminal_error.is_some() || panel.settings.is_none() {
+            if panel.saving
+                || panel.terminal_error.is_some()
+                || panel.shortcut_error.is_some()
+                || panel.settings.is_none()
+            {
                 widgets::disabled(save)
             } else {
                 save.on_press(|state: &mut Library| state.save_settings())

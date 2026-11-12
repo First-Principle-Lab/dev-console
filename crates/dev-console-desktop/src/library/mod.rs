@@ -28,7 +28,6 @@ use dev_console_core::services::{AppEvent, Effects};
 use dev_console_core::validation::{empty_draft, validate_editor_draft};
 use dev_console_core::Surface;
 use rune::{Chord, KeyEvent, TextEdit, Tx};
-use std::sync::LazyLock;
 
 pub use editor::Editor;
 pub use environment::Environment;
@@ -45,13 +44,6 @@ pub const STATUS_CONFIRMATIONS: [&str; 5] = ["Copied", "Saved", "Deleted", "Laun
 
 pub const UNSAVED_ESCAPE: &str = "This entry has unsaved edits. Save, or Cancel to discard them.";
 pub const BUSY_EDIT: &str = "Save or discard the open edit first.";
-
-static NEW_ENTRY: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+n").expect("valid chord"));
-static SAVE: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+s").expect("valid chord"));
-static COMMANDS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+1").expect("valid chord"));
-static SECRETS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+2").expect("valid chord"));
-static FILTER: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+f").expect("valid chord"));
-static EDIT: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+e").expect("valid chord"));
 
 /// The command-output dialog's state.
 #[derive(Debug, Clone)]
@@ -78,6 +70,7 @@ pub struct Library {
     hub: Hub,
     exec: Exec<Library>,
     pub theme: String,
+    pub keybindings: std::collections::BTreeMap<String, String>,
     pub updates: crate::updater::State,
     pub app: Option<AppStateInfo>,
     pub vault: Option<VaultState>,
@@ -137,6 +130,7 @@ impl Library {
         let app = hub.library.app_state();
         let mut library = Library {
             theme: hub.library.get_theme(),
+            keybindings: hub.library.get_settings().keybindings,
             updates: crate::updater::State::default(),
             vault: Some(app.vault.clone()),
             app: Some(app),
@@ -1206,32 +1200,57 @@ impl Library {
         true
     }
 
+    pub fn shortcut_label(&self, action: &str) -> String {
+        self.keybindings
+            .get(action)
+            .map(|key| {
+                key.split('+')
+                    .map(|part| {
+                        let mut chars = part.chars();
+                        chars
+                            .next()
+                            .map(|c| c.to_uppercase().to_string() + chars.as_str())
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+")
+            })
+            .unwrap_or_default()
+    }
+
+    fn shortcut_matches(&self, action: &str, event: &KeyEvent, tx: &Tx) -> bool {
+        self.keybindings
+            .get(action)
+            .and_then(|key| Chord::parse(key).ok())
+            .is_some_and(|chord| chord.matches_tx(event, tx))
+    }
+
     /// The window's key router, `<svelte:window onkeydown>`.
     pub fn route_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         // A dialog owns the keyboard. Nothing behind it changes while it is up.
         if self.dialog_open() || self.entry_options_open {
             return false;
         }
-        if NEW_ENTRY.matches(ev) {
+        if self.shortcut_matches("newEntry", ev, tx) {
             tx.instant();
             self.start_new();
-        } else if FILTER.matches(ev) {
+        } else if self.shortcut_matches("search", ev, tx) {
             // The list's filter, from anywhere in the window.
             self.query.focused = true;
-        } else if EDIT.matches(ev) {
+        } else if self.shortcut_matches("editEntry", ev, tx) {
             if self.editing.is_none() && self.details.is_some() {
                 tx.instant();
                 self.start_edit();
             }
         } else if self.editor_key(ev, tx) {
-        } else if SAVE.matches(ev) {
+        } else if self.shortcut_matches("saveEditor", ev, tx) {
             if self.editing.is_some() {
                 self.save_draft();
             }
-        } else if COMMANDS.matches(ev) {
+        } else if self.shortcut_matches("commands", ev, tx) {
             tx.instant();
             self.select_tab(Kind::Command);
-        } else if SECRETS.matches(ev) {
+        } else if self.shortcut_matches("secrets", ev, tx) {
             tx.instant();
             self.select_tab(Kind::Secret);
         } else {

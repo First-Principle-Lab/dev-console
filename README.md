@@ -154,6 +154,12 @@ Read more about [project commands](docs/project/project-command-groups.md) and
 
 ## Keyboard shortcuts
 
+In the native app, open **Settings → Keyboard** to change the Library shortcuts.
+Use Ctrl or Alt with a letter or digit, optionally adding Shift. Save to apply,
+or choose **Reset to defaults**. Each action needs a different shortcut.
+
+The table lists the defaults. The system-wide Finder binding remains in your desktop settings.
+
 | Where | Shortcut | Action |
 | --- | --- | --- |
 | Desktop | Your configured shortcut | Toggle Finder |
@@ -163,6 +169,8 @@ Read more about [project commands](docs/project/project-command-groups.md) and
 | Finder | `Ctrl+O` | Open the entry in the Library |
 | Finder | `Ctrl+P` | Ignore the detected project for this search |
 | Finder | `Esc` | Dismiss Finder |
+| Library | `Ctrl+K` | Focus search |
+| Library | `Ctrl+E` | Edit the selected entry |
 | Library | `Ctrl+1` / `Ctrl+2` | Switch Commands and Secrets |
 | Library | `Ctrl+N` | Create an entry |
 | Editor | `Ctrl+S` | Save |
