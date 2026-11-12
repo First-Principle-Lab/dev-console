@@ -241,7 +241,12 @@ fn segment(look: &Look, key: String, title: &str, selected: bool) -> El {
 }
 pub fn view(state: &Library, look: &Look) -> El {
     let u = &state.usage;
-    let wide = state.window_width - 180.0 >= WIDE;
+    let sidebar = if state.narrow {
+        0.0
+    } else {
+        state.sidebar_width()
+    };
+    let wide = state.window_width - sidebar >= WIDE;
     let mut controls = row().gap(8.0).center_y();
     if u.metric != 2 {
         // Limits are always current, so they have no period; it sits first so dropping it
@@ -286,6 +291,23 @@ pub fn view(state: &Library, look: &Look) -> El {
     } else {
         refresh.on_press(|s: &mut Library| s.refresh_usage())
     });
+    let mut lead = row().gap(6.0).center_y();
+    if state.narrow {
+        // The sidebar is hidden in a narrow window, so the dashboard carries the way back.
+        lead = lead.child(
+            widgets::button_sm(
+                look,
+                "back-to-list",
+                "Library",
+                Some(&icons::BACK),
+                widgets::Variant::Ghost,
+            )
+            .on_press_tx(|s: &mut Library, tx| {
+                tx.instant();
+                s.back_to_list();
+            }),
+        );
+    }
     let head = row()
         .key("usage-header")
         .w_full()
@@ -298,10 +320,7 @@ pub fn view(state: &Library, look: &Look) -> El {
         .flex_wrap()
         .border_sides([0.0, 0.0, 1.0, 0.0], look.line_hair)
         .child(
-            row()
-                .gap(6.0)
-                .center_y()
-                .child(text("CLI Proxy").font(ts::SM).color(look.muted))
+            lead.child(text("CLI Proxy").font(ts::SM).color(look.muted))
                 .child(text("/").font(ts::SM).color(look.dim))
                 .child(text("Usage").font(ts::MEDIUM).color(look.fg)),
         )

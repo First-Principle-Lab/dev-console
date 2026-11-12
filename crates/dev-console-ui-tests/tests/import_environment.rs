@@ -201,7 +201,6 @@ fn import_from_the_secrets_tab_moves_back_to_commands() {
     library.press_ctrl('2');
     // The action row is the same on both tabs.
     assert!(library.has("open-environment"));
-    assert!(library.has("tab-cliproxy"));
     assert!(library.press("import-project"));
     assert_eq!(library.state().tab, Kind::Command);
     assert!(library.has("project-import-dialog"));
@@ -418,6 +417,7 @@ fn both_tabs_offer_the_same_action_row() {
     let profile = Profile::new("import-both-tabs");
     let mut library = profile.library();
     let actions = ["import-project", "open-environment", "tab-cliproxy"];
+    // CLI Proxy is the third tab; Import and Environment are the action row.
     for key in actions {
         assert!(library.has(key), "{key} is missing on Commands");
     }

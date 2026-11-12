@@ -21,8 +21,9 @@ pub fn library_view(state: &Library, cx: &mut Cx<Library>) -> El {
     let mut layer = Vec::new();
     let editing = state.editing.is_some();
     let has_selection = state.selected_id.is_some() || state.selected_suggestion.is_some();
-    let show_list = state.usage.open || !state.narrow || (!editing && !has_selection);
-    let show_detail = state.usage.open || !state.narrow || has_selection || editing;
+    let has_selection = has_selection || state.usage.open;
+    let show_list = !state.narrow || (!editing && !has_selection);
+    let show_detail = !state.narrow || has_selection || editing;
     // The panes are swapped and resized, never animated: a window the compositor resizes as it
     // maps must not open on a cross-fade between its two layouts.
     let mut panes = row()
@@ -147,38 +148,6 @@ fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
     } else {
         side.w(state.sidebar_width())
     };
-    if state.usage.open {
-        // One builder for all three, so the dashboard's sidebar reads as a single list.
-        return side
-            .w(180.0)
-            .child(
-                col()
-                    .key("usage-nav")
-                    .role("tablist")
-                    .w_full()
-                    .padding(size::SP3)
-                    .gap(size::SP1)
-                    .child(
-                        nav_item(look, "tab-commands", "Commands", &icons::COMMAND, false)
-                            .on_press(|s: &mut Library| {
-                                s.select_tab(Kind::Command);
-                            }),
-                    )
-                    .child(
-                        nav_item(look, "tab-secrets", "Secrets", &icons::SECRET, false).on_press(
-                            |s: &mut Library| {
-                                s.select_tab(Kind::Secret);
-                            },
-                        ),
-                    )
-                    .child(
-                        nav_item(look, "tab-cliproxy", "CLI Proxy", &icons::HISTORY, true)
-                            .on_press(|s: &mut Library| s.open_usage()),
-                    ),
-            )
-            .child(el().grow(1.0))
-            .child(sidebar_footer(state, look));
-    }
     let mut scroll = col().w_full();
     if state.tab == Kind::Command && state.history_enabled {
         scroll = scroll.child(history::view(state, look));
@@ -251,7 +220,8 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
             Kind::Secret,
             "Secrets",
             (!hidden).then_some(state.counts[1]),
-        ));
+        ))
+        .child(usage_tab(state, look));
     let filter = TextInput::new(&state.query)
         .width(None)
         .label("Search this tab")
@@ -293,7 +263,7 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
                 .child(el().grow(1.0).min_w(0.0).child(filter))
                 .child(add),
         );
-    // The library-wide actions sit in one row on both tabs; Import switches to Commands itself.
+    // The library-wide actions sit in one row on every tab; Import switches to Commands itself.
     toolbar.child(
         row()
             .key("library-actions")
@@ -329,60 +299,8 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
                         .unwrap_or_default();
                     state.open_environment(root);
                 }),
-            )
-            .child(
-                widgets::button_sm(
-                    look,
-                    "tab-cliproxy",
-                    "CLI Proxy",
-                    Some(&icons::HISTORY),
-                    Variant::Ghost,
-                )
-                .role("tab")
-                .checked(false)
-                .help("Codex cost, tokens and limits")
-                .on_press(|s: &mut Library| s.open_usage()),
             ),
     )
-}
-
-/// A row of the usage dashboard's sidebar: icon and label, left-aligned, the selected one
-/// filled like the active tab.
-fn nav_item(
-    look: &Look,
-    key: &'static str,
-    label: &'static str,
-    glyph: &'static rune::Icon,
-    active: bool,
-) -> El {
-    let ink = if active { look.fg } else { look.muted };
-    let mut item = row()
-        .key(key)
-        .role("tab")
-        .label(label)
-        .checked(active)
-        .focusable(true)
-        .focus_selected(active)
-        .focus_ring(2.0, 1.0, look.focus)
-        .w_full()
-        .h(32.0)
-        .px(10.0)
-        .gap(size::SP2)
-        .center_y()
-        .radius(size::RADIUS)
-        .border(1.0, rune::Color::TRANSPARENT)
-        .hover(look.fg.alpha(0.06))
-        .cursor(Cursor::Pointer)
-        .child(rune::icon(glyph, 14.0).color(ink))
-        .child(
-            text(label)
-                .font(if active { ts::MEDIUM } else { ts::BODY })
-                .color(ink),
-        );
-    if active {
-        item = item.fill(look.accent_soft).border(1.0, look.accent_line);
-    }
-    item
 }
 
 fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {
@@ -400,7 +318,7 @@ fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Opt
         .focus_selected(active)
         .focus_ring(2.0, 1.0, look.focus)
         .grow(1.0)
-        .w_frac(0.5)
+        .w_frac(1.0 / 3.0)
         .shrink()
         .h_full()
         .gap(6.0)
@@ -419,6 +337,40 @@ fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Opt
     if let Some(count) = count {
         chip = chip.child(text(count.to_string()).font(ts::XS).color(look.dim));
     }
+    if active {
+        chip = chip.fill(look.accent_soft).border(1.0, look.accent_line);
+    }
+    chip
+}
+
+/// The CLI Proxy tab: the same chip as Commands and Secrets, opening the usage dashboard.
+fn usage_tab(state: &Library, look: &Look) -> El {
+    let active = state.usage.open;
+    let mut chip = row()
+        .key("tab-cliproxy")
+        .role("tab")
+        .label("CLI Proxy")
+        .checked(active)
+        .focusable(true)
+        .focus_selected(active)
+        .focus_ring(2.0, 1.0, look.focus)
+        .grow(1.0)
+        .w_frac(1.0 / 3.0)
+        .shrink()
+        .h_full()
+        .gap(6.0)
+        .center()
+        .radius(size::RADIUS - 1.0)
+        .cursor(Cursor::Pointer)
+        .on_press_tx(|state: &mut Library, tx| {
+            tx.instant();
+            state.open_usage();
+        })
+        .child(
+            text("CLI Proxy")
+                .font(if active { ts::MEDIUM } else { ts::BODY })
+                .color(if active { look.fg } else { look.muted }),
+        );
     if active {
         chip = chip.fill(look.accent_soft).border(1.0, look.accent_line);
     }
@@ -449,10 +401,7 @@ fn sidebar_footer(state: &Library, look: &Look) -> El {
                 .color(look.muted),
         );
     }
-    // The usage dashboard narrows the sidebar, which leaves room for the gear alone.
-    let settings = if state.usage.open {
-        widgets::icon_button(look, "settings", "Settings", &icons::GEAR, look.muted)
-    } else {
+    bar.child(
         widgets::button_sm(
             look,
             "settings",
@@ -460,8 +409,8 @@ fn sidebar_footer(state: &Library, look: &Look) -> El {
             Some(&icons::GEAR),
             Variant::Ghost,
         )
-    };
-    bar.child(settings.on_press(|state: &mut Library| state.open_settings()))
+        .on_press(|state: &mut Library| state.open_settings()),
+    )
 }
 
 fn vault_status(state: &Library, vault: &dev_console_core::models::VaultState, look: &Look) -> El {

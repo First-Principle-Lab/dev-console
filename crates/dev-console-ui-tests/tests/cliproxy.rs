@@ -58,3 +58,44 @@ fn unsaved_draft_blocks_usage_navigation() {
     assert!(!stage.state().usage.open);
     assert!(stage.state().editing.is_some());
 }
+
+#[test]
+fn cli_proxy_is_a_tab_and_keeps_the_library_sidebar() {
+    let profile = Profile::new("usage-sidebar");
+    let id = profile.command("deploy", "echo deploy");
+    let mut stage = profile.library();
+    stage.apply(|s| s.usage.data = Some(dev_console_ui_tests::usage_fixture()));
+    stage.press_ctrl('3');
+    assert!(stage.state().usage.open);
+    // The sidebar is the one Commands shows, with CLI Proxy beside the other two tabs.
+    for key in [
+        "tab-commands",
+        "tab-secrets",
+        "tab-cliproxy",
+        "tab-search",
+        "import-project",
+        "open-environment",
+        &format!("entry-row-{id}"),
+    ] {
+        assert!(stage.has(key), "{key} is missing beside the dashboard");
+    }
+    assert!(stage.has("cliproxy-usage"));
+    // Choosing an entry leaves the dashboard for its details.
+    assert!(stage.press(&format!("entry-row-{id}")));
+    assert!(!stage.state().usage.open);
+    assert!(!stage.has("cliproxy-usage"));
+}
+
+#[test]
+fn a_narrow_window_shows_the_dashboard_alone_with_a_way_back() {
+    let profile = Profile::new("usage-narrow");
+    let mut stage = profile.library();
+    stage.apply(|s| s.set_width(600.0));
+    stage.apply(|s| s.usage.data = Some(dev_console_ui_tests::usage_fixture()));
+    assert!(stage.press("tab-cliproxy"));
+    assert!(stage.has("cliproxy-usage"));
+    assert!(!stage.has("list-pane"));
+    assert!(stage.press("back-to-list"));
+    assert!(!stage.state().usage.open);
+    assert!(stage.has("list-pane"));
+}

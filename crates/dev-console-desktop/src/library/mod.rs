@@ -51,6 +51,7 @@ static NEW_ENTRY: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+n").expe
 static SAVE: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+s").expect("valid chord"));
 static COMMANDS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+1").expect("valid chord"));
 static SECRETS: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+2").expect("valid chord"));
+static USAGE: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+3").expect("valid chord"));
 static FILTER: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+f").expect("valid chord"));
 static EDIT: LazyLock<Chord> = LazyLock::new(|| Chord::parse("ctrl+e").expect("valid chord"));
 
@@ -366,12 +367,14 @@ impl Library {
         self.editing = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
+        self.usage.open = false;
         self.selected_id = Some(id.to_owned());
         self.load_details(id.to_owned());
     }
 
     /// The narrow layout's "List" button: back from the detail pane.
     pub fn back_to_list(&mut self) {
+        self.usage.open = false;
         self.selected_id = None;
         self.selected_suggestion = None;
         self.entry_options_open = false;
@@ -1239,6 +1242,9 @@ impl Library {
         } else if SECRETS.matches(ev) {
             tx.instant();
             self.select_tab(Kind::Secret);
+        } else if USAGE.matches(ev) {
+            tx.instant();
+            self.open_usage();
         } else {
             return false;
         }

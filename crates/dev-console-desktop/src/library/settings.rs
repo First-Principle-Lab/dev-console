@@ -25,7 +25,7 @@ use crate::theme::{self, size, text as ts, Look};
 use crate::widgets::{self, Tone, Variant};
 
 /// The keys the Library answers, as Settings lists them. The Finder's own are in its footer.
-pub const SHORTCUTS: [(&str, &[&str]); 9] = [
+pub const SHORTCUTS: [(&str, &[&str]); 10] = [
     ("Open the Finder", &["Super", "F"]),
     ("Move through the list", &["↑", "↓"]),
     ("Filter the list", &["Ctrl", "F"]),
@@ -35,6 +35,7 @@ pub const SHORTCUTS: [(&str, &[&str]); 9] = [
     ("Leave an unchanged editor", &["Esc"]),
     ("Commands", &["Ctrl", "1"]),
     ("Secrets", &["Ctrl", "2"]),
+    ("CLI Proxy", &["Ctrl", "3"]),
 ];
 
 /// The pages of the Settings sheet. One is shown at a time, so no page is long enough to scroll
