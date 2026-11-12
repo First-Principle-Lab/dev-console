@@ -35,3 +35,13 @@ test('empty data and a failed request are explicit', async ({ page }) => {
   await page.getByTestId('tab-cliproxy').click();
   await expect(page.getByTestId('cliproxy-error')).toHaveText('Usage request unavailable');
 });
+
+test('pending usage shows loading instead of zero totals', async ({ page }) => {
+  await boot(page, { cliproxy: { delayMs: 1200 } });
+  await page.getByTestId('tab-cliproxy').click();
+  await expect(page.getByTestId('cliproxy-loading')).toBeVisible();
+  await expect(page.getByTestId('cliproxy-breakdown-model')).not.toBeVisible();
+  await expect(page.getByText('$0.00', { exact: true })).not.toBeVisible();
+  await expect(page.getByTestId('cliproxy-breakdown-model')).toBeVisible();
+  await expect(page.getByTestId('cliproxy-loading')).not.toBeVisible();
+});

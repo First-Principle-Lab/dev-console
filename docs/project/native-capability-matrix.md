@@ -5,7 +5,7 @@ screens") asks for more than a list of screens that exist. It asks for **every u
 behaviour the shipped app has** to be mapped either to the native test that now decides it or to an
 explicit statement of what is still missing. This document is that map.
 
-**Read the summary first.** Of the 195 behaviours inventoried below, **120 are decided by a native
+**Read the summary first.** Of the 196 behaviours inventoried below, **121 are decided by a native
 test**, **17 are partly decided** and **58 are not decided by a native test**. The screens are built:
 Library (list, project groups, details, editor, extra fields, run approval and output, delete and
 unsaved-changes dialogs, narrow layout), Finder (search, completion, copy, project context, locked
@@ -332,6 +332,7 @@ The pure logic the views call, ported into `dev-console-core` with its own tests
 | `CLI Proxy shows cost, tokens, period breakdown and remaining quota` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
 | `missing quota does not hide token history` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
 | `empty data and a failed request are explicit` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
+| `pending usage shows loading instead of zero totals` | NATIVE-TEST | `pending_history_never_draws_zero_totals`, `local_totals_are_visible_while_online_limits_are_pending`. |
 
 ### tests/unit/usage.test.ts
 
@@ -367,10 +368,10 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 
 | Status | Rows |
 | --- | --- |
-| NATIVE-TEST | 120 |
+| NATIVE-TEST | 121 |
 | PARTIAL | 17 |
 | NOT COVERED | 58 |
-| **Total** | **195** |
+| **Total** | **196** |
 
 | Missing seam | Rows waiting on it | What the rows still need |
 | --- | --- | --- |
@@ -395,7 +396,7 @@ Machine-checked against the rows above: `the_matrix_summary_counts_match_its_row
 
 | Spec | Rows | NATIVE-TEST | PARTIAL | NOT COVERED |
 | --- | --- | --- | --- | --- |
-| `tests/e2e/cliproxy.spec.ts` | 3 | 0 | 0 | 3 |
+| `tests/e2e/cliproxy.spec.ts` | 4 | 1 | 0 | 3 |
 | `tests/unit/usage.test.ts` | 23 | 1 | 0 | 22 |
 | `tests/e2e/environment.spec.ts` | 4 | 3 | 1 | 0 |
 | `tests/e2e/finder.spec.ts` | 24 | 19 | 5 | 0 |

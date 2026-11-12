@@ -453,6 +453,11 @@ fn collect_records(path: &Path, range: &WindowRange, records: &mut Vec<UsageReco
                         session = id.to_owned();
                     }
                     if let Some(name) = value["payload"]["model_provider"].as_str() {
+                        // A session's provider is fixed in its metadata. Avoid reading
+                        // large unrelated transcripts just to discard them at EOF.
+                        if name != PROXY_PROVIDER {
+                            return;
+                        }
                         provider = Some(name.to_owned());
                     }
                 }
@@ -509,12 +514,22 @@ fn parse_usage_record(line: &str, model: &str, range: &WindowRange) -> Option<Us
     })
 }
 
-/// The `cliproxy_usage` command body. Runs the network call first (fast), then
-/// the transcript scan (potentially slow), all off the UI thread.
+/// Combined response for the web companion. The native shell loads local history
+/// separately so the online limits request cannot delay cost and token totals.
 pub fn cliproxy_usage(
     since: Option<String>,
     until: Option<String>,
 ) -> AppResult<CliproxyUsageResponse> {
+    let mut usage = cliproxy_local_usage(since, until)?;
+    let limits = cliproxy_limits();
+    usage.account = limits.account;
+    usage.limits = limits.limits;
+    usage.limits_error = limits.limits_error;
+    Ok(usage)
+}
+
+/// Account and subscription limits only; never scans session transcripts.
+pub fn cliproxy_limits() -> CliproxyUsageResponse {
     let auth = read_codex_auth();
     let limits = match &auth {
         Ok(auth) => fetch_limits(auth),
@@ -524,6 +539,22 @@ pub fn cliproxy_usage(
         .as_ref()
         .err()
         .map(|message| format!("Codex limits: {message}"));
+    CliproxyUsageResponse {
+        account: Account {
+            email: auth.as_ref().ok().and_then(|a| a.email.clone()),
+            plan: auth.as_ref().ok().and_then(|a| a.plan.clone()),
+        },
+        limits: limits.ok(),
+        limits_error,
+        records: Vec::new(),
+    }
+}
+
+/// Local cost/token history only. This path must never make a network request.
+pub fn cliproxy_local_usage(
+    since: Option<String>,
+    until: Option<String>,
+) -> AppResult<CliproxyUsageResponse> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
@@ -552,11 +583,11 @@ pub fn cliproxy_usage(
     records.sort_by(|a, b| a.ts.cmp(&b.ts));
     Ok(CliproxyUsageResponse {
         account: Account {
-            email: auth.as_ref().ok().and_then(|a| a.email.clone()),
-            plan: auth.as_ref().ok().and_then(|a| a.plan.clone()),
+            email: None,
+            plan: None,
         },
-        limits: limits.ok(),
-        limits_error,
+        limits: None,
+        limits_error: None,
         records,
     })
 }

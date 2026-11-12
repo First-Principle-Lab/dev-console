@@ -124,3 +124,60 @@ fn opening_an_entry_from_outside_leaves_the_dashboard() {
     assert!(!stage.has("cliproxy-usage"));
     assert_eq!(stage.state().selected_id.as_deref(), Some(id.as_str()));
 }
+
+#[test]
+fn pending_history_never_draws_zero_totals() {
+    let profile = Profile::new("usage-loading");
+    let mut stage = profile.library();
+    // Hold the initial read pending, as a slow disk would.
+    stage.apply(|s| {
+        s.usage.busy = true;
+        s.open_usage();
+    });
+    assert!(stage.has("usage-loading"));
+    assert!(!stage.has("usage-overview"));
+    assert!(!stage.has("usage-totals"));
+    assert!(!stage.shows("$0.00"));
+    stage.apply(|s| {
+        s.usage.busy = false;
+        s.usage.error = Some("Synthetic read failure".into());
+    });
+    assert!(stage.shows("Synthetic read failure"));
+    assert!(!stage.has("usage-totals"));
+    stage.apply(|s| {
+        s.usage.error = None;
+        s.usage.data = Some(dev_console_ui_tests::usage_fixture());
+    });
+    assert!(stage.has("usage-totals"));
+    assert!(stage.has("usage-model-row-0"));
+    assert!(!stage.has("usage-loading"));
+}
+
+#[test]
+fn local_totals_are_visible_while_online_limits_are_pending() {
+    let profile = Profile::new("usage-local-first");
+    let mut stage = profile.library();
+    stage.apply(|s| {
+        let mut data = dev_console_ui_tests::usage_fixture();
+        data.limits = None;
+        s.usage.data = Some(data);
+        s.usage.limits_busy = true;
+        s.open_usage();
+    });
+    assert!(stage.has("usage-totals"));
+    assert!(stage.has("usage-model-row-0"));
+    assert!(stage.press("usage-metric-2"));
+    assert!(stage.shows("Loading Codex limits…"));
+    assert!(!stage.shows("Codex reports no subscription limits."));
+    stage.apply(|s| {
+        s.usage.limits_busy = false;
+        s.usage.data.as_mut().unwrap().limits_error = Some("Synthetic network timeout".into());
+    });
+    assert!(stage.shows("Synthetic network timeout"));
+    assert!(stage.press("usage-metric-0"));
+    assert!(stage.has("usage-model-row-0"));
+    // A refresh keeps the previous totals instead of flashing back to zero.
+    stage.apply(|s| s.usage.busy = true);
+    assert!(stage.has("usage-totals"));
+    assert!(!stage.has("usage-loading"));
+}

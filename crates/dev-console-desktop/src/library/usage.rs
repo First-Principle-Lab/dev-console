@@ -18,6 +18,7 @@ pub struct Usage {
     pub by_time: bool,
     pub data: Option<CliproxyUsageResponse>,
     pub busy: bool,
+    pub limits_busy: bool,
     pub error: Option<String>,
     /// The chart period under the pointer, and the plot width that maps the pointer onto it.
     pub hover: Option<usize>,
@@ -38,7 +39,7 @@ impl Library {
         if self.usage.days == 0 {
             self.usage.days = 7;
         }
-        if self.usage.data.is_none() {
+        if self.usage.data.is_none() && !self.usage.busy {
             self.refresh_usage();
         }
     }
@@ -46,21 +47,48 @@ impl Library {
         self.usage.serial += 1;
         let serial = self.usage.serial;
         self.usage.busy = true;
+        self.usage.limits_busy = true;
         self.usage.error = None;
         let since = (OffsetDateTime::now_utc() - time::Duration::days(90))
             .format(&Rfc3339)
             .ok();
         self.exec().clone().run(
             self,
-            move || dev_console_core::cliproxy::cliproxy_usage(since, None),
+            move || dev_console_core::cliproxy::cliproxy_local_usage(since, None),
             move |state, result| {
                 if state.usage.serial != serial {
                     return;
                 }
                 state.usage.busy = false;
                 match result {
-                    Ok(data) => state.usage.data = Some(data),
-                    Err(e) => state.usage.error = Some(e.to_string()),
+                    Ok(mut data) => {
+                        // Keep the last limits visible while refreshing them.
+                        if let Some(previous) = &state.usage.data {
+                            data.account = previous.account.clone();
+                            data.limits = previous.limits.clone();
+                            data.limits_error = previous.limits_error.clone();
+                        }
+                        state.usage.data = Some(data);
+                        state.exec().clone().run(
+                            state,
+                            dev_console_core::cliproxy::cliproxy_limits,
+                            move |state, limits| {
+                                if state.usage.serial != serial {
+                                    return;
+                                }
+                                state.usage.limits_busy = false;
+                                if let Some(data) = &mut state.usage.data {
+                                    data.account = limits.account;
+                                    data.limits = limits.limits;
+                                    data.limits_error = limits.limits_error;
+                                }
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        state.usage.limits_busy = false;
+                        state.usage.error = Some(e.to_string());
+                    }
                 }
             },
         );
@@ -286,7 +314,7 @@ pub fn view(state: &Library, look: &Look) -> El {
         &icons::UPDATE,
         look.muted,
     );
-    controls = controls.child(if u.busy {
+    controls = controls.child(if u.busy || u.limits_busy {
         widgets::disabled(refresh)
     } else {
         refresh.on_press(|s: &mut Library| s.refresh_usage())
@@ -336,10 +364,13 @@ pub fn view(state: &Library, look: &Look) -> El {
     if let Some(error) = &u.error {
         body = body.child(text(error.clone()).color(look.danger).wrap().w_full());
     }
-    if u.busy && u.data.is_none() {
-        body = body.child(label("Loading usage…", look));
-    }
-    body = if u.metric == 2 {
+    body = if u.data.is_none() {
+        if u.busy {
+            body.child(label("Loading usage…", look).key("usage-loading"))
+        } else {
+            body
+        }
+    } else if u.metric == 2 {
         body.child(limits(u, look))
     } else {
         overview(u, look, wide, body)
@@ -360,6 +391,9 @@ fn limits(u: &Usage, look: &Look) -> El {
     let Some(data) = &u.data else {
         return body.child(label("Loading Codex limits…", look));
     };
+    if u.limits_busy && data.limits.is_none() {
+        return body.child(label("Loading Codex limits…", look));
+    }
     let plan = data
         .limits
         .as_ref()

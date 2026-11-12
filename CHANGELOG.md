@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Fixed
+
+- Load CLI Proxy cost and token totals without waiting for online limits, skip unrelated Codex transcripts early, and show a loading state instead of temporary zero totals.
+
 ## 0.0.15 — 2026-11-12
 
 ### Added

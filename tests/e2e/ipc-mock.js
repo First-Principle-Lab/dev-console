@@ -890,7 +890,10 @@
       if (seed.settingsSaveError) throw new Error(seed.settingsSaveError);
       state.settings = clone(payload.settings); return clone(state.settings);
     }
-    if (command === 'cliproxy_usage') return handleCliproxyUsage(payload);
+    if (command === 'cliproxy_usage') {
+      if (cliproxy.delayMs) await new Promise((resolve) => setTimeout(resolve, cliproxy.delayMs));
+      return handleCliproxyUsage(payload);
+    }
     throw new Error(`unmocked command ${command}`);
   }
 
