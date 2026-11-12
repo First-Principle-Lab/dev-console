@@ -30,6 +30,8 @@ minisign-verify = "0.3.0"
 base64 = "0.22.1"
 semver = "1.0.28"
 tempfile = { workspace = true }
+# Decodes the embedded logo for the tray. Rune already depends on this version.
+png = "0.18"
 
 [dev-dependencies]
 # Signs the fixtures the updater tests verify, with the library the release signer uses.

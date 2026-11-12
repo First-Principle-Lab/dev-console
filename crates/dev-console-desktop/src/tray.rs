@@ -26,30 +26,47 @@ pub const MENU_VAULT: &str = "vault-toggle";
 pub const MENU_SETTINGS: &str = "settings";
 pub const MENU_QUIT: &str = "quit";
 
-/// Tray icon edge length in device pixels.
-pub const ICON_SIZE: u32 = 22;
+/// The app logo at 32 px: the PNG the desktop entry's icon theme installs, so the tray shows the same
+/// mark as the launcher and the dock. It lives with the Tauri icons until the cutover moves them,
+/// as `scripts/build-appimage.sh` reads them from there too.
+const LOGO_PNG: &[u8] = include_bytes!("../../../src-tauri/icons/32x32.png");
 
-/// A plain filled disc, straight (not premultiplied) RGBA. The tray's own theme decides how it
-/// reads; a neutral light grey keeps it visible on dark and light bars.
-pub fn icon_rgba(size: u32) -> Vec<u8> {
-    let radius = (size as f32 - 1.0) / 2.0;
-    let centre = radius;
-    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - centre;
-            let dy = y as f32 - centre;
-            let inside = (dx * dx + dy * dy).sqrt() <= radius;
-            let channel = if inside { 232 } else { 0 };
-            let alpha = if inside { 255 } else { 0 };
-            pixels.extend_from_slice(&[channel, channel, channel, alpha]);
-        }
-    }
-    pixels
+/// The logo as straight (not premultiplied) RGBA rows, with its edge length.
+///
+/// The tray host scales it to its own size. The shipped Tauri tray drew the app icon; an earlier
+/// native build drew a plain grey disc here instead, which a tray of other apps' logos showed as a
+/// blank dot.
+pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(LOGO_PNG));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().expect("the embedded logo is a PNG");
+    let mut buffer = vec![0; reader.output_buffer_size().expect("the logo fits in memory")];
+    let frame = reader
+        .next_frame(&mut buffer)
+        .expect("the embedded logo decodes");
+    buffer.truncate(frame.buffer_size());
+    let rgba = match frame.color_type {
+        png::ColorType::Rgba => buffer,
+        png::ColorType::Rgb => buffer
+            .chunks_exact(3)
+            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => buffer
+            .chunks_exact(2)
+            .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
+            .collect(),
+        png::ColorType::Grayscale => buffer
+            .iter()
+            .flat_map(|&grey| [grey, grey, grey, 255])
+            .collect(),
+        png::ColorType::Indexed => unreachable!("EXPAND turns a palette into RGB(A)"),
+    };
+    (frame.width, frame.height, rgba)
 }
 
 pub fn tray_icon() -> TrayIcon {
-    TrayIcon::rgba(ICON_SIZE, ICON_SIZE, icon_rgba(ICON_SIZE))
+    let (width, height, rgba) = logo_rgba();
+    TrayIcon::rgba(width, height, rgba)
 }
 
 /// The menu, in the order the shipped app shows it.
@@ -188,16 +205,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_icon_buffer_matches_its_own_dimensions() {
-        let pixels = icon_rgba(ICON_SIZE);
-        assert_eq!(pixels.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
-        let centre = ((ICON_SIZE / 2) * ICON_SIZE + ICON_SIZE / 2) as usize * 4;
-        assert_eq!(pixels[centre + 3], 255, "the disc centre is opaque");
-        assert_eq!(
-            &pixels[0..4],
-            &[0, 0, 0, 0],
-            "a transparent texel is fully zeroed"
+    fn the_tray_shows_the_launcher_logo() {
+        let (width, height, pixels) = logo_rgba();
+        assert_eq!((width, height), (32, 32));
+        assert_eq!(pixels.len(), (width * height * 4) as usize);
+        let at = |x: u32, y: u32| {
+            let i = ((y * width + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        assert_eq!(at(0, 0)[3], 0, "the rounded corner is transparent");
+        let tile = at(4, 16);
+        assert_eq!(tile[3], 255, "the tile is opaque");
+        assert!(
+            tile[..3].iter().all(|&channel| channel < 80),
+            "the tile is the logo's dark ground, not a light disc: {tile:?}"
         );
+        // The `>` stroke is the one saturated colour in the mark: blue well above red and green.
+        let accent = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .map(|(x, y)| at(x, y))
+            .any(|[r, g, b, a]| a == 255 && b > 200 && b > r + 40 && b > g + 40);
+        assert!(accent, "the blue chevron is drawn");
     }
 
     #[test]
