@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chartScale,
   costTypeSegments,
+  enumerateHourStarts,
   fillPeriods,
   formatDuration,
   formatPercent,
@@ -179,6 +180,18 @@ describe('mergeUsage', () => {
     expect(merged.daily.map((entry) => entry.key)).toEqual(['2026-11-11', '2026-11-12']);
     expect(merged.hourly).toHaveLength(2);
     expect(merged.daily[1]?.totalTokens).toBe(100);
+  });
+
+  it('keys hourly records to the same local hours the 24h window lists', () => {
+    // A window that starts mid-hour still lists whole hours, so every record finds its bucket.
+    const hours = enumerateHourStarts('2026-11-11T13:47:00Z', '2026-11-12T13:47:00Z');
+    expect(hours).toHaveLength(25);
+    for (const iso of hours) expect(new Date(iso).getMinutes()).toBe(0);
+    const merged = mergeUsage([
+      record({ ts: '2026-11-12T13:40:00Z', ...bare, outputTokens: 100 }),
+      record({ ts: '2026-11-11T14:05:00Z', ...bare, outputTokens: 200 })
+    ]);
+    for (const entry of merged.hourly) expect(hours).toContain(entry.key);
   });
 
   it('credits cache savings against the uncached rate', () => {

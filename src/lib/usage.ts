@@ -118,12 +118,21 @@ export function enumerateDays(sinceDay: string, untilDay: string): readonly stri
 
 const HOUR_MS = 60 * 60 * 1000;
 
+/** The start of the viewer's clock hour containing `ms`, so a +05:30 zone buckets 19:00-20:00
+ * local rather than 18:30-19:30 UTC. */
+function floorLocalHour(ms: number): number {
+  const date = new Date(ms);
+  date.setMinutes(0, 0, 0);
+  return date.getTime();
+}
+
+/** The local hour starts covering the window; the same keys `localHourKey` gives records. */
 export function enumerateHourStarts(sinceTime: string, untilTime: string): readonly string[] {
   const starts: string[] = [];
   const start = Date.parse(sinceTime);
   const end = Date.parse(untilTime);
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return starts;
-  for (let cursor = start; cursor < end; cursor += HOUR_MS) {
+  for (let cursor = floorLocalHour(start); cursor < end; cursor += HOUR_MS) {
     starts.push(new Date(cursor).toISOString());
   }
   return starts;
@@ -500,7 +509,7 @@ function localDayKey(ts: string): string {
 function localHourKey(ts: string): string {
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return 'unknown';
-  return new Date(Math.floor(date.getTime() / HOUR_MS) * HOUR_MS).toISOString();
+  return new Date(floorLocalHour(date.getTime())).toISOString();
 }
 
 function accumulate(

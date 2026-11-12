@@ -521,7 +521,8 @@ fn limits(u: &Usage, look: &Look) -> El {
         format!(
             "Checked {}",
             OffsetDateTime::parse(&limits.checked_at, &Rfc3339)
-                .map(|t| format!("{} {:02}:{:02} UTC", day_short(t), t.hour(), t.minute()))
+                .map(local)
+                .map(|t| format!("{} {:02}:{:02}", day_short(t), t.hour(), t.minute()))
                 .unwrap_or_else(|_| limits.checked_at.clone())
         ),
         look,
@@ -798,7 +799,20 @@ fn share_bar(title: &str, parts: [f64; 4], metric: usize, look: &Look) -> El {
 fn cell(content: El, width: f32) -> El {
     row().w(width).justify_end().child(content)
 }
-/// The first bucket of the window, in UTC: the hour 23 hours back for Past 24h, so the current
+/// `at` in this machine's time zone. The `time` crate refuses the local offset once other
+/// threads run, so it comes from `localtime_r`, which also gets daylight saving right for `at`.
+fn local(at: OffsetDateTime) -> OffsetDateTime {
+    let seconds = at.unix_timestamp() as libc::time_t;
+    // SAFETY: `tm` is plain data that `localtime_r` fills; both pointers are valid for the call.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let filled = unsafe { !libc::localtime_r(&seconds, &mut tm).is_null() };
+    let offset = filled
+        .then(|| time::UtcOffset::from_whole_seconds(tm.tm_gmtoff as i32).ok())
+        .flatten()
+        .unwrap_or(time::UtcOffset::UTC);
+    at.to_offset(offset)
+}
+/// The first bucket of the window, in local time: the hour 23 hours back for Past 24h, so the current
 /// partial hour is the last bucket, or midnight `days - 1` days back.
 fn window_start(now: OffsetDateTime, days: usize) -> OffsetDateTime {
     if days == 1 {
@@ -815,7 +829,7 @@ struct Model {
     tokens: f64,
 }
 fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
-    let now = OffsetDateTime::now_utc();
+    let now = local(OffsetDateTime::now_utc());
     let days = u.days.max(1);
     let hourly = days == 1;
     let start = window_start(now, days);
@@ -978,7 +992,7 @@ fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
         .gap(12.0)
         .child(heading(
             format!(
-                "{} {} · UTC",
+                "{} {}",
                 if hourly { "Hourly" } else { "Daily" },
                 if u.metric == 0 {
                     "cost"
@@ -1235,6 +1249,18 @@ mod tests {
         let start = window_start(now, 7);
         assert_eq!(start, time::macros::datetime!(2026-11-06 0:00 UTC));
         assert_eq!((now - start).whole_days(), 6);
+        // Windows follow the clock they are given: 01:00 IST is still Nov 12 there.
+        let now = time::macros::datetime!(2026-11-12 1:00 +05:30);
+        assert_eq!(
+            window_start(now, 7),
+            time::macros::datetime!(2026-11-06 0:00 +05:30)
+        );
+    }
+
+    #[test]
+    fn local_keeps_the_instant() {
+        let at = time::macros::datetime!(2026-11-11 19:30 UTC);
+        assert_eq!(local(at), at);
     }
 
     #[test]
