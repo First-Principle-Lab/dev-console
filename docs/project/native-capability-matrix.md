@@ -179,7 +179,7 @@ Behaviour titles are quoted exactly as the spec file writes them, so `grep` find
 | `an untouched folder still lists its tasks as already saved on the second scan` | NATIVE-TEST | `a_task_the_library_already_has_is_marked_and_left_out_of_the_count`. |
 | `Enter in the folder field scans, and Escape leaves nothing behind` | NATIVE-TEST | `enter_in_the_folder_field_scans_and_cancelling_writes_nothing`, `escape_dismisses_import_and_restores_focus_to_its_opener`. |
 | `cancelling writes nothing` | NATIVE-TEST | `enter_in_the_folder_field_scans_and_cancelling_writes_nothing`. |
-| `the action is not offered while the secrets tab is showing` | NATIVE-TEST | `import_is_not_offered_on_the_secrets_tab`. |
+| `the action is not offered while the secrets tab is showing` | NATIVE-TEST | Changed on purpose in the native shell: Import, Environment and CLI Proxy share one row on both tabs, and Import moves to Commands first. `both_tabs_offer_the_same_action_row`, `import_from_the_secrets_tab_moves_back_to_commands`. |
 | `a folder with far more tasks than fit on screen scrolls instead of growing` | NATIVE-TEST | `a_long_task_list_scrolls_and_the_footer_stays_reachable`. |
 | `keeps keyboard focus inside the modal and restores it on close` | NOT COVERED | Rune's modal owns the trap and the restore; no native test walks Tab through this dialog. Seam: focus-management |
 | `reports a partially vanished selection and rescans the saved rows` | NATIVE-TEST | `a_vanished_task_is_reported_and_the_remaining_tasks_are_rescanned`. |

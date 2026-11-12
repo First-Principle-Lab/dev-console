@@ -213,19 +213,6 @@ fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
     scroll = scroll.child(entry_list(state, look));
     side.child(toolbar(state, look, kit))
         .child(
-            widgets::button_sm(
-                look,
-                "tab-cliproxy",
-                "CLI Proxy",
-                Some(&icons::HISTORY),
-                Variant::Ghost,
-            )
-            .role("tab")
-            .checked(false)
-            .mx(12.0)
-            .on_press(|s: &mut Library| s.open_usage()),
-        )
-        .child(
             col()
                 .key("list-scroll")
                 .w_full()
@@ -293,7 +280,7 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
         "New command (Ctrl+N)"
     })
     .on_press(|state: &mut Library| state.start_new());
-    let mut toolbar = col()
+    let toolbar = col()
         .key("toolbar")
         .w_full()
         .padding(size::SP3)
@@ -307,44 +294,57 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
                 .child(el().grow(1.0).min_w(0.0).child(filter))
                 .child(add),
         );
-    if state.tab == Kind::Command {
-        toolbar = toolbar.child(
-            row()
-                .w_full()
-                .gap(size::SP1)
-                .center_y()
-                .child(
-                    widgets::button_sm(
-                        look,
-                        "import-project",
-                        "Import",
-                        Some(&icons::IMPORT),
-                        Variant::Ghost,
-                    )
-                    .help("Import commands from a project folder")
-                    .on_press(|state: &mut Library| state.start_project_import()),
+    // The library-wide actions sit in one row on both tabs; Import switches to Commands itself.
+    toolbar.child(
+        row()
+            .key("library-actions")
+            .w_full()
+            .gap(size::SP1)
+            .center_y()
+            .flex_wrap()
+            .child(
+                widgets::button_sm(
+                    look,
+                    "import-project",
+                    "Import",
+                    Some(&icons::IMPORT),
+                    Variant::Ghost,
                 )
-                .child(
-                    widgets::button_sm(
-                        look,
-                        "open-environment",
-                        "Environment",
-                        Some(&icons::ENVIRONMENT),
-                        Variant::Ghost,
-                    )
-                    .help("Manage environment files for the selected project")
-                    .on_press(|state: &mut Library| {
-                        let root = state
-                            .meta()
-                            .and_then(|meta| meta.project.as_ref())
-                            .map(|project| project.root.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        state.open_environment(root);
-                    }),
-                ),
-        );
-    }
-    toolbar
+                .help("Import commands from a project folder")
+                .on_press(|state: &mut Library| state.start_project_import()),
+            )
+            .child(
+                widgets::button_sm(
+                    look,
+                    "open-environment",
+                    "Environment",
+                    Some(&icons::ENVIRONMENT),
+                    Variant::Ghost,
+                )
+                .help("Manage environment files for the selected project")
+                .on_press(|state: &mut Library| {
+                    let root = state
+                        .meta()
+                        .and_then(|meta| meta.project.as_ref())
+                        .map(|project| project.root.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    state.open_environment(root);
+                }),
+            )
+            .child(
+                widgets::button_sm(
+                    look,
+                    "tab-cliproxy",
+                    "CLI Proxy",
+                    Some(&icons::HISTORY),
+                    Variant::Ghost,
+                )
+                .role("tab")
+                .checked(false)
+                .help("Codex cost, tokens and limits")
+                .on_press(|s: &mut Library| s.open_usage()),
+            ),
+    )
 }
 
 fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {

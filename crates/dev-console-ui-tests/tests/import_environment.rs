@@ -199,8 +199,10 @@ fn import_from_the_secrets_tab_moves_back_to_commands() {
     let profile = Profile::new("imp-secrets");
     let mut library = profile.library();
     library.press_ctrl('2');
-    assert!(!library.has("import-project"));
-    library.apply(|state| state.start_project_import());
+    // The action row is the same on both tabs.
+    assert!(library.has("open-environment"));
+    assert!(library.has("tab-cliproxy"));
+    assert!(library.press("import-project"));
     assert_eq!(library.state().tab, Kind::Command);
     assert!(library.has("project-import-dialog"));
 }
@@ -412,11 +414,16 @@ fn the_import_footer_fits_the_minimum_window_with_a_long_task_list() {
 }
 
 #[test]
-fn import_is_not_offered_on_the_secrets_tab() {
-    let profile = Profile::new("import-hidden-secrets");
+fn both_tabs_offer_the_same_action_row() {
+    let profile = Profile::new("import-both-tabs");
     let mut library = profile.library();
-    assert!(library.has("import-project"));
+    let actions = ["import-project", "open-environment", "tab-cliproxy"];
+    for key in actions {
+        assert!(library.has(key), "{key} is missing on Commands");
+    }
     library.press_ctrl('2');
-    assert!(!library.has("import-project"));
+    for key in actions {
+        assert!(library.has(key), "{key} is missing on Secrets");
+    }
     assert!(library.state().import.is_none());
 }
