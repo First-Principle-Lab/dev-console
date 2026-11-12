@@ -148,33 +148,32 @@ fn sidebar(state: &Library, look: &Look, kit: &Kit) -> El {
         side.w(state.sidebar_width())
     };
     if state.usage.open {
+        // One builder for all three, so the dashboard's sidebar reads as a single list.
         return side
             .w(180.0)
             .child(
                 col()
-                    .padding(12.0)
-                    .gap(8.0)
+                    .key("usage-nav")
+                    .role("tablist")
+                    .w_full()
+                    .padding(size::SP3)
+                    .gap(size::SP1)
                     .child(
-                        tab(state, look, Kind::Command, "Commands", None)
-                            .h(32.0)
-                            .w_full(),
+                        nav_item(look, "tab-commands", "Commands", &icons::COMMAND, false)
+                            .on_press(|s: &mut Library| {
+                                s.select_tab(Kind::Command);
+                            }),
                     )
                     .child(
-                        tab(state, look, Kind::Secret, "Secrets", None)
-                            .h(32.0)
-                            .w_full(),
+                        nav_item(look, "tab-secrets", "Secrets", &icons::SECRET, false).on_press(
+                            |s: &mut Library| {
+                                s.select_tab(Kind::Secret);
+                            },
+                        ),
                     )
                     .child(
-                        widgets::button_sm(
-                            look,
-                            "tab-cliproxy",
-                            "CLI Proxy",
-                            None,
-                            Variant::Default,
-                        )
-                        .role("tab")
-                        .checked(true)
-                        .on_press(|s: &mut Library| s.open_usage()),
+                        nav_item(look, "tab-cliproxy", "CLI Proxy", &icons::HISTORY, true)
+                            .on_press(|s: &mut Library| s.open_usage()),
                     ),
             )
             .child(el().grow(1.0))
@@ -345,6 +344,45 @@ fn toolbar(state: &Library, look: &Look, kit: &Kit) -> El {
                 .on_press(|s: &mut Library| s.open_usage()),
             ),
     )
+}
+
+/// A row of the usage dashboard's sidebar: icon and label, left-aligned, the selected one
+/// filled like the active tab.
+fn nav_item(
+    look: &Look,
+    key: &'static str,
+    label: &'static str,
+    glyph: &'static rune::Icon,
+    active: bool,
+) -> El {
+    let ink = if active { look.fg } else { look.muted };
+    let mut item = row()
+        .key(key)
+        .role("tab")
+        .label(label)
+        .checked(active)
+        .focusable(true)
+        .focus_selected(active)
+        .focus_ring(2.0, 1.0, look.focus)
+        .w_full()
+        .h(32.0)
+        .px(10.0)
+        .gap(size::SP2)
+        .center_y()
+        .radius(size::RADIUS)
+        .border(1.0, rune::Color::TRANSPARENT)
+        .hover(look.fg.alpha(0.06))
+        .cursor(Cursor::Pointer)
+        .child(rune::icon(glyph, 14.0).color(ink))
+        .child(
+            text(label)
+                .font(if active { ts::MEDIUM } else { ts::BODY })
+                .color(ink),
+        );
+    if active {
+        item = item.fill(look.accent_soft).border(1.0, look.accent_line);
+    }
+    item
 }
 
 fn tab(state: &Library, look: &Look, kind: Kind, label: &'static str, count: Option<usize>) -> El {
