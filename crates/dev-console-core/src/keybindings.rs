@@ -3,13 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{AppError, AppResult};
 
-pub const ACTIONS: [(&str, &str, &str); 6] = [
+pub const ACTIONS: [(&str, &str, &str); 7] = [
     ("search", "Search", "ctrl+k"),
     ("newEntry", "New entry", "ctrl+n"),
     ("editEntry", "Edit the selected entry", "ctrl+e"),
     ("saveEditor", "Save the editor", "ctrl+s"),
     ("commands", "Commands", "ctrl+1"),
     ("secrets", "Secrets", "ctrl+2"),
+    ("cliProxy", "CLI Proxy", "ctrl+3"),
 ];
 
 pub fn defaults() -> BTreeMap<String, String> {

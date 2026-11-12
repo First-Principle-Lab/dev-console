@@ -84,3 +84,5 @@ pub use error::{AppError, AppResult};
 pub use services::{AppEvent, Effects, FinderActions, LibraryActions, Surface, WindowCommand};
 pub use state::AppState;
 pub use theme::{Appearance, Palette, Theme};
+
+pub mod cliproxy;

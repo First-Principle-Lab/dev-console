@@ -416,3 +416,59 @@ impl<S: 'static> Stage<S> {
         self.press_key(Key::Text(text.to_owned()));
     }
 }
+
+/// Synthetic usage for native interaction tests and review captures; no account access.
+pub fn usage_fixture() -> dev_console_core::cliproxy::CliproxyUsageResponse {
+    use dev_console_core::cliproxy::*;
+    use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
+    let now = OffsetDateTime::now_utc();
+    CliproxyUsageResponse {
+        account: Account {
+            email: Some("synthetic@example.com".into()),
+            plan: Some("plus".into()),
+        },
+        limits_error: None,
+        limits: Some(LimitLimits {
+            checked_at: now.format(&Rfc3339).unwrap(),
+            plan: Some("Plus".into()),
+            reset_credits: None,
+            windows: vec![
+                LimitWindow {
+                    id: "session".into(),
+                    kind: "session".into(),
+                    label: "Session".into(),
+                    used_percent: 34.0,
+                    window_duration_mins: Some(300),
+                    resets_at: Some((now + Duration::minutes(205)).format(&Rfc3339).unwrap()),
+                },
+                LimitWindow {
+                    id: "weekly".into(),
+                    kind: "weekly".into(),
+                    label: "Weekly".into(),
+                    used_percent: 9.0,
+                    window_duration_mins: Some(10080),
+                    resets_at: Some((now + Duration::days(5)).format(&Rfc3339).unwrap()),
+                },
+            ],
+        }),
+        records: (0..7)
+            .map(|i| UsageRecord {
+                ts: (now - Duration::hours(i * 24 + 1))
+                    .format(&Rfc3339)
+                    .unwrap(),
+                session: format!("synthetic-{i}"),
+                model: if i % 3 == 2 {
+                    "gpt-6-luna"
+                } else {
+                    "gpt-6-sol"
+                }
+                .into(),
+                input_tokens: (i as u64 + 2) * 16000,
+                cached_input_tokens: (8 - i as u64) * 22000,
+                cache_creation_tokens: 0,
+                output_tokens: (i as u64 % 3 + 1) * 8000,
+                reasoning_tokens: 1000,
+            })
+            .collect(),
+    }
+}
