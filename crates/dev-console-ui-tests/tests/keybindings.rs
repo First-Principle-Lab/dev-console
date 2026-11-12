@@ -15,6 +15,9 @@ fn keyboard_settings_save_route_reload_discard_and_reset() {
     assert!(library.press("shortcut-search"));
     library.press_ctrl('a');
     library.type_text("Ctrl+J");
+    library.press("shortcut-cliProxy");
+    library.press_ctrl('a');
+    library.type_text("Ctrl+L");
     assert!(library.state().settings.as_ref().unwrap().changed());
     assert!(library.press("save-settings"));
     assert!(library.state().settings.is_none());
@@ -35,6 +38,11 @@ fn keyboard_settings_save_route_reload_discard_and_reset() {
         },
     };
     assert!(!reopened.apply(|state| state.route_key(&old, &mut tx)));
+    reopened.apply(|state| state.usage.data = Some(dev_console_ui_tests::usage_fixture()));
+    reopened.press_ctrl('l');
+    assert!(reopened.state().usage.open);
+    reopened.press_ctrl('1');
+    assert!(!reopened.state().usage.open);
     reopened.press_ctrl('j');
     reopened.type_text("custom-search");
     assert_eq!(reopened.state().query.text, "custom-search");
@@ -62,7 +70,7 @@ fn conflicts_and_invalid_keys_block_save_without_changing_active_bindings() {
     let mut library = profile.library();
     library.press("settings");
     library.press("settings-tab-keyboard");
-    for invalid in ["Ctrl+N", "k", "Ctrl+Escape"] {
+    for invalid in ["Ctrl+N", "Ctrl+3", "k", "Ctrl+Escape"] {
         library.press("shortcut-search");
         library.press_ctrl('a');
         library.type_text(invalid);
