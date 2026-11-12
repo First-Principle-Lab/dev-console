@@ -5,6 +5,8 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+## 0.0.14 — 2026-11-12
+
 ### Fixed
 
 - Show the Dev Console logo as the tray icon again. 0.0.13 drew a plain grey disc, which showed as a blank dot among the other apps in the tray.
