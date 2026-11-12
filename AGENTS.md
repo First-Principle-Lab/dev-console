@@ -116,3 +116,23 @@ WebKitGTK 2.54. Browser tests and Xvfb cannot prove Wayland rendering works.
   Hyprland docs. The owner's current configuration is Lua, not the legacy
   `.conf` syntax. Back up edits and validate with `hyprctl reload` followed by
   `hyprctl configerrors`.
+
+## Checking icons on the owner's desktop
+
+The owner's bar is Ukishima, a Quickshell shell in `~/.local/share/quickshell/ukishima`. Dev Console's icon shows in three places, and they come from two different sources:
+
+| Place | What it is | Icon source |
+| --- | --- | --- |
+| Dynamic island | The pill at the top centre of each monitor. Clicking it expands it to show the tray icons of running apps. "The island" or "the running apps on top" means this. | The native tray icon, `crates/dev-console-desktop/src/tray.rs` |
+| Dock | The auto-hidden bar at the bottom with app icons. | `Icon=dev-console` from the icon theme |
+| Launcher | Super+Space. | `Icon=dev-console` from the icon theme |
+
+Capture them without clicking. `ydotool` moves the pointer to the wrong place on this two-monitor setup, and a stray click can land in another app, so don't use it.
+
+- Island: `qs -p ~/.local/share/quickshell/ukishima ipc call ukishima peek <monitor>`, then `grim -g "<x>,0 1920x120" out.png`, then the same `peek` call again to collapse it.
+- Launcher: `qs -p ~/.local/share/quickshell/ukishima ipc call ukishima launcher ""`, type the query with `wtype`, `grim`, then `wtype -k Escape`. Type only when the launcher is open.
+- Dock: auto-hide only reveals on real pointer hover. Set `dockAutoHide` to `false` in `~/.local/state/ukishima/flags.json` (Ukishima watches it), take the `grim` shot, then restore the file.
+- Tray items: `busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems`. Dev Console's item has `Id` `dev-console`.
+- Monitors: read them from `hyprctl -j monitors` rather than assuming positions.
+
+Quickshell caches icons in memory. After changing icon files, run `systemctl --user restart ukishima`. If the dock or launcher still shows an old logo, look for every `dev-console.png` under `~/.local/share/icons`, `/usr/local/share/icons` and `/usr/share/icons`: Qt picked a stale `/usr/local` copy over the user's on 2026-11-12.
