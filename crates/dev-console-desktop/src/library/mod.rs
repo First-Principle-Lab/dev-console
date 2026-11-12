@@ -955,6 +955,7 @@ impl Library {
             return;
         }
         self.editing = None;
+        self.usage.open = false;
         self.tab = kind;
         match entry_id {
             Some(id) => {
@@ -1277,6 +1278,7 @@ impl Library {
                 self.request_close();
             }
             AppEvent::WindowIntent(intent) => {
+                self.usage.open = false;
                 self.selected_suggestion = None;
                 self.entry_options_open = false;
                 self.tab = intent.kind;

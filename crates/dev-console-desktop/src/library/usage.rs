@@ -360,15 +360,37 @@ fn limits(u: &Usage, look: &Look) -> El {
     let Some(data) = &u.data else {
         return body.child(label("Loading Codex limits…", look));
     };
-    let plan = data.limits.as_ref().and_then(|l| l.plan.as_ref());
-    body = body.child(
-        row()
-            .gap(8.0)
-            .center_y()
-            .child(el().w(8.0).h(8.0).radius(4.0).fill(look.fg))
-            .child(heading("Codex", look))
-            .child(caption(plan.cloned().unwrap_or_default(), look)),
-    );
+    let plan = data
+        .limits
+        .as_ref()
+        .and_then(|l| l.plan.as_deref())
+        .or(data.account.plan.as_deref())
+        .map(|p| {
+            let mut c = p.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                .unwrap_or_default()
+        });
+    let mut title = row()
+        .w_full()
+        .gap(8.0)
+        .center_y()
+        .child(el().w(8.0).h(8.0).radius(4.0).fill(look.fg))
+        .child(heading("Codex", look))
+        .child(caption(plan.unwrap_or_default(), look))
+        .child(el().grow(1.0));
+    // The account the proxy signed in with: these limits are that account's.
+    if let Some(email) = &data.account.email {
+        title = title.child(
+            text(email.clone())
+                .key("usage-account")
+                .label(format!("Signed in as {email}"))
+                .font(ts::SM)
+                .color(look.muted)
+                .truncate(),
+        );
+    }
+    body = body.child(title);
     if let Some(error) = &data.limits_error {
         return body.child(label(error, look).wrap().w_full());
     }
@@ -776,6 +798,16 @@ fn share_bar(title: &str, parts: [f64; 4], metric: usize, look: &Look) -> El {
 fn cell(content: El, width: f32) -> El {
     row().w(width).justify_end().child(content)
 }
+/// The first bucket of the window, in UTC: the hour 23 hours back for Past 24h, so the current
+/// partial hour is the last bucket, or midnight `days - 1` days back.
+fn window_start(now: OffsetDateTime, days: usize) -> OffsetDateTime {
+    if days == 1 {
+        let first = now - time::Duration::hours(23);
+        first.replace_time(time::Time::from_hms(first.hour(), 0, 0).unwrap_or(time::Time::MIDNIGHT))
+    } else {
+        (now - time::Duration::days(days as i64 - 1)).replace_time(time::Time::MIDNIGHT)
+    }
+}
 #[derive(Default)]
 struct Model {
     cost: f64,
@@ -786,12 +818,7 @@ fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
     let now = OffsetDateTime::now_utc();
     let days = u.days.max(1);
     let hourly = days == 1;
-    let start = if hourly {
-        (now - time::Duration::hours(23))
-            .replace_time(time::Time::from_hms(now.hour(), 0, 0).unwrap())
-    } else {
-        (now - time::Duration::days(days as i64 - 1)).replace_time(time::Time::MIDNIGHT)
-    };
+    let start = window_start(now, days);
     let unit = if hourly { 3600 } else { 86400 };
     let count = if hourly { 24 } else { days };
     let periods: Vec<_> = (0..count)
@@ -951,7 +978,7 @@ fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
         .gap(12.0)
         .child(heading(
             format!(
-                "{} {}",
+                "{} {} · UTC",
                 if hourly { "Hourly" } else { "Daily" },
                 if u.metric == 0 {
                     "cost"
@@ -1197,6 +1224,18 @@ fn overview(u: &Usage, look: &Look, wide: bool, mut body: El) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_window_ends_with_the_current_bucket() {
+        let now = time::macros::datetime!(2026-11-12 10:30 UTC);
+        let start = window_start(now, 1);
+        assert_eq!(start, time::macros::datetime!(2026-11-11 11:00 UTC));
+        // 24 hourly buckets: the last one holds 10:00 to 11:00, which contains now.
+        assert_eq!((now - start).whole_hours(), 23);
+        let start = window_start(now, 7);
+        assert_eq!(start, time::macros::datetime!(2026-11-06 0:00 UTC));
+        assert_eq!((now - start).whole_days(), 6);
+    }
 
     #[test]
     fn figures_use_the_t3_code_formats() {

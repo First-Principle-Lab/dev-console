@@ -424,7 +424,7 @@ pub fn usage_fixture() -> dev_console_core::cliproxy::CliproxyUsageResponse {
     let now = OffsetDateTime::now_utc();
     CliproxyUsageResponse {
         account: Account {
-            email: None,
+            email: Some("synthetic@example.com".into()),
             plan: Some("plus".into()),
         },
         limits_error: None,

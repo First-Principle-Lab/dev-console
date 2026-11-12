@@ -1,4 +1,7 @@
+use dev_console_core::models::{Kind, WindowIntent};
+use dev_console_core::services::AppEvent;
 use dev_console_ui_tests::Profile;
+use rune::Tx;
 
 #[test]
 fn usage_navigation_refresh_and_return_to_commands() {
@@ -34,6 +37,10 @@ fn usage_navigation_refresh_and_return_to_commands() {
     assert!(stage.press("usage-metric-2"));
     assert!(stage.has("cliproxy-limits"));
     assert!(stage.has("usage-limit-session"));
+    assert_eq!(
+        stage.text_of("usage-account").as_deref(),
+        Some("synthetic@example.com")
+    );
     assert!(!stage.has("usage-periods"));
     assert!(!stage.has("usage-chart"));
     assert!(stage.press("usage-refresh"));
@@ -98,4 +105,22 @@ fn a_narrow_window_shows_the_dashboard_alone_with_a_way_back() {
     assert!(stage.press("back-to-list"));
     assert!(!stage.state().usage.open);
     assert!(stage.has("list-pane"));
+}
+
+#[test]
+fn opening_an_entry_from_outside_leaves_the_dashboard() {
+    let profile = Profile::new("usage-intent");
+    let id = profile.command("deploy", "echo deploy");
+    let mut stage = profile.library();
+    stage.apply(|s| s.usage.data = Some(dev_console_ui_tests::usage_fixture()));
+    assert!(stage.press("tab-cliproxy"));
+    let intent = WindowIntent {
+        action: "show",
+        kind: Kind::Command,
+        entry_id: Some(id.clone()),
+    };
+    stage.apply(|s| s.on_event(&AppEvent::WindowIntent(intent), &mut Tx::default()));
+    assert!(!stage.state().usage.open);
+    assert!(!stage.has("cliproxy-usage"));
+    assert_eq!(stage.state().selected_id.as_deref(), Some(id.as_str()));
 }
