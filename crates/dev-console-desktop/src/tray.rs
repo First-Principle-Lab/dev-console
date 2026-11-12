@@ -37,31 +37,21 @@ const LOGO_PNG: &[u8] = include_bytes!("../../../src-tauri/icons/32x32.png");
 /// native build drew a plain grey disc here instead, which a tray of other apps' logos showed as a
 /// blank dot.
 pub fn logo_rgba() -> (u32, u32, Vec<u8>) {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(LOGO_PNG));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let decoder = png::Decoder::new(std::io::Cursor::new(LOGO_PNG));
     let mut reader = decoder.read_info().expect("the embedded logo is a PNG");
-    let mut buffer = vec![0; reader.output_buffer_size().expect("the logo fits in memory")];
+    let mut buffer = vec![
+        0;
+        reader
+            .output_buffer_size()
+            .expect("the logo fits in memory")
+    ];
     let frame = reader
         .next_frame(&mut buffer)
         .expect("the embedded logo decodes");
     buffer.truncate(frame.buffer_size());
-    let rgba = match frame.color_type {
-        png::ColorType::Rgba => buffer,
-        png::ColorType::Rgb => buffer
-            .chunks_exact(3)
-            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => buffer
-            .chunks_exact(2)
-            .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
-            .collect(),
-        png::ColorType::Grayscale => buffer
-            .iter()
-            .flat_map(|&grey| [grey, grey, grey, 255])
-            .collect(),
-        png::ColorType::Indexed => unreachable!("EXPAND turns a palette into RGB(A)"),
-    };
-    (frame.width, frame.height, rgba)
+    // The asset is 8-bit RGBA; the test below would fail first if it were ever re-exported otherwise.
+    assert_eq!(frame.color_type, png::ColorType::Rgba, "the logo is RGBA");
+    (frame.width, frame.height, buffer)
 }
 
 pub fn tray_icon() -> TrayIcon {
