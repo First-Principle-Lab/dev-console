@@ -1124,6 +1124,7 @@ dependencies = [
  "libc",
  "minisign",
  "minisign-verify",
+ "png 0.18.1",
  "reqwest",
  "rune",
  "rune-kit",

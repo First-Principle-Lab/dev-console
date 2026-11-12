@@ -217,15 +217,16 @@ impl Server {
         &self.path
     }
 
-    /// Blocks for the next intent. A malformed, unknown-shaped or over-long request is skipped and
-    /// the next connection is read, which keeps one confused caller from ending the wakeup path.
+    /// Blocks for the next intent. A connection that fails in any way - a malformed, unknown-shaped
+    /// or over-long request, a caller that hangs up without writing (which is what
+    /// [`instance_running`] does), one that times out or leaves before the reply - is skipped and
+    /// the next one is read. Only a failure of the listener itself ends the wakeup path: a single
+    /// confused caller must not leave Super+F dead until the app restarts.
     pub fn accept(&self) -> io::Result<Intent> {
         loop {
             let (stream, _) = self.listener.accept()?;
-            match read_intent(stream) {
-                Ok(intent) => return Ok(intent),
-                Err(error) if error.kind() == io::ErrorKind::InvalidData => continue,
-                Err(error) => return Err(error),
+            if let Ok(intent) = read_intent(stream) {
+                return Ok(intent);
             }
         }
     }
@@ -237,11 +238,8 @@ impl Server {
         match self.listener.accept() {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
             Err(error) => Err(error),
-            Ok((stream, _)) => match read_intent(stream) {
-                Ok(intent) => Ok(Some(intent)),
-                Err(error) if error.kind() == io::ErrorKind::InvalidData => Ok(None),
-                Err(error) => Err(error),
-            },
+            // As in `accept`: a failed connection is that caller's problem, not the listener's.
+            Ok((stream, _)) => Ok(read_intent(stream).ok()),
         }
     }
 
@@ -365,6 +363,30 @@ mod tests {
         // The bad request is skipped and the next well-formed one still arrives.
         send_intent(&socket, Intent::Library).unwrap();
         assert_eq!(accepted.join().unwrap().unwrap(), Intent::Library);
+    }
+
+    /// Released as 0.0.13 with this bug: a liveness probe (`dev-console --background` while the app
+    /// runs, which Hyprland's autostart repeats on every reload) connected and hung up, `accept`
+    /// returned that as an error, and `serve` stopped for good. Every later Super+F then reported
+    /// "holds the lock but is not answering".
+    #[test]
+    fn a_caller_that_hangs_up_or_stalls_does_not_end_the_wakeup_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let (socket, _) = paths(dir.path());
+        let server = Server::bind(&socket).unwrap();
+        let (sent, received) = std::sync::mpsc::channel();
+        std::thread::spawn(move || server.serve(|intent| sent.send(intent).unwrap()));
+
+        assert!(instance_running(&socket), "the probe connects and hangs up");
+        let mut silent = UnixStream::connect(&socket).unwrap();
+        silent.write_all(b"{\"intent\":").unwrap();
+        drop(silent);
+
+        send_intent(&socket, Intent::Finder).unwrap();
+        assert_eq!(received.recv().unwrap(), Intent::Finder);
+        assert!(instance_running(&socket));
+        send_intent(&socket, Intent::Library).unwrap();
+        assert_eq!(received.recv().unwrap(), Intent::Library);
     }
 
     /// A caller that streams without ever sending a newline must not be able to grow this process:
