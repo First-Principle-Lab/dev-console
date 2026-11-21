@@ -37,11 +37,14 @@ test('empty data and a failed request are explicit', async ({ page }) => {
 });
 
 test('pending usage shows loading instead of zero totals', async ({ page }) => {
-  await boot(page, { cliproxy: { delayMs: 1200 } });
+  // Hold the answer pending long enough that the first frame is the one under test.
+  await boot(page, { cliproxy: { delayMs: 2500 } });
   await page.getByTestId('tab-cliproxy').click();
   await expect(page.getByTestId('cliproxy-loading')).toBeVisible();
-  await expect(page.getByTestId('cliproxy-breakdown-model')).not.toBeVisible();
-  await expect(page.getByText('$0.00', { exact: true })).not.toBeVisible();
+  // Nothing that could show a total is drawn until the answer lands.
+  await expect(page.getByTestId('cliproxy-overview')).toHaveCount(0);
+  await expect(page.getByTestId('cliproxy-breakdown-model')).toHaveCount(0);
+  await expect(page.getByTestId('cliproxy-overview')).toBeVisible();
   await expect(page.getByTestId('cliproxy-breakdown-model')).toBeVisible();
-  await expect(page.getByTestId('cliproxy-loading')).not.toBeVisible();
+  await expect(page.getByTestId('cliproxy-loading')).toHaveCount(0);
 });

@@ -1,13 +1,30 @@
+use dev_console_core::cliproxy::{CliproxyLimits, CliproxyUsageResponse};
+use dev_console_core::error::AppResult;
 use dev_console_core::models::{Kind, WindowIntent};
 use dev_console_core::services::AppEvent;
+use dev_console_desktop::library::usage::Sources;
 use dev_console_ui_tests::Profile;
 use rune::Tx;
+
+/// Synthetic reads, so a refresh here never touches the owner's transcripts or the network.
+fn fake_sources() -> Sources {
+    fn local(_: Option<String>, _: Option<String>) -> AppResult<CliproxyUsageResponse> {
+        Ok(dev_console_ui_tests::usage_fixture())
+    }
+    fn limits() -> CliproxyLimits {
+        dev_console_ui_tests::usage_fixture().limits_snapshot()
+    }
+    Sources { local, limits }
+}
 
 #[test]
 fn usage_navigation_refresh_and_return_to_commands() {
     let profile = Profile::new("usage-tabs");
     let mut stage = profile.library();
-    stage.apply(|s| s.usage.data = Some(dev_console_ui_tests::usage_fixture()));
+    stage.apply(|s| {
+        s.usage_sources = fake_sources();
+        s.usage.data = Some(dev_console_ui_tests::usage_fixture());
+    });
     assert!(stage.press("tab-cliproxy"));
     assert!(stage.state().usage.open);
     assert!(stage.has("usage-chart"));
@@ -180,4 +197,57 @@ fn local_totals_are_visible_while_online_limits_are_pending() {
     stage.apply(|s| s.usage.busy = true);
     assert!(stage.has("usage-totals"));
     assert!(!stage.has("usage-loading"));
+}
+
+#[test]
+fn refresh_on_the_limits_tab_reads_only_limits() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LOCAL: AtomicUsize = AtomicUsize::new(0);
+    static ONLINE: AtomicUsize = AtomicUsize::new(0);
+    fn local(_: Option<String>, _: Option<String>) -> AppResult<CliproxyUsageResponse> {
+        LOCAL.fetch_add(1, Ordering::SeqCst);
+        Ok(dev_console_ui_tests::usage_fixture())
+    }
+    fn limits() -> CliproxyLimits {
+        ONLINE.fetch_add(1, Ordering::SeqCst);
+        let mut data = dev_console_ui_tests::usage_fixture();
+        data.limits.as_mut().unwrap().plan = Some("refreshed".into());
+        data.limits_snapshot()
+    }
+    let profile = Profile::new("usage-limits-only");
+    let mut stage = profile.library();
+    stage.apply(|s| {
+        s.usage_sources = Sources { local, limits };
+        s.usage.data = Some(dev_console_ui_tests::usage_fixture());
+        s.open_usage();
+        s.usage.metric = 2;
+    });
+    assert!(stage.press("usage-refresh"));
+    // The Limits tab shows limits, so its refresh must not rescan local history.
+    assert_eq!(
+        LOCAL.load(Ordering::SeqCst),
+        0,
+        "limits refresh rescanned history"
+    );
+    assert_eq!(ONLINE.load(Ordering::SeqCst), 1);
+    assert!(!stage.state().usage.limits_busy);
+    assert_eq!(
+        stage
+            .state()
+            .usage
+            .data
+            .as_ref()
+            .unwrap()
+            .limits
+            .as_ref()
+            .unwrap()
+            .plan
+            .as_deref(),
+        Some("refreshed")
+    );
+    // Cost and Tokens still refresh both halves.
+    stage.apply(|s| s.usage.metric = 0);
+    assert!(stage.press("usage-refresh"));
+    assert_eq!(LOCAL.load(Ordering::SeqCst), 1);
+    assert_eq!(ONLINE.load(Ordering::SeqCst), 2);
 }

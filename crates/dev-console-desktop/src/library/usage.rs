@@ -5,10 +5,29 @@ use crate::{
     theme::{size, text as ts, Look},
     widgets,
 };
-use dev_console_core::cliproxy::{CliproxyUsageResponse, UsageRecord};
+use dev_console_core::cliproxy::{CliproxyLimits, CliproxyUsageResponse, UsageRecord};
+use dev_console_core::error::AppResult;
 use rune::{col, el, row, text, El, ScrollSpec};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+/// Where the dashboard's two reads come from: local history first, then the online
+/// account limits. Tests replace these so a refresh never reads the owner's transcripts
+/// or makes a network request.
+#[derive(Clone, Copy, Debug)]
+pub struct Sources {
+    pub local: fn(Option<String>, Option<String>) -> AppResult<CliproxyUsageResponse>,
+    pub limits: fn() -> CliproxyLimits,
+}
+
+impl Default for Sources {
+    fn default() -> Self {
+        Self {
+            local: dev_console_core::cliproxy::cliproxy_local_usage,
+            limits: dev_console_core::cliproxy::cliproxy_limits,
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Usage {
@@ -44,6 +63,7 @@ impl Library {
         }
     }
     pub fn refresh_usage(&mut self) {
+        let sources = self.usage_sources;
         self.usage.serial += 1;
         let serial = self.usage.serial;
         self.usage.busy = true;
@@ -54,7 +74,7 @@ impl Library {
             .ok();
         self.exec().clone().run(
             self,
-            move || dev_console_core::cliproxy::cliproxy_local_usage(since, None),
+            move || (sources.local)(since, None),
             move |state, result| {
                 if state.usage.serial != serial {
                     return;
@@ -64,23 +84,19 @@ impl Library {
                     Ok(mut data) => {
                         // Keep the last limits visible while refreshing them.
                         if let Some(previous) = &state.usage.data {
-                            data.account = previous.account.clone();
-                            data.limits = previous.limits.clone();
-                            data.limits_error = previous.limits_error.clone();
+                            data.apply_limits(previous.limits_snapshot());
                         }
                         state.usage.data = Some(data);
                         state.exec().clone().run(
                             state,
-                            dev_console_core::cliproxy::cliproxy_limits,
+                            move || (sources.limits)(),
                             move |state, limits| {
                                 if state.usage.serial != serial {
                                     return;
                                 }
                                 state.usage.limits_busy = false;
                                 if let Some(data) = &mut state.usage.data {
-                                    data.account = limits.account;
-                                    data.limits = limits.limits;
-                                    data.limits_error = limits.limits_error;
+                                    data.apply_limits(limits);
                                 }
                             },
                         );
@@ -89,6 +105,27 @@ impl Library {
                         state.usage.limits_busy = false;
                         state.usage.error = Some(e.to_string());
                     }
+                }
+            },
+        );
+    }
+    /// Re-reads only the signed-in account's limits, leaving the loaded history alone.
+    pub fn refresh_limits(&mut self) {
+        let sources = self.usage_sources;
+        self.usage.serial += 1;
+        let serial = self.usage.serial;
+        self.usage.limits_busy = true;
+        self.usage.error = None;
+        self.exec().clone().run(
+            self,
+            move || (sources.limits)(),
+            move |state, limits| {
+                if state.usage.serial != serial {
+                    return;
+                }
+                state.usage.limits_busy = false;
+                if let Some(data) = &mut state.usage.data {
+                    data.apply_limits(limits);
                 }
             },
         );
@@ -317,7 +354,14 @@ pub fn view(state: &Library, look: &Look) -> El {
     controls = controls.child(if u.busy || u.limits_busy {
         widgets::disabled(refresh)
     } else {
-        refresh.on_press(|s: &mut Library| s.refresh_usage())
+        refresh.on_press(|s: &mut Library| {
+            // Limits are the only thing the Limits tab shows, so refresh just those.
+            if s.usage.metric == 2 && s.usage.data.is_some() {
+                s.refresh_limits()
+            } else {
+                s.refresh_usage()
+            }
+        })
     });
     let mut lead = row().gap(6.0).center_y();
     if state.narrow {
@@ -364,16 +408,11 @@ pub fn view(state: &Library, look: &Look) -> El {
     if let Some(error) = &u.error {
         body = body.child(text(error.clone()).color(look.danger).wrap().w_full());
     }
-    body = if u.data.is_none() {
-        if u.busy {
-            body.child(label("Loading usage…", look).key("usage-loading"))
-        } else {
-            body
-        }
-    } else if u.metric == 2 {
-        body.child(limits(u, look))
-    } else {
-        overview(u, look, wide, body)
+    body = match &u.data {
+        None if u.busy => body.child(label("Loading usage…", look).key("usage-loading")),
+        None => body,
+        Some(data) if u.metric == 2 => body.child(limits(data, u.limits_busy, look)),
+        Some(_) => overview(u, look, wide, body),
     };
     col().w_full().grow(1.0).min_h(0.0).child(head).child(
         col()
@@ -386,12 +425,9 @@ pub fn view(state: &Library, look: &Look) -> El {
             .child(body),
     )
 }
-fn limits(u: &Usage, look: &Look) -> El {
+fn limits(data: &CliproxyUsageResponse, limits_busy: bool, look: &Look) -> El {
     let mut body = col().key("cliproxy-limits").w_full().gap(12.0);
-    let Some(data) = &u.data else {
-        return body.child(label("Loading Codex limits…", look));
-    };
-    if u.limits_busy && data.limits.is_none() {
+    if limits_busy && data.limits.is_none() {
         return body.child(label("Loading Codex limits…", look));
     }
     let plan = data
