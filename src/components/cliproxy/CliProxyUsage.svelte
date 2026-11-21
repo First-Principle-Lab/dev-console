@@ -195,7 +195,7 @@
   {:else if showingLimits}
     <UsageLimitsView limits={data?.limits ?? null} error={data?.limitsError ?? null} now={limitsNow} />
   {:else}
-    <div class="overview">
+    <div class="overview" data-testid="cliproxy-overview">
       <p class="sub dim">Codex sessions run through the proxy on this machine, whichever proxy account served them · API-equivalent estimate, not a subscription bill. Limits are the signed-in account's.</p>
       <section class="grid">
         <div class="left">

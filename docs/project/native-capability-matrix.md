@@ -332,7 +332,7 @@ The pure logic the views call, ported into `dev-console-core` with its own tests
 | `CLI Proxy shows cost, tokens, period breakdown and remaining quota` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
 | `missing quota does not hide token history` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
 | `empty data and a failed request are explicit` | NOT COVERED | Browser/unit coverage exists; equivalent native assertions for this precise observable are pending. Seam: usage-analytics |
-| `pending usage shows loading instead of zero totals` | NATIVE-TEST | `pending_history_never_draws_zero_totals`, `local_totals_are_visible_while_online_limits_are_pending`. |
+| `pending usage shows loading instead of zero totals` | NATIVE-TEST | `pending_history_never_draws_zero_totals`, `local_totals_are_visible_while_online_limits_are_pending`, `totals_land_before_the_online_limits_answer` |
 
 ### tests/unit/usage.test.ts
 

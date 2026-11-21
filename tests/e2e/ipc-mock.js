@@ -520,8 +520,10 @@
     };
   }
 
-  function handleCliproxyUsage(payload) {
+  async function handleCliproxyUsage(payload) {
     state.cliproxyCalls.push({ since: payload.since, until: payload.until });
+    // A seeded delay holds the first answer pending, as a slow read would.
+    if (cliproxy.delayMs) await new Promise((resolve) => setTimeout(resolve, cliproxy.delayMs));
     if (cliproxy.fail) throw new Error(cliproxy.fail);
     if (cliproxy.limitsError) {
       return {
@@ -890,10 +892,7 @@
       if (seed.settingsSaveError) throw new Error(seed.settingsSaveError);
       state.settings = clone(payload.settings); return clone(state.settings);
     }
-    if (command === 'cliproxy_usage') {
-      if (cliproxy.delayMs) await new Promise((resolve) => setTimeout(resolve, cliproxy.delayMs));
-      return handleCliproxyUsage(payload);
-    }
+    if (command === 'cliproxy_usage') return handleCliproxyUsage(payload);
     throw new Error(`unmocked command ${command}`);
   }
 

@@ -5,6 +5,10 @@ Every release of Dev Console, newest first. Each version matches a GitHub releas
 
 ## Unreleased
 
+### Changed
+
+- Refresh the CLI Proxy Limits tab by re-reading only the signed-in account's limits, and keep the cost and token history already loaded on screen.
+
 ### Fixed
 
 - Load CLI Proxy cost and token totals without waiting for online limits, skip unrelated Codex transcripts early, and show a loading state instead of temporary zero totals.

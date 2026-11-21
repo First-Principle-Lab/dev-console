@@ -280,12 +280,18 @@ impl<S> Default for TestQueue<S> {
 #[cfg(test)]
 impl<S> TestQueue<S> {
     pub(crate) fn flush(&self, state: &mut S) {
-        loop {
-            let next = self.0.lock().unwrap().pop_front();
-            match next {
-                Some(apply) => apply(state),
-                None => break,
+        while self.step(state) {}
+    }
+
+    /// Applies one held answer, so a test can look at the state between two phases.
+    pub(crate) fn step(&self, state: &mut S) -> bool {
+        let next = self.0.lock().unwrap().pop_front();
+        match next {
+            Some(apply) => {
+                apply(state);
+                true
             }
+            None => false,
         }
     }
 }

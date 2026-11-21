@@ -77,6 +77,8 @@ pub struct Library {
     pub vault: Option<VaultState>,
     pub tab: Kind,
     pub usage: usage::Usage,
+    /// Where the CLI Proxy dashboard reads history and limits. Tests replace this.
+    pub usage_sources: usage::Sources,
     pub query: TextEdit,
     pub entries: Vec<EntryMeta>,
     pub selected_id: Option<String>,
@@ -140,6 +142,7 @@ impl Library {
             exec,
             tab: Kind::Command,
             usage: usage::Usage::default(),
+            usage_sources: usage::Sources::default(),
             query: TextEdit::new(String::new()),
             entries: Vec::new(),
             selected_id: None,

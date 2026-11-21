@@ -43,7 +43,32 @@ pub struct CliproxyUsageResponse {
     pub records: Vec<UsageRecord>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl CliproxyUsageResponse {
+    /// The account and limits half, without the local history.
+    pub fn limits_snapshot(&self) -> CliproxyLimits {
+        CliproxyLimits {
+            account: self.account.clone(),
+            limits: self.limits.clone(),
+            limits_error: self.limits_error.clone(),
+        }
+    }
+
+    pub fn apply_limits(&mut self, limits: CliproxyLimits) {
+        self.account = limits.account;
+        self.limits = limits.limits;
+        self.limits_error = limits.limits_error;
+    }
+}
+
+/// The signed-in account and its subscription limits, read without scanning transcripts.
+#[derive(Debug, Clone)]
+pub struct CliproxyLimits {
+    pub account: Account,
+    pub limits: Option<LimitLimits>,
+    pub limits_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub email: Option<String>,
@@ -521,15 +546,12 @@ pub fn cliproxy_usage(
     until: Option<String>,
 ) -> AppResult<CliproxyUsageResponse> {
     let mut usage = cliproxy_local_usage(since, until)?;
-    let limits = cliproxy_limits();
-    usage.account = limits.account;
-    usage.limits = limits.limits;
-    usage.limits_error = limits.limits_error;
+    usage.apply_limits(cliproxy_limits());
     Ok(usage)
 }
 
 /// Account and subscription limits only; never scans session transcripts.
-pub fn cliproxy_limits() -> CliproxyUsageResponse {
+pub fn cliproxy_limits() -> CliproxyLimits {
     let auth = read_codex_auth();
     let limits = match &auth {
         Ok(auth) => fetch_limits(auth),
@@ -539,14 +561,13 @@ pub fn cliproxy_limits() -> CliproxyUsageResponse {
         .as_ref()
         .err()
         .map(|message| format!("Codex limits: {message}"));
-    CliproxyUsageResponse {
+    CliproxyLimits {
         account: Account {
             email: auth.as_ref().ok().and_then(|a| a.email.clone()),
             plan: auth.as_ref().ok().and_then(|a| a.plan.clone()),
         },
         limits: limits.ok(),
         limits_error,
-        records: Vec::new(),
     }
 }
 
@@ -582,10 +603,7 @@ pub fn cliproxy_local_usage(
     }
     records.sort_by(|a, b| a.ts.cmp(&b.ts));
     Ok(CliproxyUsageResponse {
-        account: Account {
-            email: None,
-            plan: None,
-        },
+        account: Account::default(),
         limits: None,
         limits_error: None,
         records,
@@ -596,6 +614,31 @@ pub fn cliproxy_local_usage(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn limits_merge_into_history_without_dropping_either_half() {
+        let mut usage = CliproxyUsageResponse {
+            account: Account::default(),
+            limits: None,
+            limits_error: None,
+            records: Vec::new(),
+        };
+        usage.apply_limits(CliproxyLimits {
+            account: Account {
+                email: Some("synthetic@example.com".into()),
+                plan: Some("plus".into()),
+            },
+            limits: None,
+            limits_error: Some("synthetic timeout".into()),
+        });
+        assert_eq!(
+            usage.account.email.as_deref(),
+            Some("synthetic@example.com")
+        );
+        assert_eq!(usage.limits_error.as_deref(), Some("synthetic timeout"));
+        let kept = usage.limits_snapshot();
+        assert_eq!(kept.account.plan.as_deref(), Some("plus"));
+        assert_eq!(kept.limits_error.as_deref(), Some("synthetic timeout"));
+    }
     #[test]
     fn maps_windows_without_inventing_reset_times() {
         let windows = codex_windows(
